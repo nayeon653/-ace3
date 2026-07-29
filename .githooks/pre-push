@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# 제출 마감(2026-09-06 23:59:59 +0900) 이후의 push를 차단한다.
+# GNU date(Linux, Git for Windows)와 BSD date(macOS)를 모두 지원한다.
+set -euo pipefail
+
+DEADLINE_STR="2026-09-06 23:59:59 +0900"
+
+deadline_epoch=""
+
+# GNU date 시도
+if deadline_epoch=$(date -d "$DEADLINE_STR" +%s 2>/dev/null); then
+  :
+else
+  # BSD date(macOS) 시도
+  deadline_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$DEADLINE_STR" +%s 2>/dev/null || echo "")
+fi
+
+if [ -z "$deadline_epoch" ]; then
+  echo "[pre-push] 경고: 이 환경의 date 명령으로 마감일 계산에 실패했습니다."
+  echo "마감일 강제가 동작하지 않으니 수동으로 마감을 지켜주세요 (2026-09-06 23:59 KST)."
+  exit 0
+fi
+
+now_epoch=$(date +%s)
+
+if [ "$now_epoch" -gt "$deadline_epoch" ]; then
+  echo "=============================================="
+  echo " 제출 마감 이후 push는 실격 사유입니다."
+  echo " 마감: 2026-09-06 23:59 (KST)"
+  echo "=============================================="
+  exit 1
+fi
+
+exit 0

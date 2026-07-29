@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+httpx
+pydantic
+pyyaml
+python-dotenv
+pdfplumber
+pymupdf
+python-docx
+openpyxl
+python-pptx
+rank-bm25
+kiwipiepy
+numpy
+pandas
+pytest
+ruff

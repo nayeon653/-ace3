@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Test (pytest)
+        run: pytest -q
+
+# 주의: 전체 평가셋(eval/) 회귀 테스트는 여기서 실행하지 않는다.
+# HCX 호출 크레딧을 소모하므로 PR마다 자동 실행하면 비용이 커진다.
+# 필요 시 아래처럼 수동 트리거(workflow_dispatch) 잡을 별도로 둔다.
+#
+# on:
+#   workflow_dispatch:
+#
+# jobs:
+#   eval-regression:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.11"
+#       - name: Install dependencies
+#         run: pip install -r requirements.txt
+#       - name: Run full eval harness
+#         run: make eval
+#         env:
+#           CLOVA_STUDIO_API_KEY: ${{ secrets.CLOVA_STUDIO_API_KEY }}

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# 커밋 메시지 컨벤션과 Co-Authored-By 트레일러 금지 규칙을 검증한다.
+set -euo pipefail
+
+msg_file="$1"
+msg=$(cat "$msg_file")
+first_line=$(head -n1 "$msg_file")
+
+pattern='^\[(feat|fix|exp|chore|docs|refactor|test|hotfix)\] #[0-9]+ .+'
+
+if ! echo "$first_line" | grep -Eq "$pattern"; then
+  echo "[commit-msg] 커밋 메시지 형식이 올바르지 않습니다."
+  echo ""
+  echo "  형식: [type] #이슈번호 작업 내용"
+  echo "  type: feat | fix | exp | chore | docs | refactor | test | hotfix"
+  echo ""
+  echo "  예시: [feat] #12 OCR 파이프라인 추가"
+  echo "        [fix] #31 임베딩 타임아웃 수정"
+  exit 1
+fi
+
+if echo "$msg" | grep -qi "Co-Authored-By"; then
+  echo "[commit-msg] Co-Authored-By 트레일러는 금지되어 있습니다."
+  echo "대회 규정(LLM은 HyperCLOVA X만 사용 가능)과 관련한 오해를 막기 위해"
+  echo "커밋 메시지에서 해당 줄을 제거하세요."
+  exit 1
+fi
+
+exit 0

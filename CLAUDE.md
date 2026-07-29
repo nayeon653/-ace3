@@ -1,0 +1,103 @@
+# CLAUDE.md
+
+이 저장소에서 코드를 작성하는 모든 사람(과 코딩 에이전트)이 지켜야 할 규칙이다.
+대회: 제10회 2026 미래에셋증권 AI Festival — 배정 주제 "연금 Agent".
+
+## 절대 어기지 말 것
+
+1. **LLM은 HyperCLOVA X만 사용 가능.** Function calling은 HCX-005, 생성은
+   HCX-DASH-002. 제품(평가 대상 시스템) 안에서 다른 LLM을 호출하는 코드를
+   작성하지 않는다. 위반 시 대회 규정상 평가대상 제외 사유다.
+   (개발 보조 도구로서의 코딩 어시스턴트 사용 가부는 별도 확인 대상이며,
+   이 규칙은 제출 시스템 자체에 적용된다.)
+2. **제출 마감은 2026-09-06 23:59.** 마감 이후 커밋·push·배포 등 변경 행위가
+   발견되면 실격이다. `.githooks/pre-push`가 이를 강제하지만, 훅에만 의존하지
+   않는다.
+3. **평가기간(2026-09-07 ~ 09-20) 중 API 서버가 죽으면 정량평가 0점.** 배포
+   안정성에 관련된 변경은 특히 신중히 다룬다.
+4. **`GET /answer` 응답 JSON은 정확히 5개 필드만 포함한다:**
+   `question_id`, `question`, `retrieved_context`, `think_trace`, `answer`.
+5. **제공된 문서 데이터가 최종 근거다.** 외부 지식은 보조 수단일 뿐이며,
+   제공 자료와 상충하면 제공 자료를 따른다.
+
+## 핵심 개발 원칙
+
+1. **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도, 연금소득세율,
+   연금수령한도 등 확정 수치는 `rules/`의 결정론적 파이썬 함수에서만 나온다.
+   LLM은 의도 분류, 도구 선택, 근거 요약, 조건 분기 설명만 담당하며 수치를
+   직접 생성하지 않는다.
+2. **역질문은 되묻기가 아니라 조건 분기 응답이다.** API가 stateless GET이라
+   되물을 수 없다. 한 응답 안에 "확인이 필요한 조건"과 "조건별 결론"을 함께
+   제시한다. 단정적 추천은 금지한다.
+3. **`retrieved_context`는 precision도 평가된다.** top-k를 통째로 넣지 말고
+   리랭킹 후 컷오프하며, 답변에 실제로 인용한 근거만 남긴다. 무관하거나
+   대상이 다른 근거를 포함하면 감점된다.
+4. **모든 답변에 근거 문서를 표시한다.** Context에 없는 내용을 생성하지 않는다
+   (환각 금지).
+5. **매일 저녁 '동작하는 버전'을 유지한다.** 의미 단위로 커밋한다.
+
+## 컨벤션 요약
+
+전문은 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) 참고.
+
+- 브랜치: `<type>/<owner>/#<issue>` (예: `feat/a/#12`, `fix/c/#31`, `exp/b/#45`)
+- 커밋: `[type] #이슈번호 작업 내용` (예: `[feat] #12 OCR 파이프라인 추가`)
+- 커밋 작성자는 각자 본인 명의. `git config user.email`을 GitHub 등록 메일과
+  일치시킬 것.
+- **`Co-Authored-By` 트레일러 금지.** LLM 사용 제약 관련 오해를 만들 수 있다.
+- main 직접 push 금지, 핫픽스도 `hotfix/` 브랜치 → PR.
+- main 통합은 squash merge. PR 승인 1인 필수 (단 `prompts/`, `rules/`,
+  `infra/` 변경은 항상 타인 리뷰).
+
+## 디렉토리 소유권
+
+충돌 방지를 위해 각 디렉토리는 명확한 소유자를 둔다. 다른 사람 소유
+디렉토리를 수정할 때는 반드시 소유자 리뷰를 받는다.
+
+| 디렉토리 | 소유자 | 내용 |
+|---|---|---|
+| `ingest/` | A | 파싱·OCR·정규화 |
+| `index/` | A | 청킹·임베딩·검색 |
+| `agent/` | B | 라우터·도구·오케스트레이션 |
+| `prompts/` | B | 프롬프트 파일 (코드 내 인라인 문자열 금지) |
+| `rules/` | C | 세제 계산기 (결정론적) |
+| `server/` | C | FastAPI |
+| `infra/` | C | Docker·배포·모니터링 |
+| `eval/questions/set_a.jsonl` | A | 평가 질의셋 (A 담당분) |
+| `eval/questions/set_b.jsonl` | B | 평가 질의셋 (B 담당분) |
+| `eval/questions/set_c.jsonl` | C | 평가 질의셋 (C 담당분) |
+| `eval/harness/` | C | 평가 실행기 |
+| `config/ingest.yaml` | A | ingest 설정 |
+| `config/agent.yaml` | B | agent 설정 |
+| `config/server.yaml` | C | server 설정 |
+| `docs/` | 공동 | append-only로 작성 |
+
+단일 `eval/questions.jsonl`이나 단일 `config.yaml`로 합치지 않는다. 3인이
+동시에 같은 파일을 건드리면 머지 충돌이 매일 발생한다.
+
+## 개발 메모
+
+```bash
+# 최초 1회 세팅
+git config core.hooksPath .githooks
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env   # 값 채워넣기 (커밋 금지)
+
+# 자주 쓰는 명령 (Makefile 참고)
+make setup   # 의존성 설치
+make ingest  # 원본 문서 → 파싱/OCR
+make index   # 청킹/임베딩/인덱싱
+make eval    # 평가셋 실행
+make serve   # 로컬 서버 기동
+make check   # ruff + pytest
+```
+
+## 하지 말 것
+
+- `.env`, API 키, 시크릿을 커밋하지 않는다 (`.githooks/pre-commit`이 1차
+  방어선이며, 사람이 2차 방어선이다).
+- 코드로 드러나지 않는 제약이 아니면 주석을 달지 않는다.
+- 하드코딩된 세액공제 한도·세율 등을 LLM 프롬프트나 애플리케이션 코드에
+  직접 박아넣지 않는다 — 반드시 `rules/`를 거친다.
+- 마감(2026-09-06 23:59) 이후 어떤 형태로든 변경 행위를 하지 않는다.
