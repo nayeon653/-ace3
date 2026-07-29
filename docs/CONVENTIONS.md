@@ -35,9 +35,14 @@ hotfix/c/#52    긴급 수정도 main 직접 커밋 금지
 - 커밋 작성자는 각자 본인 명의로 남긴다. `git config user.email`을 GitHub에
   등록된 메일과 반드시 일치시킨다. 불일치 시 커밋이 계정에 연결되지 않아
   기여자가 사라진 것처럼 보인다.
+- **Claude Code 등 AI 코딩 어시스턴트는 GitHub contributor에 절대 나타나지
+  않는다.** 커밋을 대신 만들어주더라도 author/committer는 항상 요청한
+  사람 본인의 git identity를 쓴다.
 - **`Co-Authored-By` 트레일러는 금지한다.** 대회 규정상 제출 시스템은
   HyperCLOVA X만 사용해야 하며, 커밋 히스토리에 다른 LLM 명의가 남는 것은
-  불필요한 오해를 만든다. `.githooks/commit-msg`가 이를 자동 차단한다.
+  불필요한 오해를 만든다. 또한 이 트레일러는 GitHub이 해당 계정을
+  contributor로 표시하게 만드는 원인이기도 하다. `.githooks/commit-msg`가
+  이를 자동 차단한다.
 - 의미 단위로 커밋한다. "wip", "update" 같은 메시지는 쓰지 않는다.
 
 ## PR

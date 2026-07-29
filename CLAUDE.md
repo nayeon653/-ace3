@@ -44,7 +44,14 @@
 - 커밋: `[type] #이슈번호 작업 내용` (예: `[feat] #12 OCR 파이프라인 추가`)
 - 커밋 작성자는 각자 본인 명의. `git config user.email`을 GitHub 등록 메일과
   일치시킬 것.
-- **`Co-Authored-By` 트레일러 금지.** LLM 사용 제약 관련 오해를 만들 수 있다.
+- **AI 코딩 어시스턴트(Claude Code 등)는 GitHub contributor 목록에 절대 나타나면
+  안 된다.** 커밋의 author/committer는 항상 그 커밋을 요청한 사람 본인의 git
+  identity(`user.name`/`user.email`)를 사용한다. Claude를 author나 committer로
+  설정하지 않는다.
+- **`Co-Authored-By` 트레일러 금지.** Claude Code 등 AI 도구가 커밋 메시지에
+  `Co-Authored-By: Claude <...>` 같은 트레일러를 자동으로 붙이지 않도록 한다.
+  대회의 LLM 사용 제약(HyperCLOVA X만 허용)과 관련한 오해를 막기 위함이며,
+  동시에 위 contributor 비노출 원칙을 지키기 위한 장치이기도 하다.
 - main 직접 push 금지, 핫픽스도 `hotfix/` 브랜치 → PR.
 - main 통합은 squash merge. PR 승인 1인 필수 (단 `prompts/`, `rules/`,
   `infra/` 변경은 항상 타인 리뷰).
