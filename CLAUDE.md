@@ -23,7 +23,8 @@
 ## 핵심 개발 원칙
 
 1. **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도, 연금소득세율,
-   연금수령한도 등 확정 수치는 `rules/`의 결정론적 파이썬 함수에서만 나온다.
+   연금수령한도 등 확정 수치는 `pension_agent/rules/`의 결정론적 파이썬
+   함수에서만 나온다.
    LLM은 의도 분류, 도구 선택, 근거 요약, 조건 분기 설명만 담당하며 수치를
    직접 생성하지 않는다.
 2. **역질문은 되묻기가 아니라 조건 분기 응답이다.** API가 stateless GET이라
@@ -40,8 +41,11 @@
 
 전문은 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) 참고.
 
-- 브랜치: `<type>/<owner>/#<issue>` (예: `feat/a/#12`, `fix/c/#31`, `exp/b/#45`)
-- 커밋: `[type] #이슈번호 작업 내용` (예: `[feat] #12 OCR 파이프라인 추가`)
+- 브랜치: `<type>/<short-description>` (예: `feat/ocr-pipeline`,
+  `fix/embedding-timeout`). 실제 GitHub 이슈가 있을 때만 번호를 선택적으로 붙인다.
+- 커밋: 가벼운 Conventional Commits 형식인 `type(scope): 설명`을 사용한다
+  (예: `feat(ingest): OCR 파이프라인 추가`). scope는 선택이며 이슈 번호는
+  강제하지 않는다.
 - 커밋 작성자는 각자 본인 명의. `git config user.email`을 GitHub 등록 메일과
   일치시킬 것.
 - **AI 코딩 어시스턴트(Claude Code 등)는 GitHub contributor 목록에 절대 나타나면
@@ -52,9 +56,9 @@
   `Co-Authored-By: Claude <...>` 같은 트레일러를 자동으로 붙이지 않도록 한다.
   대회의 LLM 사용 제약(HyperCLOVA X만 허용)과 관련한 오해를 막기 위함이며,
   동시에 위 contributor 비노출 원칙을 지키기 위한 장치이기도 하다.
-- main 직접 push 금지, 핫픽스도 `hotfix/` 브랜치 → PR.
-- main 통합은 squash merge. PR 승인 1인 필수 (단 `prompts/`, `rules/`,
-  `infra/` 변경은 항상 타인 리뷰).
+- main 직접 push 금지, 긴급 수정도 `fix/` 브랜치 → PR.
+- main 통합은 squash merge. PR 승인 1인 필수 (단 `pension_agent/prompts/`,
+  `pension_agent/rules/`, `infra/` 변경은 항상 타인 리뷰).
 
 ## 디렉토리 소유권
 
@@ -63,23 +67,23 @@
 
 | 디렉토리 | 소유자 | 내용 |
 |---|---|---|
-| `ingest/` | A | 파싱·OCR·정규화 |
-| `index/` | A | 청킹·임베딩·검색 |
-| `agent/` | B | 라우터·도구·오케스트레이션 |
-| `prompts/` | B | 프롬프트 파일 (코드 내 인라인 문자열 금지) |
-| `rules/` | C | 세제 계산기 (결정론적) |
-| `server/` | C | FastAPI |
+| `pension_agent/ingest/` | A | 파싱·OCR·정규화 |
+| `pension_agent/retrieval/` | A | 청킹·임베딩·검색 |
+| `pension_agent/agent/` | B | 라우터·도구·오케스트레이션 |
+| `pension_agent/prompts/` | B | 프롬프트 파일 (코드 내 인라인 문자열 금지) |
+| `pension_agent/rules/` | C | 세제 계산기 (결정론적) |
+| `pension_agent/server/` | C | FastAPI |
 | `infra/` | C | Docker·배포·모니터링 |
-| `eval/questions/set_a.jsonl` | A | 평가 질의셋 (A 담당분) |
-| `eval/questions/set_b.jsonl` | B | 평가 질의셋 (B 담당분) |
-| `eval/questions/set_c.jsonl` | C | 평가 질의셋 (C 담당분) |
-| `eval/harness/` | C | 평가 실행기 |
-| `config/ingest.yaml` | A | ingest 설정 |
-| `config/agent.yaml` | B | agent 설정 |
-| `config/server.yaml` | C | server 설정 |
+| `evals/questions/set_a.jsonl` | A | 평가 질의셋 (A 담당분) |
+| `evals/questions/set_b.jsonl` | B | 평가 질의셋 (B 담당분) |
+| `evals/questions/set_c.jsonl` | C | 평가 질의셋 (C 담당분) |
+| `evals/harness/` | C | 평가 실행기 |
+| `pension_agent/config/defaults/ingest.yaml` | A | ingest 기본 설정 |
+| `pension_agent/config/defaults/agent.yaml` | B | agent 기본 설정 |
+| `pension_agent/config/defaults/server.yaml` | C | server 기본 설정 |
 | `docs/` | 공동 | append-only로 작성 |
 
-단일 `eval/questions.jsonl`이나 단일 `config.yaml`로 합치지 않는다. 3인이
+단일 `evals/questions.jsonl`이나 단일 `config.yaml`로 합치지 않는다. 3인이
 동시에 같은 파일을 건드리면 머지 충돌이 매일 발생한다.
 
 ## 개발 메모
@@ -87,8 +91,7 @@
 ```bash
 # 최초 1회 세팅
 git config core.hooksPath .githooks
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+uv sync --dev
 cp .env.example .env   # 값 채워넣기 (커밋 금지)
 
 # 자주 쓰는 명령 (Makefile 참고)
@@ -106,5 +109,5 @@ make check   # ruff + pytest
   방어선이며, 사람이 2차 방어선이다).
 - 코드로 드러나지 않는 제약이 아니면 주석을 달지 않는다.
 - 하드코딩된 세액공제 한도·세율 등을 LLM 프롬프트나 애플리케이션 코드에
-  직접 박아넣지 않는다 — 반드시 `rules/`를 거친다.
+  직접 박아넣지 않는다 — 반드시 `pension_agent/rules/`를 거친다.
 - 마감(2026-09-06 23:59) 이후 어떤 형태로든 변경 행위를 하지 않는다.

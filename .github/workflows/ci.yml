@@ -9,21 +9,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.11"
+          enable-cache: true
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync --locked --dev
 
       - name: Lint (ruff)
-        run: ruff check .
+        run: uv run --frozen ruff check .
 
       - name: Test (pytest)
-        run: pytest -q
+        run: uv run --frozen pytest -q
 
-# 주의: 전체 평가셋(eval/) 회귀 테스트는 여기서 실행하지 않는다.
+      - name: Build package
+        run: uv build
+
+      - name: Verify installed package
+        working-directory: /tmp
+        run: >-
+          uv run --isolated --no-project
+          --with "$GITHUB_WORKSPACE"/dist/pension_agent-*.whl
+          python -c
+          'from importlib import resources; import pension_agent.retrieval;
+          root = resources.files("pension_agent");
+          assert root.joinpath("config", "defaults").is_dir();
+          assert root.joinpath("prompts").is_dir()'
+
+# 주의: 전체 평가셋(evals/) 회귀 테스트는 여기서 실행하지 않는다.
 # HCX 호출 크레딧을 소모하므로 PR마다 자동 실행하면 비용이 커진다.
 # 필요 시 아래처럼 수동 트리거(workflow_dispatch) 잡을 별도로 둔다.
 #
@@ -35,12 +50,12 @@ jobs:
 #     runs-on: ubuntu-latest
 #     steps:
 #       - uses: actions/checkout@v4
-#       - name: Set up Python
-#         uses: actions/setup-python@v5
+#       - name: Install uv and Python
+#         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 #         with:
 #           python-version: "3.11"
 #       - name: Install dependencies
-#         run: pip install -r requirements.txt
+#         run: uv sync --locked --dev
 #       - name: Run full eval harness
 #         run: make eval
 #         env:

@@ -6,32 +6,59 @@
 ## 브랜치
 
 ```
-<type>/<owner>/#<issue>
+<type>/<short-description>
 
-feat/a/#12      A가 12번 이슈 (OCR 파이프라인)
-fix/c/#31       C가 31번 이슈 (타임아웃)
-exp/b/#45       B의 실험 (머지 안 될 수 있음)
-hotfix/c/#52    긴급 수정도 main 직접 커밋 금지
+feat/ocr-pipeline
+fix/embedding-timeout
+docs/api-spec
+exp/reranker-comparison
 ```
 
-- `type`: `feat | fix | exp | chore | docs | refactor | test | hotfix`
-- `owner`: `a | b | c`
-- `git branch -r`로 누가 뭘 하는지 즉시 파악할 수 있어야 한다.
-- 브랜치 수명은 최대 3일, 변경량은 400줄 내외를 넘기지 않는다.
+- `type`: 커밋 type과 같은 목록을 사용한다.
+- `short-description`: 작업 결과를 설명하는 영문 소문자 kebab-case 명사구를 쓴다.
+- 실제 GitHub 이슈가 있는 작업만 번호를 선택적으로 붙인다
+  (예: `feat/12-ocr-pipeline`).
+- 작업자는 Notion 담당자, 커밋 author, PR 작성자로 확인하며 브랜치명에는 넣지 않는다.
+- 이미 만들어진 브랜치는 강제로 바꾸지 않고, 새 브랜치부터 이 규칙을 적용한다.
+- 브랜치 수명은 최대 3일, 자동 생성 잠금 파일을 제외한 변경량은 400줄 내외를
+  넘기지 않는다.
 - 매일 아침 main에 rebase한다.
 - main 통합은 squash merge. 머지 후 브랜치는 삭제한다 (단 `exp/`는 예외 —
   실험은 머지되지 않을 수 있으므로 남겨둔다).
 
+```bash
+# 생성
+git switch main
+git pull --ff-only
+git switch -c feat/ocr-pipeline
+
+# main 동기화
+git fetch origin
+git rebase origin/main
+
+# squash merge 뒤 로컬 브랜치 정리
+git switch main
+git pull --ff-only
+git branch -d feat/ocr-pipeline
+```
+
 ## 커밋
 
 ```
-[type] #이슈번호 작업 내용
+<type>[optional scope][!]: <description>
 
-예: [feat] #12 OCR 파이프라인 추가
-    [fix] #31 임베딩 타임아웃 수정
-    [docs] #5 API 명세 초안 작성
+예: feat(ingest): OCR 파이프라인 추가
+    fix(agent): 임베딩 타임아웃 수정
+    docs: API 명세 초안 작성
+    refactor!: 응답 스키마 변경
 ```
 
+- 허용 type은 `feat | fix | docs | refactor | test | chore | exp | perf | build |
+  ci | revert`이다.
+- scope는 변경 영역을 구분할 때만 선택적으로 사용한다.
+- 호환되지 않는 변경은 type 또는 scope 뒤에 `!`를 붙인다.
+- 설명은 한국어로 작성해도 되며, 의미가 드러나는 현재형 문구를 쓴다.
+- 이슈 번호는 강제하지 않는다. 실제 이슈가 있을 때 본문이나 footer에 남긴다.
 - 커밋 작성자는 각자 본인 명의로 남긴다. `git config user.email`을 GitHub에
   등록된 메일과 반드시 일치시킨다. 불일치 시 커밋이 계정에 연결되지 않아
   기여자가 사라진 것처럼 보인다.
@@ -47,8 +74,9 @@ hotfix/c/#52    긴급 수정도 main 직접 커밋 금지
 
 ## PR
 
-- 본문에 `closed: #이슈번호`를 표기한다.
-- 승인 1인 필수. 단 `prompts/`, `rules/`, `infra/` 변경은 항상 소유자 외
+- Notion 작업 번호를 적고, 실제 GitHub 이슈가 있을 때만 `Closes #번호`를 적는다.
+- 승인 1인 필수. 단 `pension_agent/prompts/`, `pension_agent/rules/`, `infra/`
+  변경은 항상 소유자 외
   타인의 리뷰를 받는다 (수치 오류와 프롬프트 회귀가 가장 비싼 실수이므로).
 - PR 템플릿의 "평가셋 스코어 delta"와 "샘플 응답 JSON"은 가능한 경우 채운다.
   측정이 불필요한 변경(문서, 설정 등)은 체크박스로 명시한다.
@@ -58,8 +86,9 @@ hotfix/c/#52    긴급 수정도 main 직접 커밋 금지
 
 - 리뷰어는 최소 1명. 소유 디렉토리 외 변경은 해당 디렉토리 소유자를
   리뷰어로 지정한다.
-- 세제 계산 로직(`rules/`)과 프롬프트(`prompts/`) 변경은 수치/문구 diff를
-  꼼꼼히 본다 — 이 저장소에서 가장 비싼 실수가 나는 지점이다.
+- 세제 계산 로직(`pension_agent/rules/`)과 프롬프트(`pension_agent/prompts/`)
+  변경은 수치/문구 diff를 꼼꼼히 본다 — 이 저장소에서 가장 비싼 실수가 나는
+  지점이다.
 
 ## 태그
 
