@@ -72,7 +72,7 @@
 | `pension_agent/agent/` | B | 라우터·도구·오케스트레이션 |
 | `pension_agent/prompts/` | B | 프롬프트 파일 (코드 내 인라인 문자열 금지) |
 | `pension_agent/rules/` | C | 세제 계산기 (결정론적) |
-| `pension_agent/server/` | C | FastAPI |
+| `pension_agent/api/` | C | FastAPI 라우트·스키마·HTTP 예외 변환 |
 | `infra/` | C | Docker·배포·모니터링 |
 | `evals/questions/set_a.jsonl` | A | 평가 질의셋 (A 담당분) |
 | `evals/questions/set_b.jsonl` | B | 평가 질의셋 (B 담당분) |
@@ -80,7 +80,7 @@
 | `evals/harness/` | C | 평가 실행기 |
 | `pension_agent/config/defaults/ingest.yaml` | A | ingest 기본 설정 |
 | `pension_agent/config/defaults/agent.yaml` | B | agent 기본 설정 |
-| `pension_agent/config/defaults/server.yaml` | C | server 기본 설정 |
+| `pension_agent/config/defaults/api.yaml` | C | API 기본 설정 |
 | `docs/` | 공동 | append-only로 작성 |
 
 단일 `evals/questions.jsonl`이나 단일 `config.yaml`로 합치지 않는다. 3인이

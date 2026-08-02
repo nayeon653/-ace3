@@ -18,7 +18,7 @@ eval: ## 평가셋 실행
 	$(UV) run python -m evals.harness.run
 
 serve: ## 로컬 API 서버 기동
-	$(UV) run uvicorn pension_agent.server.main:app --reload --port $${PORT:-8000}
+	$(UV) run uvicorn pension_agent.api.app:app --reload --port $${PORT:-8000}
 
 check: ## 린트 + 테스트
 	$(UV) run ruff check .

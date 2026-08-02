@@ -4,6 +4,7 @@ date: 2026-08-02
 type: architecture
 related:
   - https://app.notion.com/p/3ac8385edd5081fe9198cc937641db63
+  - 20260803-api-interface-module.md
 supersedes: []
 superseded-by: []
 ---
@@ -50,3 +51,4 @@ superseded-by: []
 - [ACE-4: 실행 코드와 지원 파일을 분리하는 프로젝트 구조로 변경 검토](https://app.notion.com/p/3ac8385edd5081fe9198cc937641db63)
 - `pyproject.toml`
 - `.github/workflows/ci.yml`
+- [후속 결정: HTTP 인터페이스 모듈명을 `api`로 지정](20260803-api-interface-module.md)

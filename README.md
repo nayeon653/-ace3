@@ -37,7 +37,7 @@ cp .env.example .env        # 값 채워넣기 (절대 커밋 금지)
 ```
 문서(PDF/DOCX/XLSX/PPTX) → ingest(파싱/OCR/정규화) → retrieval(인덱싱/검색)
                                                                   │
-GET /answer ─→ server(FastAPI) ─→ agent(라우터/도구 오케스트레이션) ──┤
+GET /answer ─→ api(FastAPI) ────→ agent(라우터/도구 오케스트레이션) ──┤
                                         │                          │
                                         ├─→ rules(결정론적 세제 계산) │
                                         └─→ prompts + HyperCLOVA X ─┘
@@ -70,7 +70,7 @@ make check   # ruff + pytest
 | `pension_agent/agent/` | B | 라우터·도구·오케스트레이션 |
 | `pension_agent/prompts/` | B | 프롬프트 파일 |
 | `pension_agent/rules/` | C | 세제 계산기 (결정론적) |
-| `pension_agent/server/` | C | FastAPI |
+| `pension_agent/api/` | C | FastAPI 라우트·스키마·HTTP 예외 변환 |
 | `pension_agent/core/` | 공동 | 공용 설정 로더·모델·예외 |
 | `pension_agent/config/defaults/` | A/B/C 분할 | 안전한 런타임 기본 설정 |
 | `infra/` | C | Docker·배포·모니터링 |

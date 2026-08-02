@@ -9,13 +9,13 @@ import pytest
     "module_name",
     [
         "pension_agent.agent",
+        "pension_agent.api",
         "pension_agent.config",
         "pension_agent.core",
         "pension_agent.ingest",
         "pension_agent.prompts",
         "pension_agent.retrieval",
         "pension_agent.rules",
-        "pension_agent.server",
     ],
 )
 def test_application_modules_are_importable(module_name: str) -> None:
