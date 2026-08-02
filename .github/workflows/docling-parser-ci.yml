@@ -1,0 +1,45 @@
+name: Docling parser CI
+
+on:
+  pull_request:
+    paths:
+      - "tools/docling_parser/**"
+      - ".github/workflows/docling-parser-ci.yml"
+
+jobs:
+  parser-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "tools/docling_parser/uv.lock"
+
+      - name: Verify parser lock
+        run: uv lock --check --project tools/docling_parser
+
+      - name: Install parser dependencies
+        run: uv sync --locked --project tools/docling_parser
+
+      - name: Test parser
+        run: >-
+          uv run --frozen --project tools/docling_parser
+          pytest -q tools/docling_parser/tests
+
+      - name: Build parser distributions
+        run: uv build tools/docling_parser --out-dir "$RUNNER_TEMP/docling-parser-dist"
+
+      - name: Verify wheel entry points
+        run: >-
+          uv run --frozen --project tools/docling_parser python -c
+          'import glob, os, zipfile;
+          wheel = glob.glob(os.path.join(os.environ["RUNNER_TEMP"], "docling-parser-dist", "*.whl"))[0];
+          archive = zipfile.ZipFile(wheel);
+          entry = next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"));
+          metadata = archive.read(entry).decode();
+          assert "docling-parser = docling_team_parser.cli:main" in metadata;
+          assert "mirae_naver_ocr = docling_team_parser.ocr.naver_plugin" in metadata'

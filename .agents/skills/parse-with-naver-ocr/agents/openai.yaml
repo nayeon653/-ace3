@@ -1,0 +1,4 @@
+interface:
+  display_name: "NAVER OCR 문서 파싱"
+  short_description: "NAVER CLOVA General OCR V2로 문서를 안전하게 파싱"
+  default_prompt: "$parse-with-naver-ocr 스킬을 사용해 외부 전송 승인을 확인하고 문서를 NAVER OCR로 파싱해 주세요."

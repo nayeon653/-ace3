@@ -66,7 +66,7 @@
 
 | 디렉토리 | 내용 |
 |---|---|
-| `pension_agent/ingest/` | 파싱·OCR·정규화 |
+| `pension_agent/ingest/` | 파싱 artifact 검증·정규화·retrieval 연계 |
 | `pension_agent/retrieval/` | 청킹·임베딩·검색 |
 | `pension_agent/agent/` | 라우터·도구·오케스트레이션 |
 | `pension_agent/prompts/` | 프롬프트 파일 (코드 내 인라인 문자열 금지) |
@@ -75,6 +75,7 @@
 | `infra/` | Docker·배포·모니터링 |
 | `evals/` | 품질 평가 데이터와 실행기 |
 | `pension_agent/config/` | 설정 로더와 안전한 기본값 |
+| `tools/docling_parser/` | 제품 런타임과 격리된 오프라인 Docling 파싱 CLI |
 | `docs/` | 명세·컨벤션·결정·실험 기록 |
 
 `docs/` 전체가 append-only인 것은 아니다. API 명세와 컨벤션은 현재 상태에 맞게
@@ -100,7 +101,21 @@
 - `api`는 `retrieval`이나 `rules`를 직접 호출하지 않고 `agent`를 통해 사용한다.
 - 운영 경로인 `api`, `agent`, `retrieval`, `rules`는 `ingest`와 파싱 라이브러리를
   import하지 않는다.
-- 파싱 라이브러리는 `ingest` 구현과 함께 별도 의존성 그룹으로 추가한다.
+- 현재 Docling 파서는 `tools/docling_parser/`의 독립 잠금 환경에서 오프라인으로
+  실행하며 제품 런타임에서 import하지 않는다. 애플리케이션 내부 파서를 새로
+  추가할 때는 `ingest` 구현과 함께 별도 의존성 그룹으로 관리한다.
+
+## 문서 파싱 운영
+
+- 문서 파싱의 실행·저장·검수 정책은
+  [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md)를 유일한
+  원본으로 사용한다.
+- Codex와 Claude Code의 로컬/NAVER Skill에는 선택 조건과 중앙 문서 경로만 둔다.
+  CLI 명령이나 운영 규칙을 Skill 본문에 복제하지 않는다.
+- 원본은 `data/raw/`, 파싱 bundle은 `data/processed/docling/`에 두고 둘 다 Git에
+  커밋하지 않는다.
+- 현재 작업 범위는 파싱까지다. 청킹·임베딩 정책을 파서 코드나 Skill에 미리 넣지
+  않는다.
 
 ## 개발 메모
 
@@ -114,6 +129,8 @@ cp .env.example .env   # 값 채워넣기 (커밋 금지)
 make setup   # 런타임 + 개발 의존성 설치
 make check   # ruff + pytest
 make build   # wheel + source distribution 빌드
+make setup-parser  # 독립 Docling 파서 환경 설치
+make parser-doctor # 파서 환경과 고정 프로필 확인
 ```
 
 애플리케이션 실행 명령은 해당 진입점이 구현되는 PR에서 함께 추가한다.

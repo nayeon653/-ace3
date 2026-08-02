@@ -31,7 +31,7 @@ done <<< "$staged_files"
 while IFS= read -r f; do
   [ -z "$f" ] && continue
   case "$f" in
-    data/raw/*|*.zip|*.faiss|*.db|*.sqlite3)
+    data/raw/*|data/processed/*|data/ocr/*|data/indexes/*|.docling-parser/*|*.zip|*.faiss|*.db|*.sqlite3)
       fail "원본/산출물 파일이 스테이징되어 있습니다: $f (.gitignore 대상)"
       ;;
   esac
@@ -46,6 +46,12 @@ while IFS= read -r f; do
   fi
   if git diff --cached -- "$f" | grep -Eiq '^\+.*X-NCP-[A-Za-z0-9-]+\s*[:=]\s*[A-Za-z0-9._-]{16,}'; then
     fail "NCP 인증 헤더 값으로 보이는 패턴이 포함되어 있습니다: $f"
+  fi
+  if git diff --cached -- "$f" | grep -Eiq "^\+.*NAVER_OCR_SECRET['\"]?[[:space:]]*[:=][[:space:]]*['\"]?[A-Za-z0-9._-]{16,}"; then
+    fail "NAVER OCR secret으로 보이는 값이 포함되어 있습니다: $f"
+  fi
+  if git diff --cached -- "$f" | grep -Eiq "^\+.*NAVER_OCR_INVOKE_URL['\"]?[[:space:]]*[:=][[:space:]]*['\"]?https://[^[:space:]\"']{16,}"; then
+    fail "NAVER OCR Invoke URL로 보이는 값이 포함되어 있습니다: $f"
   fi
 done <<< "$staged_files"
 
