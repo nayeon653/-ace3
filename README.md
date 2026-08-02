@@ -27,19 +27,17 @@ chmod +x .githooks/*
 git config user.name "<이름 또는 GitHub id>"
 git config user.email "<GitHub에 등록된 메일>"
 
-# 3. 개발 환경
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+# 3. 개발 환경 (uv 설치 필요: https://docs.astral.sh/uv/)
+uv sync --dev
 cp .env.example .env        # 값 채워넣기 (절대 커밋 금지)
 ```
 
 ## 아키텍처 요약
 
 ```
-문서(PDF/DOCX/XLSX/PPTX) → ingest(파싱/OCR/정규화) → index(청킹/임베딩/검색)
-                                                              │
-GET /answer ─→ server(FastAPI) ─→ agent(라우터/도구 오케스트레이션) ──┤
+문서(PDF/DOCX/XLSX/PPTX) → ingest(파싱/OCR/정규화) → retrieval(인덱싱/검색)
+                                                                  │
+GET /answer ─→ api(FastAPI) ────→ agent(라우터/도구 오케스트레이션) ──┤
                                         │                          │
                                         ├─→ rules(결정론적 세제 계산) │
                                         └─→ prompts + HyperCLOVA X ─┘
@@ -48,40 +46,58 @@ GET /answer ─→ server(FastAPI) ─→ agent(라우터/도구 오케스트레
 ```
 
 원칙: **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도·세율 등 확정
-수치는 `rules/`의 결정론적 함수에서만 나오며, LLM은 의도 분류·근거 요약·
-조건 분기 설명만 담당한다. 자세한 원칙은 [`CLAUDE.md`](CLAUDE.md) 참고.
+수치는 `pension_agent/rules/`의 결정론적 함수에서만 나오며, LLM은 의도 분류·
+근거 요약·조건 분기 설명만 담당한다. 자세한 원칙은 [`CLAUDE.md`](CLAUDE.md)
+참고.
+
+모듈 의존성은 HTTP 인터페이스에서 도메인 모듈 방향으로만 흐릅니다.
+
+```text
+api → agent → retrieval
+          ├→ rules
+          └→ prompts
+
+ingest → retrieval
+```
+
+`core`는 공용 타입·프로토콜·예외만 제공하고, `config`는 설정 로딩과 기본값을
+담습니다. 운영 경로인 `api`와 `agent`는 오프라인 파싱 모듈인 `ingest`를 import하지
+않습니다. 파싱 라이브러리는 `ingest` 구현과 함께 별도 의존성 그룹으로 추가합니다.
 
 ## 빠른 시작
 
 ```bash
-make setup   # 의존성 설치
-make ingest  # 원본 문서 → 파싱/OCR
-make index   # 청킹/임베딩/인덱싱
-make serve   # 로컬 서버 기동 (GET /answer)
-make eval    # 평가셋 실행
+make setup   # 런타임 + 개발 의존성 설치
 make check   # ruff + pytest
+make build   # wheel + source distribution 빌드
 ```
+
+현재는 프로젝트 구조만 제공하며 애플리케이션 실행 진입점은 아직 구현하지 않았습니다.
+파싱·검색·API·평가 명령은 각 기능을 구현하는 PR에서 함께 추가합니다.
 
 ## 디렉토리 구조
 
-| 디렉토리 | 소유자 | 내용 |
-|---|---|---|
-| `ingest/` | A | 파싱·OCR·정규화 |
-| `index/` | A | 청킹·임베딩·검색 |
-| `agent/` | B | 라우터·도구·오케스트레이션 |
-| `prompts/` | B | 프롬프트 파일 |
-| `rules/` | C | 세제 계산기 (결정론적) |
-| `server/` | C | FastAPI |
-| `infra/` | C | Docker·배포·모니터링 |
-| `eval/questions/` | A/B/C 분할 | 평가 질의셋 (`set_a.jsonl` / `set_b.jsonl` / `set_c.jsonl`) |
-| `eval/harness/` | C | 평가 실행기 |
-| `config/` | A/B/C 분할 | 설정 (`ingest.yaml` / `agent.yaml` / `server.yaml`) |
-| `docs/` | 공동 | 컨벤션, 결정 로그, 실험 로그, API 명세, 제안서 |
-| `tests/` | 공동 | 테스트 |
+| 디렉토리 | 내용 |
+|---|---|
+| `pension_agent/ingest/` | 파싱·OCR·정규화 |
+| `pension_agent/retrieval/` | 청킹·임베딩·검색 |
+| `pension_agent/agent/` | 라우터·도구·오케스트레이션 |
+| `pension_agent/prompts/` | 프롬프트 파일 |
+| `pension_agent/rules/` | 세제 계산기 (결정론적) |
+| `pension_agent/api/` | FastAPI 라우트·스키마·HTTP 예외 변환 |
+| `pension_agent/core/` | 공용 타입·프로토콜·예외 |
+| `pension_agent/config/` | 설정 로더와 안전한 런타임 기본값 |
+| `infra/` | Docker·배포·모니터링 |
+| `data/` | 원본·중간 산출물·검색 인덱스 (Git 제외) |
+| `evals/questions/` | 평가 질의셋 |
+| `evals/harness/` | 평가 실행기 |
+| `docs/` | 컨벤션, 결정 기록, 실험 로그, API 명세, 제안서 |
+| `tests/` | 테스트 |
 
 ## 더 읽기
 
-- [`CLAUDE.md`](CLAUDE.md) — 절대 원칙, 컨벤션 요약, 디렉토리 소유권
+- [`CLAUDE.md`](CLAUDE.md) — 절대 원칙, 컨벤션 요약, 모듈 의존성 방향
 - [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 브랜치·커밋·PR·리뷰·태그 규칙 전문
+- [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
 - [`SUBMISSION.md`](SUBMISSION.md) — 제출물 체크리스트 및 마감

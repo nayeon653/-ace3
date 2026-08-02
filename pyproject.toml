@@ -1,0 +1,38 @@
+[project]
+name = "pension-agent"
+version = "0.1.0"
+description = "Pension document retrieval and answer agent for the 2026 Mirae Asset AI Festival"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi",
+    "httpx",
+    "kiwipiepy",
+    "numpy",
+    "pydantic",
+    "python-dotenv",
+    "pyyaml",
+    "rank-bm25",
+    "uvicorn[standard]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "pension_agent"
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

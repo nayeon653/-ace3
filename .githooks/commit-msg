@@ -6,16 +6,16 @@ msg_file="$1"
 msg=$(cat "$msg_file")
 first_line=$(head -n1 "$msg_file")
 
-pattern='^\[(feat|fix|exp|chore|docs|refactor|test|hotfix)\] #[0-9]+ .+'
+pattern='^(feat|fix|docs|refactor|test|chore|exp|perf|build|ci|revert)(\([a-z0-9._/-]+\))?!?: .+$'
 
 if ! echo "$first_line" | grep -Eq "$pattern"; then
   echo "[commit-msg] 커밋 메시지 형식이 올바르지 않습니다."
   echo ""
-  echo "  형식: [type] #이슈번호 작업 내용"
-  echo "  type: feat | fix | exp | chore | docs | refactor | test | hotfix"
+  echo "  형식: type(scope): 작업 내용 (scope는 선택)"
+  echo "  type: feat | fix | docs | refactor | test | chore | exp | perf | build | ci | revert"
   echo ""
-  echo "  예시: [feat] #12 OCR 파이프라인 추가"
-  echo "        [fix] #31 임베딩 타임아웃 수정"
+  echo "  예시: feat(ingest): OCR 파이프라인 추가"
+  echo "        fix(agent): 임베딩 타임아웃 수정"
   exit 1
 fi
 
