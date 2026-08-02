@@ -5,7 +5,7 @@ UV ?= uv
 help: ## 사용 가능한 타깃 목록 출력
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "%-10s %s\n", $$1, $$2}'
 
-setup: ## 의존성 설치
+setup: ## 런타임 + 개발 의존성 설치
 	$(UV) sync --dev
 
 ingest: ## 원본 문서 파싱/OCR/정규화 실행
