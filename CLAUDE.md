@@ -57,34 +57,25 @@
   대회의 LLM 사용 제약(HyperCLOVA X만 허용)과 관련한 오해를 막기 위함이며,
   동시에 위 contributor 비노출 원칙을 지키기 위한 장치이기도 하다.
 - main 직접 push 금지, 긴급 수정도 `fix/` 브랜치 → PR.
-- main 통합은 squash merge. PR 승인 1인 필수 (단 `pension_agent/prompts/`,
-  `pension_agent/rules/`, `infra/` 변경은 항상 타인 리뷰).
+- main 통합은 squash merge. PR 승인 1인 필수.
 
-## 디렉토리 소유권
+## 디렉토리 역할
 
-충돌 방지를 위해 각 디렉토리는 명확한 소유자를 둔다. 다른 사람 소유
-디렉토리를 수정할 때는 반드시 소유자 리뷰를 받는다.
+팀 역할과 담당 디렉토리는 아직 고정하지 않는다. 담당자는 작업별로 정하고,
+디렉토리는 아래 기능 경계만 나타낸다.
 
-| 디렉토리 | 소유자 | 내용 |
-|---|---|---|
-| `pension_agent/ingest/` | A | 파싱·OCR·정규화 |
-| `pension_agent/retrieval/` | A | 청킹·임베딩·검색 |
-| `pension_agent/agent/` | B | 라우터·도구·오케스트레이션 |
-| `pension_agent/prompts/` | B | 프롬프트 파일 (코드 내 인라인 문자열 금지) |
-| `pension_agent/rules/` | C | 세제 계산기 (결정론적) |
-| `pension_agent/api/` | C | FastAPI 라우트·스키마·HTTP 예외 변환 |
-| `infra/` | C | Docker·배포·모니터링 |
-| `evals/questions/set_a.jsonl` | A | 평가 질의셋 (A 담당분) |
-| `evals/questions/set_b.jsonl` | B | 평가 질의셋 (B 담당분) |
-| `evals/questions/set_c.jsonl` | C | 평가 질의셋 (C 담당분) |
-| `evals/harness/` | C | 평가 실행기 |
-| `pension_agent/config/defaults/ingest.yaml` | A | ingest 기본 설정 |
-| `pension_agent/config/defaults/agent.yaml` | B | agent 기본 설정 |
-| `pension_agent/config/defaults/api.yaml` | C | API 기본 설정 |
-| `docs/` | 공동 | 명세·컨벤션·결정·실험 기록 |
-
-단일 `evals/questions.jsonl`이나 단일 `config.yaml`로 합치지 않는다. 3인이
-동시에 같은 파일을 건드리면 머지 충돌이 매일 발생한다.
+| 디렉토리 | 내용 |
+|---|---|
+| `pension_agent/ingest/` | 파싱·OCR·정규화 |
+| `pension_agent/retrieval/` | 청킹·임베딩·검색 |
+| `pension_agent/agent/` | 라우터·도구·오케스트레이션 |
+| `pension_agent/prompts/` | 프롬프트 파일 (코드 내 인라인 문자열 금지) |
+| `pension_agent/rules/` | 세제 계산기 (결정론적) |
+| `pension_agent/api/` | FastAPI 라우트·스키마·HTTP 예외 변환 |
+| `infra/` | Docker·배포·모니터링 |
+| `evals/` | 품질 평가 데이터와 실행기 |
+| `pension_agent/config/` | 설정 로더와 안전한 기본값 |
+| `docs/` | 명세·컨벤션·결정·실험 기록 |
 
 `docs/` 전체가 append-only인 것은 아니다. API 명세와 컨벤션은 현재 상태에 맞게
 수정하고, 채택된 결정 기록과 완료된 실험 기록은 정해진 정책에 따라 보존한다.

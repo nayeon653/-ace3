@@ -1,7 +1,7 @@
 ---
 name: Bug
 about: 버그 리포트
-title: "[fix] 제목"
+title: ""
 labels: ""
 assignees: ""
 ---

@@ -77,26 +77,26 @@ make check         # ruff + pytest
 
 ## 디렉토리 구조
 
-| 디렉토리 | 소유자 | 내용 |
-|---|---|---|
-| `pension_agent/ingest/` | A | 파싱·OCR·정규화 |
-| `pension_agent/retrieval/` | A | 청킹·임베딩·검색 |
-| `pension_agent/agent/` | B | 라우터·도구·오케스트레이션 |
-| `pension_agent/prompts/` | B | 프롬프트 파일 |
-| `pension_agent/rules/` | C | 세제 계산기 (결정론적) |
-| `pension_agent/api/` | C | FastAPI 라우트·스키마·HTTP 예외 변환 |
-| `pension_agent/core/` | 공동 | 공용 타입·프로토콜·예외 |
-| `pension_agent/config/` | 공동 | 설정 로더와 안전한 런타임 기본값 |
-| `infra/` | C | Docker·배포·모니터링 |
-| `data/` | 로컬 전용 | 원본·중간 산출물·검색 인덱스 (Git 제외) |
-| `evals/questions/` | A/B/C 분할 | 평가 질의셋 (`set_a.jsonl` / `set_b.jsonl` / `set_c.jsonl`) |
-| `evals/harness/` | C | 평가 실행기 |
-| `docs/` | 공동 | 컨벤션, 결정 기록, 실험 로그, API 명세, 제안서 |
-| `tests/` | 공동 | 테스트 |
+| 디렉토리 | 내용 |
+|---|---|
+| `pension_agent/ingest/` | 파싱·OCR·정규화 |
+| `pension_agent/retrieval/` | 청킹·임베딩·검색 |
+| `pension_agent/agent/` | 라우터·도구·오케스트레이션 |
+| `pension_agent/prompts/` | 프롬프트 파일 |
+| `pension_agent/rules/` | 세제 계산기 (결정론적) |
+| `pension_agent/api/` | FastAPI 라우트·스키마·HTTP 예외 변환 |
+| `pension_agent/core/` | 공용 타입·프로토콜·예외 |
+| `pension_agent/config/` | 설정 로더와 안전한 런타임 기본값 |
+| `infra/` | Docker·배포·모니터링 |
+| `data/` | 원본·중간 산출물·검색 인덱스 (Git 제외) |
+| `evals/questions/` | 평가 질의셋 |
+| `evals/harness/` | 평가 실행기 |
+| `docs/` | 컨벤션, 결정 기록, 실험 로그, API 명세, 제안서 |
+| `tests/` | 테스트 |
 
 ## 더 읽기
 
-- [`CLAUDE.md`](CLAUDE.md) — 절대 원칙, 컨벤션 요약, 디렉토리 소유권
+- [`CLAUDE.md`](CLAUDE.md) — 절대 원칙, 컨벤션 요약, 모듈 의존성 방향
 - [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 브랜치·커밋·PR·리뷰·태그 규칙 전문
 - [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
