@@ -81,10 +81,35 @@
 | `pension_agent/config/defaults/ingest.yaml` | A | ingest 기본 설정 |
 | `pension_agent/config/defaults/agent.yaml` | B | agent 기본 설정 |
 | `pension_agent/config/defaults/api.yaml` | C | API 기본 설정 |
-| `docs/` | 공동 | append-only로 작성 |
+| `docs/` | 공동 | 명세·컨벤션·결정·실험 기록 |
 
 단일 `evals/questions.jsonl`이나 단일 `config.yaml`로 합치지 않는다. 3인이
 동시에 같은 파일을 건드리면 머지 충돌이 매일 발생한다.
+
+`docs/` 전체가 append-only인 것은 아니다. API 명세와 컨벤션은 현재 상태에 맞게
+수정하고, 채택된 결정 기록과 완료된 실험 기록은 정해진 정책에 따라 보존한다.
+
+## 모듈 의존성 방향
+
+의존성은 아래 방향으로만 흐른다. 표에 없는 기능 모듈 import는 허용하지 않는다.
+
+| 모듈 | import 가능한 내부 모듈 |
+|---|---|
+| `core` | 없음 |
+| `config` | `core` |
+| `rules` | `core`, `config` |
+| `retrieval` | `core`, `config` |
+| `ingest` | `core`, `config`, `retrieval` |
+| `agent` | `core`, `config`, `retrieval`, `rules`, `prompts` |
+| `api` | `core`, `config`, `agent` |
+
+- `core`에는 공용 타입·프로토콜·예외만 두고 기능 모듈을 import하지 않는다.
+- `config`는 설정 로더와 기본값을 소유하며 기능 로직을 포함하지 않는다.
+- `prompts`는 실행 시 읽는 리소스 패키지이며 다른 기능 모듈을 import하지 않는다.
+- `api`는 `retrieval`이나 `rules`를 직접 호출하지 않고 `agent`를 통해 사용한다.
+- 운영 경로인 `api`, `agent`, `retrieval`, `rules`는 `ingest`와 파싱 라이브러리를
+  import하지 않는다.
+- 파싱 라이브러리는 `ingest` 구현과 함께 별도 의존성 그룹으로 추가한다.
 
 ## 개발 메모
 
@@ -95,12 +120,12 @@ uv sync --dev
 cp .env.example .env   # 값 채워넣기 (커밋 금지)
 
 # 자주 쓰는 명령 (Makefile 참고)
-make setup   # 의존성 설치
-make ingest  # 원본 문서 → 파싱/OCR
-make index   # 청킹/임베딩/인덱싱
-make eval    # 평가셋 실행
-make serve   # 로컬 서버 기동
-make check   # ruff + pytest
+make setup         # 런타임 + 개발 의존성 설치
+make ingest        # 원본 문서 → 파싱/OCR
+make index         # 청킹/임베딩/인덱싱
+make eval          # 평가셋 실행
+make serve         # 로컬 서버 기동
+make check         # ruff + pytest
 ```
 
 ## 하지 말 것

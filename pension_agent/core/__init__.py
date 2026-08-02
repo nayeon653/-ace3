@@ -1,1 +1,1 @@
-"""Shared settings, models, and exceptions."""
+"""Shared types, protocols, and exceptions."""

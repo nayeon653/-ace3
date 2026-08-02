@@ -5,6 +5,7 @@ type: architecture
 related:
   - https://app.notion.com/p/3ac8385edd5081fe9198cc937641db63
   - 20260803-api-interface-module.md
+  - 20260803-module-dependency-direction.md
 supersedes: []
 superseded-by: []
 ---
@@ -52,3 +53,4 @@ superseded-by: []
 - `pyproject.toml`
 - `.github/workflows/ci.yml`
 - [후속 결정: HTTP 인터페이스 모듈명을 `api`로 지정](20260803-api-interface-module.md)
+- [후속 결정: 모듈 의존성 방향을 단방향으로 제한](20260803-module-dependency-direction.md)

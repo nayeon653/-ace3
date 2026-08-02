@@ -1,1 +1,1 @@
-"""Runtime configuration resources."""
+"""Runtime settings loader and configuration resources."""

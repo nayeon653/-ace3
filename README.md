@@ -50,15 +50,29 @@ GET /answer ─→ api(FastAPI) ────→ agent(라우터/도구 오케스
 근거 요약·조건 분기 설명만 담당한다. 자세한 원칙은 [`CLAUDE.md`](CLAUDE.md)
 참고.
 
+모듈 의존성은 HTTP 인터페이스에서 도메인 모듈 방향으로만 흐릅니다.
+
+```text
+api → agent → retrieval
+          ├→ rules
+          └→ prompts
+
+ingest → retrieval
+```
+
+`core`는 공용 타입·프로토콜·예외만 제공하고, `config`는 설정 로딩과 기본값을
+담습니다. 운영 경로인 `api`와 `agent`는 오프라인 파싱 모듈인 `ingest`를 import하지
+않습니다. 파싱 라이브러리는 `ingest` 구현과 함께 별도 의존성 그룹으로 추가합니다.
+
 ## 빠른 시작
 
 ```bash
-make setup   # 의존성 설치
-make ingest  # 원본 문서 → 파싱/OCR
-make index   # 청킹/임베딩/인덱싱
-make serve   # 로컬 서버 기동 (GET /answer)
-make eval    # 평가셋 실행
-make check   # ruff + pytest
+make setup         # 런타임 + 개발 의존성 설치
+make ingest        # 원본 문서 → 파싱/OCR
+make index         # 청킹/임베딩/인덱싱
+make serve         # 로컬 서버 기동 (GET /answer)
+make eval          # 평가셋 실행
+make check         # ruff + pytest
 ```
 
 ## 디렉토리 구조
@@ -71,8 +85,8 @@ make check   # ruff + pytest
 | `pension_agent/prompts/` | B | 프롬프트 파일 |
 | `pension_agent/rules/` | C | 세제 계산기 (결정론적) |
 | `pension_agent/api/` | C | FastAPI 라우트·스키마·HTTP 예외 변환 |
-| `pension_agent/core/` | 공동 | 공용 설정 로더·모델·예외 |
-| `pension_agent/config/defaults/` | A/B/C 분할 | 안전한 런타임 기본 설정 |
+| `pension_agent/core/` | 공동 | 공용 타입·프로토콜·예외 |
+| `pension_agent/config/` | 공동 | 설정 로더와 안전한 런타임 기본값 |
 | `infra/` | C | Docker·배포·모니터링 |
 | `data/` | 로컬 전용 | 원본·중간 산출물·검색 인덱스 (Git 제외) |
 | `evals/questions/` | A/B/C 분할 | 평가 질의셋 (`set_a.jsonl` / `set_b.jsonl` / `set_c.jsonl`) |
