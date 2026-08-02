@@ -77,12 +77,13 @@ make check   # ruff + pytest
 | `data/` | 로컬 전용 | 원본·중간 산출물·검색 인덱스 (Git 제외) |
 | `evals/questions/` | A/B/C 분할 | 평가 질의셋 (`set_a.jsonl` / `set_b.jsonl` / `set_c.jsonl`) |
 | `evals/harness/` | C | 평가 실행기 |
-| `docs/` | 공동 | 컨벤션, 결정 로그, 실험 로그, API 명세, 제안서 |
+| `docs/` | 공동 | 컨벤션, 결정 기록, 실험 로그, API 명세, 제안서 |
 | `tests/` | 공동 | 테스트 |
 
 ## 더 읽기
 
 - [`CLAUDE.md`](CLAUDE.md) — 절대 원칙, 컨벤션 요약, 디렉토리 소유권
 - [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 브랜치·커밋·PR·리뷰·태그 규칙 전문
+- [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
 - [`SUBMISSION.md`](SUBMISSION.md) — 제출물 체크리스트 및 마감
