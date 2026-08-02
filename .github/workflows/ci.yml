@@ -38,25 +38,5 @@ jobs:
           assert root.joinpath("config", "defaults").is_dir();
           assert root.joinpath("prompts").is_dir()'
 
-# 주의: 전체 평가셋(evals/) 회귀 테스트는 여기서 실행하지 않는다.
-# HCX 호출 크레딧을 소모하므로 PR마다 자동 실행하면 비용이 커진다.
-# 필요 시 아래처럼 수동 트리거(workflow_dispatch) 잡을 별도로 둔다.
-#
-# on:
-#   workflow_dispatch:
-#
-# jobs:
-#   eval-regression:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
-#       - name: Install uv and Python
-#         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-#         with:
-#           python-version: "3.11"
-#       - name: Install dependencies
-#         run: uv sync --locked --dev
-#       - name: Run full eval harness
-#         run: make eval
-#         env:
-#           CLOVA_STUDIO_API_KEY: ${{ secrets.CLOVA_STUDIO_API_KEY }}
+# 전체 평가셋 회귀 테스트는 HCX 호출 비용이 있으므로 평가 하네스 구현 후
+# 수동 실행(workflow_dispatch) 워크플로로 분리한다.

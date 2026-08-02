@@ -1,4 +1,4 @@
-.PHONY: help setup ingest index eval serve check build lock hooks
+.PHONY: help setup check build lock hooks
 
 UV ?= uv
 
@@ -7,18 +7,6 @@ help: ## 사용 가능한 타깃 목록 출력
 
 setup: ## 런타임 + 개발 의존성 설치
 	$(UV) sync --dev
-
-ingest: ## 원본 문서 파싱/OCR/정규화 실행
-	$(UV) run python -m pension_agent.ingest.run
-
-index: ## 청킹/임베딩/인덱싱 실행
-	$(UV) run python -m pension_agent.retrieval.run
-
-eval: ## 평가셋 실행
-	$(UV) run python -m evals.harness.run
-
-serve: ## 로컬 API 서버 기동
-	$(UV) run uvicorn pension_agent.api.app:app --reload --port $${PORT:-8000}
 
 check: ## 린트 + 테스트
 	$(UV) run ruff check .

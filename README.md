@@ -67,13 +67,13 @@ ingest → retrieval
 ## 빠른 시작
 
 ```bash
-make setup         # 런타임 + 개발 의존성 설치
-make ingest        # 원본 문서 → 파싱/OCR
-make index         # 청킹/임베딩/인덱싱
-make serve         # 로컬 서버 기동 (GET /answer)
-make eval          # 평가셋 실행
-make check         # ruff + pytest
+make setup   # 런타임 + 개발 의존성 설치
+make check   # ruff + pytest
+make build   # wheel + source distribution 빌드
 ```
+
+현재는 프로젝트 구조만 제공하며 애플리케이션 실행 진입점은 아직 구현하지 않았습니다.
+파싱·검색·API·평가 명령은 각 기능을 구현하는 PR에서 함께 추가합니다.
 
 ## 디렉토리 구조
 

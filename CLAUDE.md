@@ -111,13 +111,12 @@ uv sync --dev
 cp .env.example .env   # 값 채워넣기 (커밋 금지)
 
 # 자주 쓰는 명령 (Makefile 참고)
-make setup         # 런타임 + 개발 의존성 설치
-make ingest        # 원본 문서 → 파싱/OCR
-make index         # 청킹/임베딩/인덱싱
-make eval          # 평가셋 실행
-make serve         # 로컬 서버 기동
-make check         # ruff + pytest
+make setup   # 런타임 + 개발 의존성 설치
+make check   # ruff + pytest
+make build   # wheel + source distribution 빌드
 ```
+
+애플리케이션 실행 명령은 해당 진입점이 구현되는 PR에서 함께 추가한다.
 
 ## 하지 말 것
 
