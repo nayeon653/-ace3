@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+_MARKDOWN_ASSET_LINK = re.compile(r"(\]\(<?)(assets\\[^)\n>]*)(>?\))")
+
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.sha256()
@@ -61,8 +63,31 @@ def write_json_atomic(path: Path, payload: Any) -> None:
 
 
 def normalize_markdown_file(path: Path) -> None:
+    def normalize_asset_link(match: re.Match[str]) -> str:
+        asset_path = match.group(2).replace("\\", "/")
+        return f"{match.group(1)}{asset_path}{match.group(3)}"
+
     text = path.read_text(encoding="utf-8")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _MARKDOWN_ASSET_LINK.sub(normalize_asset_link, text)
     if text and not text.endswith("\n"):
         text += "\n"
     path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def normalize_docling_json_file(path: Path) -> None:
+    """Windows에서 생성된 상대 이미지 URI만 POSIX 형식으로 바꾼다."""
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if isinstance(value, dict):
+            result = {key: normalize(item) for key, item in value.items()}
+            uri = result.get("uri")
+            if isinstance(uri, str) and uri.startswith("assets\\"):
+                result["uri"] = uri.replace("\\", "/")
+            return result
+        return value
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    write_json_atomic(path, normalize(payload))

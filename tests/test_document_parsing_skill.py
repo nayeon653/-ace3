@@ -8,7 +8,7 @@ POLICY_RELATIVE_PATH = "docs/operations/document-parsing.md"
 
 def test_canonical_document_parsing_policy_exists() -> None:
     assert (REPO_ROOT / POLICY_RELATIVE_PATH).is_file()
-    assert (REPO_ROOT / "tools/docling_parser/pyproject.toml").is_file()
+    assert (REPO_ROOT / "tools/docling_parser/scripts/parse_document.py").is_file()
 
 
 def test_codex_and_claude_skill_entrypoints_match() -> None:

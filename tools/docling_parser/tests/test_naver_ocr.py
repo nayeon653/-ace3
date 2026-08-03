@@ -7,8 +7,6 @@ import httpx
 import pytest
 from docling.datamodel.accelerator_options import AcceleratorOptions
 from docling_core.types.doc import BoundingBox, CoordOrigin
-from PIL import Image
-
 from docling_team_parser.errors import NaverOcrError
 from docling_team_parser.ocr import naver_plugin
 from docling_team_parser.ocr.config import validate_naver_invoke_url
@@ -17,6 +15,7 @@ from docling_team_parser.ocr.naver_plugin import (
     NaverOcrOptions,
     ocr_engines,
 )
+from PIL import Image
 
 SECRET = "never-print-this-secret"
 INVOKE_URL = "https://example.apigw.ntruss.com/custom/v1/domain-id/invoke-key/general"

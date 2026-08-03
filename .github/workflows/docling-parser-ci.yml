@@ -30,6 +30,11 @@ jobs:
           uv run --frozen --project tools/docling_parser
           pytest -q tools/docling_parser/tests
 
+      - name: Verify parser script
+        run: >-
+          uv run --frozen --project tools/docling_parser
+          python tools/docling_parser/scripts/parse_document.py --help
+
       - name: Build parser distributions
         run: uv build tools/docling_parser --out-dir "$RUNNER_TEMP/docling-parser-dist"
 
@@ -41,5 +46,5 @@ jobs:
           archive = zipfile.ZipFile(wheel);
           entry = next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"));
           metadata = archive.read(entry).decode();
-          assert "docling-parser = docling_team_parser.cli:main" in metadata;
+          assert "docling-parser =" not in metadata;
           assert "mirae_naver_ocr = docling_team_parser.ocr.naver_plugin" in metadata'

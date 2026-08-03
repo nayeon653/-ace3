@@ -6,7 +6,7 @@ description: -ace3 저장소의 PDF, DOCX, PPTX, XLSX 파일을 고정 NAVER CLO
 # NAVER OCR 파싱 진입점
 
 이 파일에서 상위 디렉터리를 탐색해 `docs/operations/document-parsing.md`와
-`tools/docling_parser/pyproject.toml`이 모두 있는 저장소 루트를 찾는다. 중앙 운영
+`tools/docling_parser/scripts/parse_document.py`가 모두 있는 저장소 루트를 찾는다. 중앙 운영
 문서를 끝까지 읽고 **NAVER OCR 실행** 절차를 그대로 따른다.
 
 현재 요청에서 NAVER OCR 지정 또는 해당 범위의 외부 전송 승인이 모두 없으면 중단하고

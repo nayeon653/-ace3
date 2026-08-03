@@ -1,4 +1,4 @@
-.PHONY: help setup check build lock hooks setup-parser parser-doctor parser-test
+.PHONY: help setup check build lock hooks setup-parser parser-test
 
 UV ?= uv
 PARSER_PROJECT ?= tools/docling_parser
@@ -25,9 +25,6 @@ hooks: ## 훅 경로를 .githooks로 설정 (팀원 각자 최초 1회 실행)
 
 setup-parser: ## 독립 Docling 파서 환경 설치
 	$(UV) sync --locked --project $(PARSER_PROJECT)
-
-parser-doctor: ## Docling 파서 의존성과 고정 프로필 확인
-	$(UV) run --frozen --project $(PARSER_PROJECT) docling-parser doctor
 
 parser-test: ## Docling 파서 단위 테스트 실행
 	$(UV) run --frozen --project $(PARSER_PROJECT) pytest -q --capture=sys $(PARSER_PROJECT)/tests

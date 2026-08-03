@@ -3,8 +3,6 @@ from __future__ import annotations
 from io import BytesIO
 from types import SimpleNamespace
 
-from PIL import Image
-
 from docling_team_parser.docling_engine import DoclingEngine
 from docling_team_parser.errors import NaverOcrError
 from docling_team_parser.profiles import (
@@ -12,6 +10,7 @@ from docling_team_parser.profiles import (
     NAVER_PROFILE_ID,
     get_profile,
 )
+from PIL import Image
 
 
 def test_pdf_and_office_image_inputs_use_distinct_ocr_scales() -> None:

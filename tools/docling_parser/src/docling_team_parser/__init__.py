@@ -1,4 +1,4 @@
-"""팀에서 사용하는 Docling 파서."""
+"""팀에서 사용하는 Docling 파서와 NAVER OCR 확장."""
 
 from importlib.metadata import PackageNotFoundError, version
 

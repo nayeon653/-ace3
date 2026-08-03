@@ -79,11 +79,10 @@ make check   # ruff + pytest
 make build   # wheel + source distribution 빌드
 
 make setup-parser  # Docling 파서 전용 환경 설치
-make parser-doctor # 로컬 OCR 환경과 고정 프로필 확인
 make parser-test   # 파서 단위 테스트
 ```
 
-Docling 오프라인 파싱 CLI는 제공됩니다. 제품 검색·API·평가 실행 진입점은 아직
+Docling 오프라인 파싱 스크립트는 제공됩니다. 제품 검색·API·평가 실행 진입점은 아직
 구현하지 않았으며 각 기능을 구현하는 PR에서 함께 추가합니다.
 
 ## 디렉토리 구조
@@ -98,7 +97,7 @@ Docling 오프라인 파싱 CLI는 제공됩니다. 제품 검색·API·평가 �
 | `pension_agent/api/` | FastAPI 라우트·스키마·HTTP 예외 변환 |
 | `pension_agent/core/` | 공용 타입·프로토콜·예외 |
 | `pension_agent/config/` | 설정 로더와 안전한 런타임 기본값 |
-| `tools/docling_parser/` | 고정 로컬/NAVER OCR 프로필을 제공하는 오프라인 CLI |
+| `tools/docling_parser/` | 고정 로컬/NAVER OCR 프로필을 제공하는 오프라인 파싱 도구 |
 | `infra/` | Docker·배포·모니터링 |
 | `data/` | 원본·중간 산출물·검색 인덱스 (Git 제외) |
 | `evals/questions/` | 평가 질의셋 |

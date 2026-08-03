@@ -9,7 +9,7 @@ from typing import Any
 
 from .errors import NaverOcrError, ParserError
 from .io_utils import sha256_bytes
-from .models import OcrProvider, ParserProfile
+from .profiles import OcrProvider, ParserProfile
 
 
 @dataclass(slots=True)

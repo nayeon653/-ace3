@@ -75,7 +75,7 @@
 | `infra/` | Docker·배포·모니터링 |
 | `evals/` | 품질 평가 데이터와 실행기 |
 | `pension_agent/config/` | 설정 로더와 안전한 기본값 |
-| `tools/docling_parser/` | 제품 런타임과 격리된 오프라인 Docling 파싱 CLI |
+| `tools/docling_parser/` | 제품 런타임과 격리된 오프라인 Docling 파싱 도구 |
 | `docs/` | 명세·컨벤션·결정·실험 기록 |
 
 `docs/` 전체가 append-only인 것은 아니다. API 명세와 컨벤션은 현재 상태에 맞게
@@ -111,7 +111,7 @@
   [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md)를 유일한
   원본으로 사용한다.
 - Codex와 Claude Code의 로컬/NAVER Skill에는 선택 조건과 중앙 문서 경로만 둔다.
-  CLI 명령이나 운영 규칙을 Skill 본문에 복제하지 않는다.
+  실행 명령이나 운영 규칙을 Skill 본문에 복제하지 않는다.
 - 원본은 `data/raw/`, 파싱 bundle은 `data/processed/docling/`에 두고 둘 다 Git에
   커밋하지 않는다.
 - 현재 작업 범위는 파싱까지다. 청킹·임베딩 정책을 파서 코드나 Skill에 미리 넣지
@@ -130,7 +130,7 @@ make setup   # 런타임 + 개발 의존성 설치
 make check   # ruff + pytest
 make build   # wheel + source distribution 빌드
 make setup-parser  # 독립 Docling 파서 환경 설치
-make parser-doctor # 파서 환경과 고정 프로필 확인
+make parser-test   # Docling 파서 단위 테스트
 ```
 
 애플리케이션 실행 명령은 해당 진입점이 구현되는 PR에서 함께 추가한다.
