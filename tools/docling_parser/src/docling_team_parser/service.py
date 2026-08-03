@@ -1,4 +1,4 @@
-"""Application service used by the Docling CLI adapter."""
+"""Docling CLI 어댑터가 사용하는 애플리케이션 서비스."""
 
 from __future__ import annotations
 
@@ -233,8 +233,8 @@ class ParserService:
 
             engine_result.document.save_as_markdown(
                 markdown_path,
-                # A relative directory makes Docling emit portable references such
-                # as assets/image_....png instead of the atomic staging path.
+                # 상대 디렉터리를 사용하면 Docling이 원자적 스테이징 경로 대신
+                # assets/image_....png 같은 이식 가능한 참조를 생성한다.
                 artifacts_dir=Path("assets"),
                 image_mode=ImageRefMode.REFERENCED,
                 traverse_pictures=profile.traverse_pictures,
@@ -342,9 +342,9 @@ class ParserService:
                     started_clock=started_clock,
                     error=parser_error,
                 )
-            except Exception:  # noqa: BLE001 - diagnostics must not mask parse errors
-                # A diagnostic artifact is best effort and must never replace the
-                # original parse failure (for example on a full output volume).
+            except Exception:  # noqa: BLE001 - 진단 실패가 파싱 오류를 가리면 안 된다.
+                # 진단 산출물은 가능한 경우에만 생성하며 원래 파싱 실패를 대체해서는 안 된다.
+                # 예를 들어 출력 볼륨이 가득 찬 경우에도 원래 오류를 유지해야 한다.
                 failure_path = None
             parser_error.failure_manifest_path = failure_path
             raise parser_error from exc
@@ -455,8 +455,8 @@ class ParserService:
                 if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
             )
         else:
-            # Individual authorization happens inside parse(), allowing CONTINUE
-            # batches to report one bad explicit path without losing all results.
+            # 개별 경로 권한은 parse() 안에서 검사한다. 따라서 CONTINUE 배치는 잘못된
+            # 명시 경로 하나를 보고하면서도 나머지 결과를 보존할 수 있다.
             candidates = (path.expanduser() for path in request.source_paths)
         try:
             paths = sorted(
@@ -689,7 +689,7 @@ class ParserService:
 
     @staticmethod
     def _path_is_unredirected_within(path: Path, root: Path) -> bool:
-        """Reject symlinks and Windows junctions, including nested artifact links."""
+        """산출물 내부 링크를 포함한 심볼릭 링크와 Windows 정션을 거부한다."""
 
         resolved_path = path.resolve(strict=True)
         resolved_root = root.resolve(strict=True)

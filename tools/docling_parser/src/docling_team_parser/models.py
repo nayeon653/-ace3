@@ -1,4 +1,4 @@
-"""Request, result, profile, and manifest contracts."""
+"""요청, 결과, 프로필 및 매니페스트 계약."""
 
 from __future__ import annotations
 

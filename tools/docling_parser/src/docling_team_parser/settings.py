@@ -1,4 +1,4 @@
-"""Runtime settings and path authorization."""
+"""런타임 설정과 경로 접근 권한 검사."""
 
 from __future__ import annotations
 

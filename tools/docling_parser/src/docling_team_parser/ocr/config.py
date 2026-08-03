@@ -1,4 +1,4 @@
-"""Shared validation for NAVER OCR runtime configuration."""
+"""NAVER OCR 런타임 설정에 공통으로 적용하는 검증."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ _NAVER_APIGW_HOST = re.compile(
 
 
 def validate_naver_invoke_url(value: str) -> str:
-    """Return a validated General OCR Invoke URL or raise a safe error."""
+    """검증된 General OCR 호출 URL을 반환하거나 안전한 오류를 발생시킨다."""
 
     invoke_url = value.strip()
     try:

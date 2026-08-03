@@ -1,4 +1,4 @@
-"""Docling-only conversion pipeline and Office picture OCR pass."""
+"""Docling 전용 변환 파이프라인과 Office 그림 OCR 단계."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class EngineResult:
 
 
 class DoclingEngine:
-    """Build Docling pipelines from one immutable profile."""
+    """불변 프로필 하나를 기준으로 Docling 파이프라인을 구성한다."""
 
     def __init__(self, profile: ParserProfile):
         self.profile = profile
@@ -263,7 +263,7 @@ class DoclingEngine:
 
     @staticmethod
     def _serialize_picture_png(image: Any) -> bytes:
-        """Flatten transparent Office images onto white before OCR."""
+        """투명한 Office 이미지를 OCR 전에 흰색 배경으로 합성한다."""
 
         from PIL import Image
 
@@ -306,14 +306,14 @@ class DoclingEngine:
     @staticmethod
     def _safe_exception(value: object) -> str:
         text = str(value) or value.__class__.__name__
-        # Avoid passing through remote response bodies or credentials in user-facing errors.
+        # 사용자에게 표시하는 오류에 원격 응답 본문이나 인증정보를 포함하지 않는다.
         if len(text) > 500:
             text = text[:500] + "…"
         return text.replace("\n", " ")
 
     @staticmethod
     def _exception_is_naver_ocr(exc: BaseException) -> bool:
-        """Recognize a NAVER failure through Docling's exception wrappers."""
+        """Docling이 감싼 예외에서 NAVER 실패를 식별한다."""
 
         current: BaseException | None = exc
         seen: set[int] = set()

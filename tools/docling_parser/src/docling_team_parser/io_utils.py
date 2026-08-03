@@ -1,4 +1,4 @@
-"""Small deterministic and atomic I/O helpers."""
+"""결정적이며 원자적으로 동작하는 소규모 I/O 도우미."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def sha256_bytes(value: bytes) -> str:
 
 
 def sha256_directory(path: Path) -> str:
-    """Hash relative file names and bytes in stable order."""
+    """상대 파일명과 바이트를 일정한 순서로 해시한다."""
 
     digest = hashlib.sha256()
     for file_path in sorted(

@@ -1,4 +1,4 @@
-"""Stable parser error types exposed by the CLI adapter."""
+"""CLI 어댑터가 노출하는 안정적인 파서 오류 타입."""
 
 from __future__ import annotations
 
@@ -22,4 +22,4 @@ class ParserError(Exception):
 
 
 class NaverOcrError(RuntimeError):
-    """Raised when a NAVER OCR request or response is invalid."""
+    """NAVER OCR 요청 또는 응답이 유효하지 않을 때 발생한다."""

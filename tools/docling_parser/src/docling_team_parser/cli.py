@@ -1,4 +1,4 @@
-"""CLI-first adapter that exposes only fixed local and NAVER workflows."""
+"""고정된 로컬 및 NAVER 워크플로만 노출하는 CLI 우선 어댑터."""
 
 from __future__ import annotations
 
@@ -212,7 +212,7 @@ def main(
     *,
     service_factory: Callable[[], ParserService] = ParserService,
 ) -> int:
-    """Run a CLI command and return a process exit code."""
+    """CLI 명령을 실행하고 프로세스 종료 코드를 반환한다."""
 
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -243,7 +243,7 @@ def main(
     except ParserError as exc:
         _write_json(_error_payload(exc), stream=sys.stderr)
         return 2
-    except Exception as exc:  # noqa: BLE001 - CLI boundary must stay JSON-only.
+    except Exception as exc:  # noqa: BLE001 - CLI 경계는 항상 JSON만 출력해야 한다.
         _write_json(
             {"error": {"code": "INTERNAL_ERROR", "message": str(exc)}},
             stream=sys.stderr,
@@ -251,5 +251,5 @@ def main(
         return 1
 
 
-if __name__ == "__main__":  # pragma: no cover - console entry point
+if __name__ == "__main__":  # pragma: no cover - 콘솔 진입점
     raise SystemExit(main())

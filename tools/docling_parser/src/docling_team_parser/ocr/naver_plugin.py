@@ -1,4 +1,4 @@
-"""Docling OCR plugin backed by NAVER CLOVA General OCR V2."""
+"""NAVER CLOVA General OCR V2를 사용하는 Docling OCR 플러그인."""
 
 from __future__ import annotations
 
@@ -35,10 +35,10 @@ _SUPPORTED_REQUEST_LANGUAGES = frozenset({"ko", "ja", "zh-TW"})
 
 
 class NaverOcrOptions(OcrOptions):
-    """Configuration exposed to Docling's OCR factory.
+    """Docling OCR 팩터리에 노출하는 설정.
 
-    The invoke URL and secret deliberately are not option fields. They are read from
-    the process environment only when an enabled model is initialized.
+    호출 URL과 비밀키는 의도적으로 옵션 필드에 넣지 않는다. 활성화된 모델을
+    초기화할 때만 프로세스 환경에서 읽는다.
     """
 
     kind: ClassVar[Literal["naver_ocr"]] = "naver_ocr"
@@ -52,7 +52,7 @@ class NaverOcrOptions(OcrOptions):
 
 
 class NaverOcrModel(BaseOcrModel):
-    """Synchronous NAVER CLOVA General OCR V2 adapter for Docling."""
+    """Docling용 동기식 NAVER CLOVA General OCR V2 어댑터."""
 
     def __init__(
         self,
@@ -136,18 +136,17 @@ class NaverOcrModel(BaseOcrModel):
                                     start_index=len(all_ocr_cells),
                                 )
                             except NaverOcrError as exc:
-                                # Docling's threaded stage records page failures and
-                                # may continue with later batches. Latch the first
-                                # fatal remote failure so later batches make no more
-                                # billable requests for a doomed document.
+                                # Docling의 스레드 단계는 페이지 실패를 기록한 뒤 다음
+                                # 배치를 계속할 수 있다. 첫 치명적 원격 실패를 저장하여
+                                # 실패가 확정된 문서에 추가 과금 요청을 보내지 않는다.
                                 self._fatal_error_message = str(exc)
                                 raise
                         all_ocr_cells.extend(cells)
                     finally:
                         image.close()
 
-                # Deliberately run this only after every request and response has
-                # succeeded. Any NaverOcrError escapes and fails the conversion.
+                # 모든 요청과 응답이 성공한 뒤에만 의도적으로 실행한다.
+                # NaverOcrError는 그대로 전파되어 전체 변환을 실패시킨다.
                 self.post_process_cells(all_ocr_cells, page, conv_res)
 
             if settings.debug.visualize_ocr:
@@ -205,7 +204,7 @@ class NaverOcrModel(BaseOcrModel):
                     files={"file": ("docling-crop.png", image_bytes, "image/png")},
                 )
             except httpx.RequestError as exc:
-                # Do not include the exception text: it can contain request details.
+                # 예외 문자열에는 요청 상세정보가 포함될 수 있으므로 노출하지 않는다.
                 last_transport_error = type(exc).__name__
                 if attempt < self.options.max_attempts:
                     self._sleep_before_retry(attempt)
@@ -231,15 +230,16 @@ class NaverOcrModel(BaseOcrModel):
                 self._sleep_before_retry(attempt)
                 continue
 
-            # Response bodies are intentionally excluded. They are remote-controlled
-            # data and may echo sensitive request information.
+            # 응답 본문은 외부에서 제어되는 데이터이며 민감한 요청 정보를 되돌려줄 수
+            # 있으므로 의도적으로 오류에서 제외한다.
             if rate_limited:
                 raise NaverOcrError(
                     f"NAVER OCR rate limit exceeded after {attempt} attempt(s)"
                 )
             raise NaverOcrError(f"NAVER OCR returned HTTP {response.status_code}")
 
-        # The loop always returns or raises. This guard keeps type checkers honest.
+        # 이 반복문은 항상 반환하거나 예외를 발생시킨다. 아래 방어 코드는 타입 검사기를
+        # 위해 남겨 둔다.
         raise NaverOcrError(
             "NAVER OCR transport failed"
             + (f": {last_transport_error}" if last_transport_error else "")
@@ -339,7 +339,7 @@ class NaverOcrModel(BaseOcrModel):
 
     @staticmethod
     def _bounded_error_code(response: httpx.Response) -> str | None:
-        """Read only the documented error code from a small JSON response."""
+        """작은 JSON 응답에서 문서화된 오류 코드만 읽는다."""
 
         if len(response.content) > 64 * 1024:
             return None
@@ -367,7 +367,7 @@ class NaverOcrModel(BaseOcrModel):
 
 
 def ocr_engines() -> dict[str, list[type[NaverOcrModel]]]:
-    """Docling setuptools entrypoint contract."""
+    """Docling setuptools 진입점 계약."""
 
     return {"ocr_engines": [NaverOcrModel]}
 

@@ -1,4 +1,4 @@
-"""Immutable parsing profiles shared by the core service, CLI, and skills."""
+"""핵심 서비스, CLI 및 Skill이 공유하는 불변 파싱 프로필."""
 
 from __future__ import annotations
 
@@ -39,20 +39,19 @@ _PROFILES: dict[str, ParserProfile] = {
         ocr_provider=OcrProvider.NAVER,
         external_data_transfer=True,
         ocr_mode="pdf_aware_layout_regions",
-        # CLOVA General OCR accepts ko/ja/zh-TW request hints; English is not a
-        # valid value for this API field.
+        # CLOVA General OCR의 요청 언어 힌트는 ko/ja/zh-TW만 허용한다.
+        # 영어는 이 API 필드에서 유효한 값이 아니다.
         languages=("ko",),
         layout_model_repo_id=_LAYOUT_MODEL_REPO_ID,
         layout_model_revision=_LAYOUT_MODEL_REVISION,
         naver_api_version="V2",
-        # 2.1 renders PDF pages at roughly 150 DPI. Office picture inputs use
-        # office_picture_image_scale=1.0 because Docling's image backend already
-        # measures them in source pixels.
+        # 2.1은 PDF 페이지를 약 150 DPI로 렌더링한다. Docling 이미지 백엔드는 Office
+        # 그림을 이미 원본 픽셀 단위로 측정하므로 office_picture_image_scale=1.0을 쓴다.
         naver_image_scale=2.1,
         naver_timeout_seconds=60.0,
         naver_max_attempts=3,
-        # Docling TableFormer consumes OCR text cells. Structured CLOVA table
-        # responses are intentionally not requested until the plugin consumes them.
+        # Docling TableFormer는 OCR 텍스트 셀을 입력으로 사용한다. 플러그인이 구조화된
+        # CLOVA 표 응답을 소비하도록 구현하기 전까지는 해당 응답을 요청하지 않는다.
         naver_enable_table_detection=False,
         naver_max_image_edge=7_900,
         naver_max_image_bytes=49_000_000,
