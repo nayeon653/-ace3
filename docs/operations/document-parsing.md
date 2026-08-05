@@ -69,48 +69,6 @@ data/
 다섯 산출물은 하나의 원자적 bundle이다. 일부만 복사하거나 공유하지 않는다. 실제
 원본과 생성 결과는 Git에 커밋하지 않는다.
 
-## 공유 데이터 저장 정책
-
-- private GitHub 저장소는 파서 코드, 잠금 파일, 프로필, 스키마, 이 정책과
-  비민감 소용량 catalog pointer 같은 control plane으로만 사용한다.
-- 원본과 Docling bundle의 팀 기준 저장소는 private S3 호환 객체 저장소를 사용한다.
-  NAVER Cloud를 사용할 때는 신규 구축 기준으로 `Ncloud Storage`를 우선 검토한다.
-- 로컬 `data/`는 작업 cache다. 팀 기준본은 객체 저장소에 있고, 필요한 collection만
-  내려받는다.
-- 원본은 SHA-256 기반의 새 key에 한 번만 올린다. 같은 key를 덮어쓰거나
-  `sync --delete`로 동기화하지 않는다.
-- 파생 bundle도 manifest의 고유한 `bundle_id`를 포함한 새 prefix에 통째로 올린다. 업로드가
-  모두 성공하면 catalog에 `candidate`로 등록하고, 사람 검수 후에만
-  `adopted` 또는 `rejected`로 바꾼다. `adopted`만 후속 청킹 후보로 사용한다.
-- 원본 파일명이나 catalog 자체가 민감하면 GitHub에 기록하지 않고 객체 저장소에만
-  둔다.
-- 사람별 계정과 자동화 전용 계정을 분리하고 private bucket에 최소 권한을 부여한다.
-  접근 키는 `.env`, 운영체제 secret 저장소 또는 CI secret에만 둔다.
-- raw와 derived의 bucket 또는 최상위 prefix를 분리하고 public access 차단,
-  서버 측 암호화, versioning과 접근 로그를 켠다. 일반 사용자에게 삭제·versioning
-  중지 권한을 주지 않는다. lifecycle 자동 삭제는 미완성 orphan과 기간이 지난
-  `candidate`에만 적용하고 raw와 `adopted`는 별도 보존 기간 결정 전에 삭제하지 않는다.
-
-권장 object key는 다음과 같다. 실제 bucket 이름과 동기화 스크립트는 저장소 공급자를
-확정하는 별도 작업에서 정한다.
-
-```text
-raw/<collection-id>/<source-sha256>/source.<ext>
-derived/docling/<collection-id>/<source-sha256>/<profile-id>/<profile-digest>/<bundle-id>/...
-```
-
-`collection-id`는 문서 제목이 아닌 변경하지 않는 영문 소문자 slug로 정한다.
-catalog를 GitHub에 둘 때는 하나의 JSONL 파일을 여러 사람이 덮어쓰지 않도록
-bundle별 작은 파일로 나누고 PR로 상태를 변경한다. 메타데이터가 민감해 객체
-저장소에 두면 `catalog/<collection-id>/<source-sha256>/<profile-digest>/<bundle-id>.json`
-같은 불변 객체로 나누고 bucket versioning을 사용한다. 하나의 collection은
-GitHub과 객체 저장소 catalog 중 한 곳만 권위 있는 원본으로 사용한다.
-
-catalog 레코드에는 `collection_id`, 원본 object key·version·SHA-256,
-bundle prefix·ID·manifest SHA-256, 프로필 ID·digest, `state`, 검수자와 검수 시각을
-기록한다. 공유 업로드·다운로드 도구를 구현할 때는 manifest의 산출물 해시와
-원격 객체를 검증한 뒤에만 catalog를 변경하도록 한다.
-
 ## 저장소와 실행 스크립트 찾기
 
 Skill의 위치에서 상위 디렉터리를 탐색해 다음 두 파일이 모두 있는 가장 가까운
@@ -215,9 +173,9 @@ uv run --frozen --project "<parser-project>" --env-file "<repo-root>/.env.parser
 7. HTML에서 표의 병합 셀과 내장 이미지가 깨지지 않고 표시되는지 확인한다.
 8. `merged_multipage_tables`의 페이지와 행 범위를 원본의 페이지 경계와 대조한다.
 
-검수 메모 때문에 생성 bundle을 수정하지 않는다. 사람이 확인하기 전에는 후보
-결과로 취급하고, 채택 상태는 bundle 밖의 권위 있는 catalog에 남긴다. 채택한
-bundle만 후속 정규화와 retrieval 입력으로 사용한다.
+검수 메모 때문에 생성 bundle을 수정하지 않는다. 사람이 확인하기 전에는 검수 전
+결과로 취급한다. 공유 저장 위치, 검수 상태 기록 방식과 후속 정규화·retrieval 입력
+선정 기준은 팀 합의 후 별도 운영 정책으로 반영한다.
 
 ## 운영체제 경로
 
