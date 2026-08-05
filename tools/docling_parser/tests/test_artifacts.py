@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +10,10 @@ import pytest
 from docling_team_parser.artifacts import parse_document
 from docling_team_parser.document_quality import DocumentQualityReport
 from docling_team_parser.errors import NaverOcrError, ParserError
+from docling_team_parser.multipage_tables import (
+    MergedMultipageTable,
+    MergedTableSegment,
+)
 from docling_team_parser.profiles import LOCAL_PROFILE_ID, NAVER_PROFILE_ID
 
 
@@ -73,6 +77,7 @@ class FakeEngineResult:
             visual_review_picture_pages=(),
             picture_ocr_text_nodes_isolated=0,
             repeated_text_nodes_normalized=0,
+            merged_multipage_tables=(),
             possible_cross_page_table_pairs=(),
         )
     )
@@ -115,7 +120,7 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert docling_json["text"] == "assets\\literal"
     assert (bundle.assets_dir / "picture.png").read_bytes() == b"png"
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 5
+    assert manifest["schema_version"] == 6
     assert manifest["status"] == "success"
     assert manifest["bundle_id"] == bundle.bundle_id
     assert manifest["bundle_id"] != bundle.output_dir.name
@@ -131,6 +136,7 @@ def test_parse_document_publishes_complete_portable_bundle(
     )
     assert bundle.to_dict()["html_path"] == str(bundle.html_path)
     assert manifest["quality_signals"] == {
+        "merged_multipage_tables": [],
         "possible_cross_page_table_pairs": []
     }
 
@@ -149,6 +155,63 @@ def test_parse_document_refuses_to_overwrite_existing_bundle(
         parse_document(source, output_dir, "local")
 
     assert caught.value.code == "OUTPUT_EXISTS"
+
+
+def test_manifest_records_merged_multipage_table_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    merged = MergedMultipageTable(
+        table_ref="#/tables/3",
+        pages=(4, 5),
+        segments=(
+            MergedTableSegment(
+                source_table_ref="#/tables/3",
+                page_no=4,
+                source_rows=10,
+                output_row_start=0,
+                output_row_end=10,
+                repeated_header_rows_removed=0,
+                continuation_row_merged_into=None,
+            ),
+            MergedTableSegment(
+                source_table_ref="#/tables/4",
+                page_no=5,
+                source_rows=3,
+                output_row_start=10,
+                output_row_end=12,
+                repeated_header_rows_removed=0,
+                continuation_row_merged_into=9,
+            ),
+        ),
+    )
+
+    class MergedTableEngine:
+        def __init__(self, _profile: Any):
+            pass
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            result = FakeEngineResult()
+            return replace(
+                result,
+                quality=replace(
+                    result.quality,
+                    merged_multipage_tables=(merged,),
+                ),
+            )
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", MergedTableEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+
+    bundle = parse_document(source, tmp_path / "outputs", "local")
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["stats"]["multipage_tables_merged"] == 1
+    assert manifest["stats"]["multipage_table_segments_absorbed"] == 1
+    assert manifest["quality_signals"]["merged_multipage_tables"] == [
+        merged.to_dict()
+    ]
 
 
 def test_unexpandable_source_path_is_returned_as_parser_error(tmp_path: Path) -> None:

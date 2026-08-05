@@ -51,6 +51,7 @@ class ParserProfile:
     isolate_embedded_picture_ocr: bool = True
     full_page_picture_min_page_area_ratio: float = 0.65
     normalize_repeated_text: bool = True
+    merge_multipage_tables: bool = True
     warn_possible_cross_page_tables: bool = True
     local_confidence_threshold: float | None = None
     local_image_scale: float | None = None

@@ -216,7 +216,7 @@ def parse_document(
         normalize_docling_json_file(docling_json_path)
 
         manifest = {
-            "schema_version": 5,
+            "schema_version": 6,
             "status": "success",
             "bundle_id": bundle_id,
             "source": {
@@ -264,11 +264,22 @@ def parse_document(
                 "repeated_text_nodes_normalized": (
                     result.quality.repeated_text_nodes_normalized
                 ),
+                "multipage_tables_merged": len(
+                    result.quality.merged_multipage_tables
+                ),
+                "multipage_table_segments_absorbed": sum(
+                    len(item.segments) - 1
+                    for item in result.quality.merged_multipage_tables
+                ),
                 "possible_cross_page_table_continuations": len(
                     result.quality.possible_cross_page_table_pairs
                 ),
             },
             "quality_signals": {
+                "merged_multipage_tables": [
+                    item.to_dict()
+                    for item in result.quality.merged_multipage_tables
+                ],
                 "possible_cross_page_table_pairs": [
                     [first, second]
                     for first, second in result.quality.possible_cross_page_table_pairs

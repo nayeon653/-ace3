@@ -15,11 +15,11 @@ from docling_team_parser.profiles import (
     (
         (
             LOCAL_PROFILE_ID,
-            "sha256:085ee1f8977ca4bd80211c9f0f100d0c430a78417e6c18b691c564775f6a2113",
+            "sha256:d4fa70592665ad78000811b58b1ff5b20ed30c35c7fbde5c52c0b1b4deafc639",
         ),
         (
             NAVER_PROFILE_ID,
-            "sha256:d53b6dc1a5b75e94d7fecd0c13a8524c354cdbe242838ee6352365d53a970c34",
+            "sha256:a78b84564e1cce07ab34bc5020ec25b15235db58eb28f5fa434d45f0725387e3",
         ),
     ),
 )

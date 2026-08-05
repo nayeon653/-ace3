@@ -5,19 +5,15 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from itertools import pairwise
 from typing import Any
 
+from .multipage_tables import MergedMultipageTable, merge_multipage_tables
 from .profiles import ParserProfile
 
 _HASH_SIZE = 16
 _HASH_BITS = _HASH_SIZE * _HASH_SIZE
 _HASH_DISTANCE_RATIO = 0.16
 _POSITION_TOLERANCE = 0.03
-_BOTTOM_TABLE_EDGE_RATIO = 0.85
-_TOP_TABLE_EDGE_RATIO = 0.15
-_TABLE_HORIZONTAL_TOLERANCE_RATIO = 0.05
-_TABLE_LEADING_CONTENT_TOLERANCE_RATIO = 0.004
 _NUMBER_TOKEN = re.compile(r"[\d.,%]+")
 
 
@@ -29,6 +25,7 @@ class DocumentQualityReport:
     visual_review_picture_pages: tuple[int, ...]
     picture_ocr_text_nodes_isolated: int
     repeated_text_nodes_normalized: int
+    merged_multipage_tables: tuple[MergedMultipageTable, ...]
     possible_cross_page_table_pairs: tuple[tuple[int, int], ...]
 
     @property
@@ -56,6 +53,19 @@ class DocumentQualityReport:
                 f"{self.repeated_text_nodes_normalized} node(s); original text "
                 "remains in each node's orig field"
             )
+        if self.merged_multipage_tables:
+            pages = ", ".join(
+                "-".join(str(page) for page in item.pages)
+                for item in self.merged_multipage_tables
+            )
+            segment_count = sum(
+                len(item.segments) for item in self.merged_multipage_tables
+            )
+            warnings.append(
+                f"merged {len(self.merged_multipage_tables)} multipage table(s) "
+                f"from {segment_count} segment(s) across pages {pages}; source "
+                "segment row provenance was recorded in quality_signals"
+            )
         if self.possible_cross_page_table_pairs:
             pairs = ", ".join(
                 f"{first}->{second}"
@@ -64,8 +74,8 @@ class DocumentQualityReport:
             warnings.append(
                 "detected "
                 f"{len(self.possible_cross_page_table_pairs)} possible cross-page "
-                f"table continuation(s) ({pairs}); segments were preserved without "
-                "automatic merging"
+                f"table continuation(s) ({pairs}) that could not be merged safely; "
+                "segments were preserved"
             )
         return warnings
 
@@ -99,10 +109,17 @@ def improve_document(
     normalized = (
         _normalize_repeated_text(document) if profile.normalize_repeated_text else 0
     )
-    table_pairs = (
-        _possible_cross_page_table_pairs(document)
-        if profile.warn_possible_cross_page_tables and detect_cross_page_tables
-        else ()
+    table_report = (
+        merge_multipage_tables(
+            document,
+            enabled=profile.merge_multipage_tables,
+        )
+        if detect_cross_page_tables
+        and (
+            profile.merge_multipage_tables
+            or profile.warn_possible_cross_page_tables
+        )
+        else None
     )
     return DocumentQualityReport(
         repeated_decorative_pictures_removed=removed,
@@ -111,7 +128,14 @@ def improve_document(
         visual_review_picture_pages=visual_pages,
         picture_ocr_text_nodes_isolated=isolated,
         repeated_text_nodes_normalized=normalized,
-        possible_cross_page_table_pairs=table_pairs,
+        merged_multipage_tables=(
+            table_report.merged_tables if table_report is not None else ()
+        ),
+        possible_cross_page_table_pairs=(
+            table_report.unmerged_page_pairs
+            if table_report is not None and profile.warn_possible_cross_page_tables
+            else ()
+        ),
     )
 
 
@@ -324,83 +348,6 @@ def _normalize_repeated_text(document: Any) -> int:
             normalized += 1
             break
     return normalized
-
-
-def _possible_cross_page_table_pairs(document: Any) -> tuple[tuple[int, int], ...]:
-    ordered: list[tuple[int, float, Any, Any, Any]] = []
-    for table in document.tables:
-        if len(getattr(table, "prov", [])) != 1:
-            continue
-        provenance = table.prov[0]
-        page = document.pages.get(provenance.page_no)
-        if page is None or page.size.height <= 0:
-            continue
-        bbox = provenance.bbox.to_top_left_origin(page.size.height)
-        ordered.append((provenance.page_no, bbox.t, table, bbox, page))
-    ordered.sort(key=lambda item: (item[0], item[1]))
-
-    pairs: set[tuple[int, int]] = set()
-    for first, second in pairwise(ordered):
-        first_page_no, _top, first_table, first_bbox, first_page = first
-        second_page_no, _top2, second_table, second_bbox, second_page = second
-        if second_page_no != first_page_no + 1:
-            continue
-        if first_table.data.num_cols != second_table.data.num_cols:
-            continue
-        if first_page.size.width <= 0 or second_page.size.width <= 0:
-            continue
-        if abs(
-            (first_bbox.l / first_page.size.width)
-            - (second_bbox.l / second_page.size.width)
-        ) > _TABLE_HORIZONTAL_TOLERANCE_RATIO:
-            continue
-        if abs(
-            (first_bbox.r / first_page.size.width)
-            - (second_bbox.r / second_page.size.width)
-        ) > _TABLE_HORIZONTAL_TOLERANCE_RATIO:
-            continue
-        if first_bbox.b / first_page.size.height < _BOTTOM_TABLE_EDGE_RATIO:
-            continue
-        if second_bbox.t / second_page.size.height > _TOP_TABLE_EDGE_RATIO:
-            continue
-        if _has_body_content_before_table(
-            document,
-            second_table,
-            second_bbox,
-            second_page,
-        ):
-            continue
-        pairs.add((first_page_no, second_page_no))
-    return tuple(sorted(pairs))
-
-
-def _has_body_content_before_table(
-    document: Any,
-    table: Any,
-    table_bbox: Any,
-    page: Any,
-) -> bool:
-    from docling_core.types.doc import ContentLayer, DocItemLabel
-
-    tolerance = page.size.height * _TABLE_LEADING_CONTENT_TOLERANCE_RATIO
-    ignored_labels = {DocItemLabel.PAGE_HEADER, DocItemLabel.PAGE_FOOTER}
-    for item, _level in document.iterate_items(
-        with_groups=False,
-        traverse_pictures=False,
-    ):
-        if item is table or getattr(item, "content_layer", None) is not ContentLayer.BODY:
-            continue
-        if getattr(item, "label", None) in ignored_labels:
-            continue
-        if hasattr(item, "text") and not item.text.strip():
-            continue
-        for provenance in getattr(item, "prov", []):
-            if provenance.page_no != table.prov[0].page_no:
-                continue
-            bbox = provenance.bbox.to_top_left_origin(page.size.height)
-            if bbox.b <= table_bbox.t + tolerance:
-                return True
-    return False
 
 
 def _format_pages(pages: tuple[int, ...]) -> str:
