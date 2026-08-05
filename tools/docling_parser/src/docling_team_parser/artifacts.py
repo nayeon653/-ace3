@@ -215,8 +215,12 @@ def parse_document(
         )
         normalize_docling_json_file(docling_json_path)
 
+        ocr_usage: dict[str, Any] = {"provider": profile.ocr_provider.value}
+        if result.ocr_usage is not None:
+            ocr_usage.update(result.ocr_usage.to_dict())
+
         manifest = {
-            "schema_version": 6,
+            "schema_version": 7,
             "status": "success",
             "bundle_id": bundle_id,
             "source": {
@@ -230,6 +234,7 @@ def parse_document(
                 "digest": profile.digest,
                 "options": profile.to_dict(),
             },
+            "ocr_usage": ocr_usage,
             "runtime": {
                 "parser_version": __version__,
                 "python": sys.version.split()[0],

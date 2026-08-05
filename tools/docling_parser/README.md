@@ -2,7 +2,8 @@
 
 `-ace3`의 문서 파싱 단계에서 사용하는 저장소 내부 오프라인 Python 도구입니다.
 PDF, DOCX, PPTX, XLSX를 고정 로컬 EasyOCR 또는 NAVER CLOVA General OCR V2
-프로필로 파싱해 Markdown, Docling JSON, manifest와 이미지 assets를 생성합니다.
+프로필로 파싱해 Markdown, HTML, Docling JSON, manifest와 이미지 assets를 생성합니다.
+NAVER 프로필의 manifest에는 실제 API 호출, 캐시 hit/miss와 재시도 횟수도 기록합니다.
 
 평가 API의 런타임 패키지가 아닙니다. Docling, PyTorch와 NumPy 1.x 의존성이 API
 환경에 섞이지 않도록 자체 `pyproject.toml`, `uv.lock`, `.venv`를 사용합니다.

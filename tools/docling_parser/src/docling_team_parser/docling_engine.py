@@ -5,12 +5,15 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .document_quality import DocumentQualityReport, improve_document, mark_items_invisible
 from .errors import NaverOcrError, ParserError
 from .io_utils import sha256_bytes
 from .profiles import OcrProvider, ParserProfile
+
+if TYPE_CHECKING:
+    from .ocr.naver_plugin import NaverOcrUsage, NaverOcrUsageSession
 
 
 @dataclass(slots=True)
@@ -23,6 +26,7 @@ class EngineResult:
     quality: DocumentQualityReport
     warnings: list[str]
     conversion_version: dict[str, Any]
+    ocr_usage: NaverOcrUsage | None
 
 
 class DoclingEngine:
@@ -30,8 +34,27 @@ class DoclingEngine:
 
     def __init__(self, profile: ParserProfile):
         self.profile = profile
+        self._naver_usage_session_id: str | None = None
 
     def convert(self, source: Path) -> EngineResult:
+        if self.profile.ocr_provider is OcrProvider.LOCAL:
+            return self._convert(source, ocr_usage_session=None)
+
+        from .ocr.naver_plugin import naver_ocr_usage_session
+
+        with naver_ocr_usage_session() as usage_session:
+            self._naver_usage_session_id = usage_session.session_id
+            try:
+                return self._convert(source, ocr_usage_session=usage_session)
+            finally:
+                self._naver_usage_session_id = None
+
+    def _convert(
+        self,
+        source: Path,
+        *,
+        ocr_usage_session: NaverOcrUsageSession | None,
+    ) -> EngineResult:
         from docling.datamodel.base_models import ConversionStatus, InputFormat
         from docling.document_converter import DocumentConverter, PdfFormatOption
 
@@ -122,6 +145,11 @@ class DoclingEngine:
             quality=quality,
             warnings=warnings,
             conversion_version=version,
+            ocr_usage=(
+                ocr_usage_session.snapshot()
+                if ocr_usage_session is not None
+                else None
+            ),
         )
 
     def _pdf_pipeline_options(self, mode: str, *, image_input: bool = False):
@@ -185,6 +213,7 @@ class DoclingEngine:
                 enable_table_detection=bool(self.profile.naver_enable_table_detection),
                 max_image_edge=self.profile.naver_max_image_edge or 7_900,
                 max_image_bytes=self.profile.naver_max_image_bytes or 49_000_000,
+                usage_session_id=self._naver_usage_session_id,
             )
             options.allow_external_plugins = True
             options.enable_remote_services = True

@@ -14,6 +14,7 @@ from docling_team_parser.multipage_tables import (
     MergedMultipageTable,
     MergedTableSegment,
 )
+from docling_team_parser.ocr.naver_plugin import NaverOcrUsage
 from docling_team_parser.profiles import LOCAL_PROFILE_ID, NAVER_PROFILE_ID
 
 
@@ -83,6 +84,7 @@ class FakeEngineResult:
     )
     warnings: list[str] = field(default_factory=list)
     conversion_version: dict[str, Any] = field(default_factory=lambda: {"docling_version": "test"})
+    ocr_usage: NaverOcrUsage | None = None
 
 
 class SuccessfulEngine:
@@ -120,7 +122,7 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert docling_json["text"] == "assets\\literal"
     assert (bundle.assets_dir / "picture.png").read_bytes() == b"png"
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 6
+    assert manifest["schema_version"] == 7
     assert manifest["status"] == "success"
     assert manifest["bundle_id"] == bundle.bundle_id
     assert manifest["bundle_id"] != bundle.output_dir.name
@@ -129,6 +131,7 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert "path" not in manifest["source"]
     assert manifest["profile"]["digest"] == bundle.profile_digest
     assert manifest["profile"]["options"]["ocr_provider"] == "local"
+    assert manifest["ocr_usage"] == {"provider": "local"}
     assert manifest["artifacts"]["markdown"] == "document.md"
     assert manifest["artifacts"]["html"] == "document.html"
     assert manifest["artifacts"]["html_sha256"] == artifacts_module.sha256_file(
@@ -138,6 +141,47 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert manifest["quality_signals"] == {
         "merged_multipage_tables": [],
         "possible_cross_page_table_pairs": []
+    }
+
+
+def test_manifest_records_naver_api_and_cache_usage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    usage = NaverOcrUsage(
+        image_requests=4,
+        api_calls=4,
+        cache_hits=1,
+        cache_misses=3,
+        retry_attempts=1,
+    )
+
+    class SuccessfulNaverEngine:
+        def __init__(self, profile: Any):
+            assert profile.id == NAVER_PROFILE_ID
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            return FakeEngineResult(ocr_usage=usage)
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", SuccessfulNaverEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+
+    bundle = parse_document(
+        source,
+        tmp_path / "outputs",
+        "naver",
+        confirm_external_transfer=True,
+    )
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["ocr_usage"] == {
+        "provider": "naver",
+        "image_requests": 4,
+        "api_calls": 4,
+        "cache_hits": 1,
+        "cache_misses": 3,
+        "retry_attempts": 1,
     }
 
 

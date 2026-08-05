@@ -13,6 +13,7 @@ from docling_team_parser.ocr.config import validate_naver_invoke_url
 from docling_team_parser.ocr.naver_plugin import (
     NaverOcrModel,
     NaverOcrOptions,
+    naver_ocr_usage_session,
     ocr_engines,
 )
 from PIL import Image
@@ -52,6 +53,7 @@ def _make_model(
     *,
     max_attempts: int = 3,
     enable_table_detection: bool = False,
+    usage_session_id: str | None = None,
 ) -> tuple[NaverOcrModel, httpx.Client]:
     client = httpx.Client(transport=handler)
     monkeypatch.setattr(naver_plugin.httpx, "Client", lambda **_: client)
@@ -67,6 +69,7 @@ def _make_model(
             timeout_seconds=5.0,
             max_attempts=max_attempts,
             enable_table_detection=enable_table_detection,
+            usage_session_id=usage_session_id,
         ),
         accelerator_options=AcceleratorOptions(),
     )
@@ -85,6 +88,9 @@ def test_plugin_contract_and_options_do_not_hold_credentials() -> None:
     assert NaverOcrOptions(scale=1.5).scale == 1.5
     assert "secret" not in options.model_dump()
     assert "invoke_url" not in options.model_dump()
+    assert "usage_session_id" not in NaverOcrOptions(
+        usage_session_id="internal-session"
+    ).model_dump()
 
 
 def test_disabled_model_does_not_require_remote_credentials(
@@ -251,6 +257,43 @@ def test_identical_image_requests_reuse_successful_response(
 
     assert first == second
     assert seen == 1
+
+
+def test_usage_session_counts_api_calls_cache_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statuses = iter((500, 200))
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        status = next(statuses)
+        if status == 200:
+            return httpx.Response(status, json=_success_payload())
+        return httpx.Response(status, text="temporary")
+
+    with naver_ocr_usage_session() as usage_session:
+        model, client = _make_model(
+            monkeypatch,
+            httpx.MockTransport(handler),
+            max_attempts=2,
+            usage_session_id=usage_session.session_id,
+        )
+        image = Image.new("RGB", (32, 32), "white")
+        try:
+            model._request_ocr(image)
+            model._request_ocr(image)
+        finally:
+            image.close()
+            model.close()
+            client.close()
+        usage = usage_session.snapshot()
+
+    assert usage.to_dict() == {
+        "image_requests": 2,
+        "api_calls": 2,
+        "cache_hits": 1,
+        "cache_misses": 1,
+        "retry_attempts": 1,
+    }
 
 
 def test_retries_429_and_5xx_until_success(monkeypatch: pytest.MonkeyPatch) -> None:

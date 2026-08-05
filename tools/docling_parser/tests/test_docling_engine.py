@@ -22,11 +22,17 @@ def test_pdf_and_office_image_inputs_use_distinct_ocr_scales() -> None:
     naver_engine = DoclingEngine(get_profile(NAVER_PROFILE_ID))
     naver_pdf = naver_engine._pdf_pipeline_options("pdf_aware_layout_regions")
     naver_office = naver_engine._pdf_pipeline_options("full_page", image_input=True)
+    naver_engine._naver_usage_session_id = "document-session"
+    naver_with_usage = naver_engine._pdf_pipeline_options(
+        "pdf_aware_layout_regions"
+    )
 
     assert local_pdf.ocr_options.scale == 3.0
     assert naver_pdf.ocr_options.scale == 2.1
     assert local_office.ocr_options.scale == 1.0
     assert naver_office.ocr_options.scale == 1.0
+    assert naver_with_usage.ocr_options.usage_session_id == "document-session"
+    assert "usage_session_id" not in naver_with_usage.ocr_options.model_dump()
     assert local_pdf.layout_options.model_spec.revision == (
         "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8"
     )

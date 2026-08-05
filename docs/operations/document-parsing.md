@@ -62,7 +62,7 @@ data/
 | `document.md` | 사람이 읽고 검수하는 파생 결과다. 직접 보정해 기준 데이터로 만들지 않는다. |
 | `document.html` | 표의 행·열 병합을 표현하고 이미지를 파일 안에 포함한 사람 검수용 파생 결과다. 고신뢰 페이지 간 연속 표는 하나의 표로 표현한다. |
 | `assets/` | JSON과 Markdown이 참조하는 이미지다. bundle 밖으로 옮기거나 이름을 바꾸지 않는다. |
-| `manifest.json` | 원본, 프로필, 런타임, 품질 신호와 각 산출물의 SHA-256을 기록한다. 직접 편집하지 않는다. |
+| `manifest.json` | 원본, 프로필, 런타임, OCR 사용량, 품질 신호와 각 산출물의 SHA-256을 기록한다. 직접 편집하지 않는다. |
 | `data/ocr/` | 현재 사용하지 않는 진단용 중간물 예약 경로다. |
 | `data/indexes/` | 후속 retrieval 단계의 재생성 가능한 결과다. 현재 범위 밖이다. |
 
@@ -174,6 +174,12 @@ uv run --frozen --project "<parser-project>" --env-file "<repo-root>/.env.parser
 파일별로 실행하되 첫 실패에서 중단한다. NAVER 호출이 최종 실패하면 해당 문서 전체를
 실패 처리하며 로컬 OCR로 자동 대체하지 않는다.
 
+성공 bundle의 manifest schema 7부터 `ocr_usage`에 `image_requests`, `api_calls`,
+`cache_hits`, `cache_misses`, `retry_attempts`를 기록한다. `api_calls`는 재시도를 포함한
+실제 HTTP POST 횟수이고 `image_requests`는 캐시 조회까지 도달한 논리 이미지 요청
+수다. 성공한 응답만 같은 프로세스의 동일 문서 변환 중 SHA-256 기준으로 재사용한다.
+호출 URL, 비밀키, 요청 ID와 이미지 해시는 manifest에 기록하지 않는다.
+
 ## 충돌, 실패와 프로필 변경
 
 - 출력 폴더 이름은 원본 stem, 원본 SHA-256 앞 12자리와 프로필 ID로 정한다.
@@ -199,7 +205,8 @@ uv run --frozen --project "<parser-project>" --env-file "<repo-root>/.env.parser
 
 검수 순서는 다음과 같다.
 
-1. `manifest.json`의 원본 SHA-256, 프로필 ID/digest와 경고를 확인한다.
+1. `manifest.json`의 원본 SHA-256, 프로필 ID/digest, 경고와 NAVER 사용 시
+   `ocr_usage`의 실제 API 호출·캐시·재시도 횟수를 확인한다.
 2. 페이지·슬라이드·시트의 제목과 읽기 순서를 확인한다.
 3. 표의 행·열, 단위, 소수점, 음수 부호를 원본과 대조한다.
 4. 세율, 한도, 날짜, 연령 조건과 각주·예외 문구를 대조한다.

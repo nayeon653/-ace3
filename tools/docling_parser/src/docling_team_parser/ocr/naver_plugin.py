@@ -9,8 +9,9 @@ import os
 import threading
 import time
 import uuid
-from collections.abc import Iterable
-from contextlib import suppress
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager, suppress
+from dataclasses import asdict, dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -33,6 +34,80 @@ from docling_team_parser.ocr.config import validate_naver_invoke_url
 
 _RETRY_BACKOFF_SECONDS = 0.25
 _SUPPORTED_REQUEST_LANGUAGES = frozenset({"ko", "ja", "zh-TW"})
+_USAGE_SESSIONS: dict[str, NaverOcrUsageSession] = {}
+_USAGE_SESSIONS_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True, slots=True)
+class NaverOcrUsage:
+    """한 문서 변환에서 발생한 NAVER OCR 사용량."""
+
+    image_requests: int
+    api_calls: int
+    cache_hits: int
+    cache_misses: int
+    retry_attempts: int
+
+    def to_dict(self) -> dict[str, int]:
+        return asdict(self)
+
+
+class NaverOcrUsageSession:
+    """여러 Docling OCR 모델의 요청 통계를 문서 단위로 합산한다."""
+
+    def __init__(self) -> None:
+        self.session_id = uuid.uuid4().hex
+        self._lock = threading.Lock()
+        self._image_requests = 0
+        self._api_calls = 0
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._retry_attempts = 0
+
+    def record_image_request(self, *, cache_hit: bool) -> None:
+        with self._lock:
+            self._image_requests += 1
+            if cache_hit:
+                self._cache_hits += 1
+            else:
+                self._cache_misses += 1
+
+    def record_api_call(self, *, retry: bool) -> None:
+        with self._lock:
+            self._api_calls += 1
+            if retry:
+                self._retry_attempts += 1
+
+    def snapshot(self) -> NaverOcrUsage:
+        with self._lock:
+            return NaverOcrUsage(
+                image_requests=self._image_requests,
+                api_calls=self._api_calls,
+                cache_hits=self._cache_hits,
+                cache_misses=self._cache_misses,
+                retry_attempts=self._retry_attempts,
+            )
+
+
+@contextmanager
+def naver_ocr_usage_session() -> Iterator[NaverOcrUsageSession]:
+    """현재 문서 변환에만 유효한 NAVER OCR 사용량 세션을 연다."""
+
+    session = NaverOcrUsageSession()
+    with _USAGE_SESSIONS_LOCK:
+        _USAGE_SESSIONS[session.session_id] = session
+    try:
+        yield session
+    finally:
+        with _USAGE_SESSIONS_LOCK:
+            _USAGE_SESSIONS.pop(session.session_id, None)
+
+
+def _usage_session_for(session_id: str | None) -> NaverOcrUsageSession | None:
+    if session_id is None:
+        return None
+    with _USAGE_SESSIONS_LOCK:
+        return _USAGE_SESSIONS.get(session_id)
 
 
 class NaverOcrOptions(OcrOptions):
@@ -50,6 +125,7 @@ class NaverOcrOptions(OcrOptions):
     enable_table_detection: bool = False
     max_image_edge: int = Field(default=7_900, ge=1, le=7_999)
     max_image_bytes: int = Field(default=49_000_000, ge=1, le=50_000_000)
+    usage_session_id: str | None = Field(default=None, exclude=True, repr=False)
 
 
 class NaverOcrModel(BaseOcrModel):
@@ -75,6 +151,7 @@ class NaverOcrModel(BaseOcrModel):
         self._fatal_error_message: str | None = None
         self._request_lock = threading.Lock()
         self._response_cache: dict[str, dict[str, Any]] = {}
+        self._usage_session = _usage_session_for(self.options.usage_session_id)
 
         if self.enabled:
             invoke_url = os.environ.get("NAVER_OCR_INVOKE_URL", "")
@@ -179,7 +256,11 @@ class NaverOcrModel(BaseOcrModel):
         image_hash = hashlib.sha256(image_bytes).hexdigest()
         cached = self._response_cache.get(image_hash)
         if cached is not None:
+            if self._usage_session is not None:
+                self._usage_session.record_image_request(cache_hit=True)
             return cached
+        if self._usage_session is not None:
+            self._usage_session.record_image_request(cache_hit=False)
 
         message: dict[str, Any] = {
             "version": "V2",
@@ -202,6 +283,8 @@ class NaverOcrModel(BaseOcrModel):
 
         last_transport_error: str | None = None
         for attempt in range(1, self.options.max_attempts + 1):
+            if self._usage_session is not None:
+                self._usage_session.record_api_call(retry=attempt > 1)
             try:
                 response = self._client.post(
                     self._invoke_url,
@@ -379,4 +462,11 @@ def ocr_engines() -> dict[str, list[type[NaverOcrModel]]]:
     return {"ocr_engines": [NaverOcrModel]}
 
 
-__all__ = ["NaverOcrModel", "NaverOcrOptions", "ocr_engines"]
+__all__ = [
+    "NaverOcrModel",
+    "NaverOcrOptions",
+    "NaverOcrUsage",
+    "NaverOcrUsageSession",
+    "naver_ocr_usage_session",
+    "ocr_engines",
+]
