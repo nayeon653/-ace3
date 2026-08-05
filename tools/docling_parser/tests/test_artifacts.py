@@ -26,6 +26,24 @@ class FakeDocument:
         (asset_dir / "picture.png").write_bytes(b"png")
         filename.write_text("# Parsed\r\n\r\n![image](assets\\picture.png)", encoding="utf-8")
 
+    def save_as_html(
+        self,
+        filename: Path,
+        *,
+        image_mode: Any,
+        html_lang: str,
+        split_page_view: bool,
+        **_kwargs: Any,
+    ) -> None:
+        assert image_mode.value == "embedded"
+        assert html_lang == "ko"
+        assert split_page_view is False
+        filename.write_text(
+            '<!doctype html>\r\n<html><head></head><img '
+            'src="data:image/png;base64,cG5n"></html>',
+            encoding="utf-8",
+        )
+
     def save_as_json(
         self,
         filename: Path,
@@ -85,12 +103,19 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert markdown.endswith("\n")
     assert "\r" not in markdown
     assert "assets/picture.png" in markdown
+    html = bundle.html_path.read_text(encoding="utf-8")
+    assert html.endswith("\n")
+    assert "\r" not in html
+    assert '<html lang="ko">' in html
+    assert '<style id="ace3-document-review">' in html
+    assert "max-width: 1400px" in html
+    assert "data:image/png;base64,cG5n" in html
     docling_json = json.loads(bundle.docling_json_path.read_text(encoding="utf-8"))
     assert docling_json["image"]["uri"] == "assets/picture.png"
     assert docling_json["text"] == "assets\\literal"
     assert (bundle.assets_dir / "picture.png").read_bytes() == b"png"
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 4
+    assert manifest["schema_version"] == 5
     assert manifest["status"] == "success"
     assert manifest["bundle_id"] == bundle.bundle_id
     assert manifest["bundle_id"] != bundle.output_dir.name
@@ -100,6 +125,11 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert manifest["profile"]["digest"] == bundle.profile_digest
     assert manifest["profile"]["options"]["ocr_provider"] == "local"
     assert manifest["artifacts"]["markdown"] == "document.md"
+    assert manifest["artifacts"]["html"] == "document.html"
+    assert manifest["artifacts"]["html_sha256"] == artifacts_module.sha256_file(
+        bundle.html_path
+    )
+    assert bundle.to_dict()["html_path"] == str(bundle.html_path)
     assert manifest["quality_signals"] == {
         "possible_cross_page_table_pairs": []
     }
@@ -183,6 +213,34 @@ def test_parse_failure_leaves_no_partial_bundle(
             raise RuntimeError("synthetic failure")
 
     monkeypatch.setattr(artifacts_module, "DoclingEngine", FailingEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "outputs"
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(source, output_dir, "local")
+
+    assert caught.value.code == "PARSE_FAILED"
+    assert not list(output_dir.glob("sample--*"))
+    assert not list(output_dir.glob(".docling-parser-*"))
+
+
+def test_html_export_failure_leaves_no_partial_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingHtmlDocument(FakeDocument):
+        def save_as_html(self, _filename: Path, **_kwargs: Any) -> None:
+            raise RuntimeError("synthetic HTML failure")
+
+    class FailingHtmlEngine:
+        def __init__(self, _profile: Any):
+            pass
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            return FakeEngineResult(document=FailingHtmlDocument())
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", FailingHtmlEngine)
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"source")
     output_dir = tmp_path / "outputs"

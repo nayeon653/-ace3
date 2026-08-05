@@ -19,6 +19,7 @@ from .docling_engine import DoclingEngine
 from .errors import NaverOcrError, ParserError
 from .io_utils import (
     normalize_docling_json_file,
+    normalize_html_file,
     normalize_markdown_file,
     safe_stem,
     sha256_directory,
@@ -28,6 +29,12 @@ from .io_utils import (
 from .profiles import OcrProvider, profile_for_provider
 
 SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx", ".pptx", ".xlsx"})
+_HTML_LANGUAGE = "ko"
+_HTML_REVIEW_STYLE = """<style id="ace3-document-review">
+body {
+    max-width: 1400px;
+}
+</style>"""
 _RUNTIME_PACKAGES = (
     "docling",
     "docling-core",
@@ -64,6 +71,7 @@ class ArtifactBundle:
     output_dir: Path
     manifest_path: Path
     markdown_path: Path
+    html_path: Path
     docling_json_path: Path
     assets_dir: Path
     source_sha256: str
@@ -77,6 +85,7 @@ class ArtifactBundle:
             "output_dir",
             "manifest_path",
             "markdown_path",
+            "html_path",
             "docling_json_path",
             "assets_dir",
         ):
@@ -175,6 +184,7 @@ def parse_document(
 
         assets_dir = stage / "assets"
         markdown_path = stage / "document.md"
+        html_path = stage / "document.html"
         docling_json_path = stage / "document.docling.json"
         assets_dir.mkdir()
 
@@ -186,6 +196,17 @@ def parse_document(
             compact_tables=False,
         )
         normalize_markdown_file(markdown_path)
+        result.document.save_as_html(
+            html_path,
+            image_mode=ImageRefMode.EMBEDDED,
+            html_lang=_HTML_LANGUAGE,
+            split_page_view=False,
+        )
+        normalize_html_file(
+            html_path,
+            language=_HTML_LANGUAGE,
+            head_append=_HTML_REVIEW_STYLE,
+        )
         result.document.save_as_json(
             docling_json_path,
             artifacts_dir=Path("assets"),
@@ -195,7 +216,7 @@ def parse_document(
         normalize_docling_json_file(docling_json_path)
 
         manifest = {
-            "schema_version": 4,
+            "schema_version": 5,
             "status": "success",
             "bundle_id": bundle_id,
             "source": {
@@ -219,6 +240,8 @@ def parse_document(
             "artifacts": {
                 "markdown": "document.md",
                 "markdown_sha256": sha256_file(markdown_path),
+                "html": "document.html",
+                "html_sha256": sha256_file(html_path),
                 "docling_json": "document.docling.json",
                 "docling_json_sha256": sha256_file(docling_json_path),
                 "assets": "assets",
@@ -268,6 +291,7 @@ def parse_document(
             output_dir=target,
             manifest_path=target / "manifest.json",
             markdown_path=target / "document.md",
+            html_path=target / "document.html",
             docling_json_path=target / "document.docling.json",
             assets_dir=target / "assets",
             source_sha256=source_sha256,

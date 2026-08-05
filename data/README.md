@@ -14,7 +14,8 @@ data/
 - `raw/`의 파일은 제공 문서 원본이자 답변의 최종 근거이므로 수정하거나 덮어쓰지
   않습니다.
 - `processed/docling/`의 문서별 디렉터리는 `document.docling.json`, `document.md`,
-  `manifest.json`, `assets/`를 한 bundle로 보존합니다. 일부만 이동하거나 직접
+  `document.html`, `manifest.json`, `assets/`를 한 bundle로 보존합니다. 일부만
+  이동하거나 직접
   편집하지 않습니다.
 - `ocr/`은 현재 Docling 파서의 기준 결과 저장소가 아닙니다.
 - `indexes/`는 파싱 검수 후 retrieval 단계에서 생성합니다.

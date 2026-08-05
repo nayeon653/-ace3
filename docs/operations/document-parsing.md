@@ -46,6 +46,7 @@ data/
 │           └── <safe-stem>--<source-sha12>--<profile-id>/
 │               ├── document.docling.json
 │               ├── document.md
+│               ├── document.html
 │               ├── manifest.json
 │               └── assets/
 ├── ocr/
@@ -57,12 +58,13 @@ data/
 | `data/raw/` | 원본이자 답변의 최종 근거다. 수정하거나 덮어쓰지 않는다. |
 | `document.docling.json` | 문서 구조와 provenance를 보존하는 기계 기준 결과다. 직접 편집하지 않는다. |
 | `document.md` | 사람이 읽고 검수하는 파생 결과다. 직접 보정해 기준 데이터로 만들지 않는다. |
+| `document.html` | 표의 행·열 병합을 표현하고 이미지를 파일 안에 포함한 사람 검수용 파생 결과다. 페이지 간 표는 자동으로 합치지 않는다. |
 | `assets/` | JSON과 Markdown이 참조하는 이미지다. bundle 밖으로 옮기거나 이름을 바꾸지 않는다. |
 | `manifest.json` | 원본, 프로필, 런타임, 품질 신호와 각 산출물의 SHA-256을 기록한다. 직접 편집하지 않는다. |
 | `data/ocr/` | 현재 사용하지 않는 진단용 중간물 예약 경로다. |
 | `data/indexes/` | 후속 retrieval 단계의 재생성 가능한 결과다. 현재 범위 밖이다. |
 
-네 산출물은 하나의 원자적 bundle이다. 일부만 복사하거나 공유하지 않는다. 실제
+다섯 산출물은 하나의 원자적 bundle이다. 일부만 복사하거나 공유하지 않는다. 실제
 원본과 생성 결과는 Git에 커밋하지 않는다.
 
 ## 공유 데이터 저장 정책
@@ -188,7 +190,7 @@ uv run --frozen --project "<parser-project>" --env-file "<repo-root>/.env.parser
 ## 결과 판정과 사람 검수
 
 스크립트의 표준 출력 JSON과 종료 코드를 함께 확인한다. 종료 코드 `0`,
-`status=success`, 완성된 manifest와 네 산출물 종류가 모두 있을 때 기술적으로
+`status=success`, 완성된 manifest와 다섯 산출물 종류가 모두 있을 때 기술적으로
 성공이다. 파서 실행 오류는 종료 코드 `1`과 표준 오류 JSON으로, 잘못된
 명령 인자는 `argparse` 안내와 종료 코드 `2`로 반환된다. 경고는 실패는 아니지만
 검수 대상이다. 기술적 성공은 사람 검수 완료를 뜻하지 않는다.
@@ -201,6 +203,7 @@ uv run --frozen --project "<parser-project>" --env-file "<repo-root>/.env.parser
 4. 세율, 한도, 날짜, 연령 조건과 각주·예외 문구를 대조한다.
 5. 차트 범례와 이미지 안 문자가 Markdown에 반영됐는지 확인한다.
 6. Markdown 이미지 링크가 같은 bundle의 `assets/`를 가리키는지 확인한다.
+7. HTML에서 표의 병합 셀과 내장 이미지가 깨지지 않고 표시되는지 확인한다.
 
 검수 메모 때문에 생성 bundle을 수정하지 않는다. 사람이 확인하기 전에는 후보
 결과로 취급하고, 채택 상태는 bundle 밖의 권위 있는 catalog에 남긴다. 채택한

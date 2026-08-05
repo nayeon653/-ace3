@@ -75,6 +75,38 @@ def normalize_markdown_file(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def normalize_html_file(
+    path: Path,
+    *,
+    language: str,
+    head_append: str = "",
+) -> None:
+    """HTML 줄바꿈과 누락된 문서 언어를 운영체제와 무관하게 고정한다."""
+
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(
+        r"<html(?=>)",
+        f'<html lang="{language}"',
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if head_append:
+        closing_head = re.search(r"</head>", text, flags=re.IGNORECASE)
+        if closing_head is None:
+            raise ValueError("HTML head closing tag is missing")
+        text = (
+            text[: closing_head.start()]
+            + head_append.rstrip()
+            + "\n"
+            + text[closing_head.start() :]
+        )
+    if text and not text.endswith("\n"):
+        text += "\n"
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def normalize_docling_json_file(path: Path) -> None:
     """Windows에서 생성된 상대 이미지 URI만 POSIX 형식으로 바꾼다."""
 
