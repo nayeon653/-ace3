@@ -229,6 +229,30 @@ def test_general_v2_request_and_response_coordinate_conversion(
     )
 
 
+def test_identical_image_requests_reuse_successful_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal seen
+        seen += 1
+        return httpx.Response(200, json=_success_payload())
+
+    model, client = _make_model(monkeypatch, httpx.MockTransport(handler))
+    image = Image.new("RGB", (32, 32), "white")
+    try:
+        first = model._request_ocr(image)
+        second = model._request_ocr(image)
+    finally:
+        image.close()
+        model.close()
+        client.close()
+
+    assert first == second
+    assert seen == 1
+
+
 def test_retries_429_and_5xx_until_success(monkeypatch: pytest.MonkeyPatch) -> None:
     statuses = iter((500, 429, 200))
     seen = 0

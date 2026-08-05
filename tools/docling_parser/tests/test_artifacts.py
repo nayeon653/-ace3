@@ -8,6 +8,7 @@ from typing import Any
 import docling_team_parser.artifacts as artifacts_module
 import pytest
 from docling_team_parser.artifacts import parse_document
+from docling_team_parser.document_quality import DocumentQualityReport
 from docling_team_parser.errors import NaverOcrError, ParserError
 from docling_team_parser.profiles import LOCAL_PROFILE_ID, NAVER_PROFILE_ID
 
@@ -44,7 +45,19 @@ class FakeEngineResult:
     document: Any = field(default_factory=FakeDocument)
     pages: int = 2
     pictures_found: int = 1
+    pictures_retained: int = 1
     office_pictures_ocrd: int = 1
+    quality: DocumentQualityReport = field(
+        default_factory=lambda: DocumentQualityReport(
+            repeated_decorative_pictures_removed=0,
+            repeated_decorative_picture_pages=(),
+            embedded_pictures_requiring_visual_review=0,
+            visual_review_picture_pages=(),
+            picture_ocr_text_nodes_isolated=0,
+            repeated_text_nodes_normalized=0,
+            possible_cross_page_table_pairs=(),
+        )
+    )
     warnings: list[str] = field(default_factory=list)
     conversion_version: dict[str, Any] = field(default_factory=lambda: {"docling_version": "test"})
 
@@ -77,7 +90,7 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert docling_json["text"] == "assets\\literal"
     assert (bundle.assets_dir / "picture.png").read_bytes() == b"png"
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 3
+    assert manifest["schema_version"] == 4
     assert manifest["status"] == "success"
     assert manifest["bundle_id"] == bundle.bundle_id
     assert manifest["bundle_id"] != bundle.output_dir.name
@@ -87,6 +100,9 @@ def test_parse_document_publishes_complete_portable_bundle(
     assert manifest["profile"]["digest"] == bundle.profile_digest
     assert manifest["profile"]["options"]["ocr_provider"] == "local"
     assert manifest["artifacts"]["markdown"] == "document.md"
+    assert manifest["quality_signals"] == {
+        "possible_cross_page_table_pairs": []
+    }
 
 
 def test_parse_document_refuses_to_overwrite_existing_bundle(

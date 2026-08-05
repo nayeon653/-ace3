@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from .document_quality import DocumentQualityReport, improve_document, mark_items_invisible
 from .errors import NaverOcrError, ParserError
 from .io_utils import sha256_bytes
 from .profiles import OcrProvider, ParserProfile
@@ -17,7 +18,9 @@ class EngineResult:
     document: Any
     pages: int
     pictures_found: int
+    pictures_retained: int
     office_pictures_ocrd: int
+    quality: DocumentQualityReport
     warnings: list[str]
     conversion_version: dict[str, Any]
 
@@ -75,12 +78,38 @@ class DoclingEngine:
             )
 
         document = conversion.document
-        warnings: list[str] = []
         picture_count = len(document.pictures)
         office_picture_count = 0
 
-        if source.suffix.lower() in {".docx", ".pptx", ".xlsx"} and picture_count:
-            office_picture_count, picture_warnings = self._ocr_office_pictures(document)
+        # Office 그림 OCR 전에 반복 장식을 먼저 제거해야 불필요한 외부 호출도 막을 수
+        # 있다. PDF는 이 시점에 OCR까지 끝났지만 같은 후처리 규칙을 적용한다.
+        quality = improve_document(
+            document,
+            self.profile,
+            detect_cross_page_tables=source.suffix.lower() == ".pdf",
+        )
+        if source.suffix.lower() in {".docx", ".pptx", ".xlsx"} and document.pictures:
+            (
+                office_picture_count,
+                office_picture_text_nodes,
+                picture_warnings,
+            ) = self._ocr_office_pictures(document)
+            quality = replace(
+                quality,
+                embedded_pictures_requiring_visual_review=max(
+                    quality.embedded_pictures_requiring_visual_review,
+                    len(document.pictures),
+                ),
+                picture_ocr_text_nodes_isolated=(
+                    quality.picture_ocr_text_nodes_isolated
+                    + office_picture_text_nodes
+                ),
+            )
+        else:
+            picture_warnings = []
+
+        warnings = list(quality.warnings)
+        if picture_warnings:
             warnings.extend(picture_warnings)
 
         version = conversion.version.model_dump(mode="json")
@@ -88,7 +117,9 @@ class DoclingEngine:
             document=document,
             pages=len(document.pages),
             pictures_found=picture_count,
+            pictures_retained=len(document.pictures),
             office_pictures_ocrd=office_picture_count,
+            quality=quality,
             warnings=warnings,
             conversion_version=version,
         )
@@ -161,7 +192,7 @@ class DoclingEngine:
 
         return options
 
-    def _ocr_office_pictures(self, document: Any) -> tuple[int, list[str]]:
+    def _ocr_office_pictures(self, document: Any) -> tuple[int, int, list[str]]:
         from docling.datamodel.base_models import (
             ConversionStatus,
             DocumentStream,
@@ -184,6 +215,7 @@ class DoclingEngine:
         warnings: list[str] = []
         parsed_by_hash: dict[str, Any] = {}
         inserted_count = 0
+        isolated_text_nodes = 0
 
         for index, picture in enumerate(list(document.pictures), start=1):
             if not isinstance(picture, PictureItem):
@@ -238,15 +270,18 @@ class DoclingEngine:
             roots = self._ocr_content_roots(image_document)
             if not roots:
                 continue
-            document.insert_node_items(
-                sibling=picture,
-                node_items=roots,
-                doc=image_document,
-                after=True,
+            # Office 그림 OCR도 PDF 그림과 동일하게 근거 JSON에는 보존하되 사람 검수용
+            # Markdown 본문에는 토큰 나열로 펼치지 않는다.
+            isolated_text_nodes += mark_items_invisible(roots, image_document)
+            self._attach_picture_ocr_roots(
+                document,
+                picture,
+                image_document,
+                roots,
             )
             inserted_count += 1
 
-        return inserted_count, warnings
+        return inserted_count, isolated_text_nodes, warnings
 
     @staticmethod
     def _ocr_content_roots(image_document: Any) -> list[Any]:
@@ -290,6 +325,36 @@ class DoclingEngine:
                 return buffer.getvalue()
         finally:
             rgb_image.close()
+
+    @staticmethod
+    def _attach_picture_ocr_roots(
+        document: Any,
+        picture: Any,
+        image_document: Any,
+        roots: list[Any],
+    ) -> None:
+        """복사한 OCR 트리를 인접 본문이 아니라 원본 그림 아래에 둔다."""
+
+        parent = picture.parent.resolve(document) if picture.parent else document.body
+        sibling_index = next(
+            index
+            for index, ref in enumerate(parent.children)
+            if ref.cref == picture.self_ref
+        )
+        document.insert_node_items(
+            sibling=picture,
+            node_items=roots,
+            doc=image_document,
+            after=True,
+        )
+        first = sibling_index + 1
+        inserted_refs = parent.children[first : first + len(roots)]
+        del parent.children[first : first + len(roots)]
+
+        picture_ref = picture.get_ref()
+        for ref in inserted_refs:
+            ref.resolve(document).parent = picture_ref
+        picture.children.extend(inserted_refs)
 
     @staticmethod
     def _remove_image_page_provenance(image_document: Any) -> None:

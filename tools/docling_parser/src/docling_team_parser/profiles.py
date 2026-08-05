@@ -23,7 +23,7 @@ class OcrProvider(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ParserProfile:
-    # 실행기가 직접 읽지 않는 필드도 v1 프로필 digest 호환을 위해 유지한다.
+    # 실행기가 직접 읽지 않는 필드도 프로필 digest 재현성을 위해 유지한다.
     id: str
     description: str
     ocr_provider: OcrProvider
@@ -43,6 +43,15 @@ class ParserProfile:
     generate_picture_images: bool = True
     export_images: bool = True
     traverse_pictures: bool = True
+    suppress_repeated_decorative_pictures: bool = True
+    decorative_picture_max_page_area_ratio: float = 0.02
+    decorative_picture_margin_ratio: float = 0.12
+    decorative_picture_min_page_repeat_ratio: float = 0.2
+    decorative_picture_min_pages: int = 3
+    isolate_embedded_picture_ocr: bool = True
+    full_page_picture_min_page_area_ratio: float = 0.65
+    normalize_repeated_text: bool = True
+    warn_possible_cross_page_tables: bool = True
     local_confidence_threshold: float | None = None
     local_image_scale: float | None = None
     naver_api_version: Literal["V2"] | None = None

@@ -195,7 +195,7 @@ def parse_document(
         normalize_docling_json_file(docling_json_path)
 
         manifest = {
-            "schema_version": 3,
+            "schema_version": 4,
             "status": "success",
             "bundle_id": bundle_id,
             "source": {
@@ -227,7 +227,29 @@ def parse_document(
             "stats": {
                 "pages": result.pages,
                 "pictures_found": result.pictures_found,
+                "pictures_retained": result.pictures_retained,
                 "office_pictures_ocrd": result.office_pictures_ocrd,
+                "repeated_decorative_pictures_removed": (
+                    result.quality.repeated_decorative_pictures_removed
+                ),
+                "embedded_pictures_requiring_visual_review": (
+                    result.quality.embedded_pictures_requiring_visual_review
+                ),
+                "picture_ocr_text_nodes_isolated": (
+                    result.quality.picture_ocr_text_nodes_isolated
+                ),
+                "repeated_text_nodes_normalized": (
+                    result.quality.repeated_text_nodes_normalized
+                ),
+                "possible_cross_page_table_continuations": len(
+                    result.quality.possible_cross_page_table_pairs
+                ),
+            },
+            "quality_signals": {
+                "possible_cross_page_table_pairs": [
+                    [first, second]
+                    for first, second in result.quality.possible_cross_page_table_pairs
+                ],
             },
             "warnings": result.warnings,
             "created_at": datetime.now(UTC).isoformat(),

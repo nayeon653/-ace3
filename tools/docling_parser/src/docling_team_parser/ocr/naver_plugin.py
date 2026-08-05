@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -73,6 +74,7 @@ class NaverOcrModel(BaseOcrModel):
         self._client: httpx.Client | None = None
         self._fatal_error_message: str | None = None
         self._request_lock = threading.Lock()
+        self._response_cache: dict[str, dict[str, Any]] = {}
 
         if self.enabled:
             invoke_url = os.environ.get("NAVER_OCR_INVOKE_URL", "")
@@ -174,6 +176,10 @@ class NaverOcrModel(BaseOcrModel):
             raise NaverOcrError(
                 "NAVER OCR image exceeds the configured request byte limit"
             )
+        image_hash = hashlib.sha256(image_bytes).hexdigest()
+        cached = self._response_cache.get(image_hash)
+        if cached is not None:
+            return cached
 
         message: dict[str, Any] = {
             "version": "V2",
@@ -221,6 +227,7 @@ class NaverOcrModel(BaseOcrModel):
                     raise NaverOcrError("NAVER OCR returned invalid JSON") from None
                 if not isinstance(payload, dict):
                     raise NaverOcrError("NAVER OCR returned an invalid response object")
+                self._response_cache[image_hash] = payload
                 return payload
 
             naver_error_code = self._bounded_error_code(response)

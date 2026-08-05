@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from types import SimpleNamespace
 
+from docling_core.types.doc import DocItemLabel, DoclingDocument
 from docling_team_parser.docling_engine import DoclingEngine
 from docling_team_parser.errors import NaverOcrError
 from docling_team_parser.profiles import (
@@ -43,6 +44,27 @@ def test_transparent_office_picture_is_flattened_onto_white() -> None:
         assert flattened.mode == "RGB"
         assert flattened.getpixel((0, 0)) == (255, 255, 255)
         assert flattened.getpixel((1, 0)) == (0, 0, 0)
+
+
+def test_office_picture_ocr_roots_are_attached_under_the_picture() -> None:
+    document = DoclingDocument(name="office-document")
+    picture = document.add_picture()
+    image_document = DoclingDocument(name="picture-ocr")
+    root = image_document.add_text(label=DocItemLabel.TEXT, text="그림 안 텍스트")
+
+    DoclingEngine._attach_picture_ocr_roots(
+        document,
+        picture,
+        image_document,
+        [root],
+    )
+
+    assert len(document.body.children) == 1
+    assert len(picture.children) == 1
+    inserted = picture.children[0].resolve(document)
+    assert inserted.text == "그림 안 텍스트"
+    assert inserted.parent is not None
+    assert inserted.parent.resolve(document) is picture
 
 
 def test_naver_exception_is_recognized_through_docling_wrapper() -> None:
