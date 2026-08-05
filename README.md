@@ -53,7 +53,7 @@ GET /answer → api(FastAPI) → agent(라우터/도구 오케스트레이션)
 
 원칙: **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도·세율 등 확정
 수치는 `pension_agent/rules/`의 결정론적 함수에서만 나오며, LLM은 의도 분류·
-근거 요약·조건 분기 설명만 담당한다. 자세한 원칙은 [`CLAUDE.md`](CLAUDE.md)
+근거 요약·조건 분기 설명만 담당한다. 자세한 원칙은 [`PROJECT_RULES.md`](PROJECT_RULES.md)
 참고.
 
 모듈 의존성은 HTTP 인터페이스에서 도메인 모듈 방향으로만 흐릅니다.
@@ -107,7 +107,8 @@ Docling 오프라인 파싱 스크립트는 제공됩니다. 제품 검색·API�
 
 ## 더 읽기
 
-- [`CLAUDE.md`](CLAUDE.md) — 절대 원칙, 컨벤션 요약, 모듈 의존성 방향
+- [`PROJECT_RULES.md`](PROJECT_RULES.md) — 절대 원칙, 컨벤션 요약, 모듈 의존성 방향
+- [`AGENTS.md`](AGENTS.md), [`CLAUDE.md`](CLAUDE.md) — 도구별 공통 정책 진입점
 - [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 브랜치·커밋·PR·리뷰·태그 규칙 전문
 - [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세

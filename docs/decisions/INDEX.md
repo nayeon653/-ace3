@@ -10,3 +10,4 @@
 | 2026-08-03 | architecture | accepted | [Docling 파서를 독립 오프라인 도구와 중앙 운영 정책으로 관리](20260803-docling-parser-operations.md) |
 | 2026-08-03 | architecture | accepted | [Docling 파서 실행 계층을 단일 Python 스크립트로 단순화](20260803-docling-parser-script-interface.md) |
 | 2026-08-03 | architecture | accepted | [모듈 의존성 방향을 단방향으로 제한](20260803-module-dependency-direction.md) |
+| 2026-08-05 | process | accepted | [공통 프로젝트 규칙을 도구 중립 파일로 분리](20260805-tool-neutral-project-rules.md) |
