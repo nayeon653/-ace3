@@ -1,0 +1,50 @@
+name: 버그
+description: 재현 가능한 오동작이나 품질 저하를 등록합니다.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        시크릿, API 키, 개인정보가 로그나 첨부 파일에 포함되지 않도록 확인해 주세요.
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 증상
+      description: 실제로 관찰한 문제를 설명해 주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 방법
+      description: 최소 재현 절차와 입력값을 순서대로 작성해 주세요.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 동작
+      description: 정상이라면 어떤 결과가 나와야 하는지 작성해 주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 로그와 증거
+      description: 민감정보를 제거한 오류 메시지, 응답 JSON, 화면 캡처 등을 첨부해 주세요.
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 실행 환경
+      description: 브랜치 또는 커밋, 실행 방법, OS 등 재현에 필요한 환경 정보를 작성해 주세요.

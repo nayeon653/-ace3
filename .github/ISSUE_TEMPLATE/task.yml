@@ -1,0 +1,55 @@
+name: 작업
+description: 기능, 개선, 문서화 등 계획된 작업을 등록합니다.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        작업의 목적과 완료 조건이 검증 가능하도록 작성해 주세요.
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: 작업 목적
+      description: 무엇을 왜 해야 하는지 설명해 주세요.
+      placeholder: 해결하려는 문제와 기대 결과를 작성합니다.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: work_type
+    attributes:
+      label: 작업 종류
+      description: 이슈 생성 후 같은 이름의 라벨을 적용합니다.
+      options:
+        - feature - 새로운 기능 또는 사용자 가치
+        - docs - 문서 작성과 수정
+        - chore - 저장소, CI, 개발환경 정비
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 작업 범위
+      description: 구현할 항목을 체크리스트로 나눠 주세요.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건
+      description: 리뷰어가 완료 여부를 판단할 수 있는 검증 기준을 작성해 주세요.
+      placeholder: 테스트, 문서, 동작 확인 등 구체적인 기준을 작성합니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 선행 작업과 의존성
+      description: 관련 이슈, 차단 요소 또는 먼저 결정할 사항이 있으면 작성해 주세요.
+      placeholder: "없음 또는 #이슈번호"
