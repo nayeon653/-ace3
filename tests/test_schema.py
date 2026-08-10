@@ -3,6 +3,7 @@
 서버가 아직 구현되지 않았으므로 skip 처리한다.
 pension_agent/api/ 구현 완료 후 TODO를 해소하고 실제 클라이언트 호출로 교체할 것.
 """
+
 import pytest
 
 REQUIRED_KEYS = {

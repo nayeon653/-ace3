@@ -27,7 +27,7 @@ chmod +x .githooks/*
 git config user.name "<이름 또는 GitHub id>"
 git config user.email "<GitHub에 등록된 메일>"
 
-# 3. 개발 환경 (uv 설치 필요: https://docs.astral.sh/uv/)
+# 3. 개발 환경 (Python 3.12, uv 필요: https://docs.astral.sh/uv/)
 uv sync --dev
 cp .env.example .env        # 값 채워넣기 (절대 커밋 금지)
 ```
@@ -75,12 +75,15 @@ ingest → retrieval
 
 ```bash
 make setup   # 런타임 + 개발 의존성 설치
-make check   # ruff + pytest
+make check   # Ruff 린트·포맷 + mypy 타입 검사 + pytest
 make build   # wheel + source distribution 빌드
 
 make setup-parser  # Docling 파서 전용 환경 설치
 make parser-test   # 파서 단위 테스트
 ```
+
+PR과 `main` 브랜치 push에는 Python 3.12 기반 Backend CI가 실행되며,
+`make check`와 패키지 빌드·설치 가능 여부를 검증합니다.
 
 Docling 오프라인 파싱 스크립트는 제공됩니다. 제품 검색·API·평가 실행 진입점은 아직
 구현하지 않았으며 각 기능을 구현하는 PR에서 함께 추가합니다.

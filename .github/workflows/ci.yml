@@ -1,18 +1,24 @@
-name: CI
+name: Backend CI
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv and Python
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           enable-cache: true
 
       - name: Install dependencies
@@ -20,6 +26,12 @@ jobs:
 
       - name: Lint (ruff)
         run: uv run --frozen ruff check .
+
+      - name: Check format (ruff)
+        run: uv run --frozen ruff format --check .
+
+      - name: Type check (mypy)
+        run: uv run --frozen mypy pension_agent
 
       - name: Test (pytest)
         run: uv run --frozen pytest -q

@@ -9,8 +9,10 @@ help: ## 사용 가능한 타깃 목록 출력
 setup: ## 런타임 + 개발 의존성 설치
 	$(UV) sync --dev
 
-check: ## 린트 + 테스트
+check: ## 린트 + 포맷 + 타입 + 테스트
 	$(UV) run ruff check .
+	$(UV) run ruff format --check .
+	$(UV) run mypy pension_agent
 	$(UV) run pytest -q --capture=sys
 
 build: ## wheel과 source distribution 빌드
