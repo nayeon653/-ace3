@@ -1,0 +1,409 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
+
+import docling_team_parser.artifacts as artifacts_module
+import pytest
+from docling_team_parser.artifacts import parse_document
+from docling_team_parser.document_quality import DocumentQualityReport
+from docling_team_parser.errors import NaverOcrError, ParserError
+from docling_team_parser.multipage_tables import (
+    MergedMultipageTable,
+    MergedTableSegment,
+)
+from docling_team_parser.ocr.naver_plugin import NaverOcrUsage
+from docling_team_parser.profiles import LOCAL_PROFILE_ID, NAVER_PROFILE_ID
+
+
+class FakeDocument:
+    def save_as_markdown(
+        self,
+        filename: Path,
+        *,
+        artifacts_dir: Path,
+        **_kwargs: Any,
+    ) -> None:
+        asset_dir = filename.parent / artifacts_dir
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        (asset_dir / "picture.png").write_bytes(b"png")
+        filename.write_text("# Parsed\r\n\r\n![image](assets\\picture.png)", encoding="utf-8")
+
+    def save_as_html(
+        self,
+        filename: Path,
+        *,
+        image_mode: Any,
+        html_lang: str,
+        split_page_view: bool,
+        **_kwargs: Any,
+    ) -> None:
+        assert image_mode.value == "embedded"
+        assert html_lang == "ko"
+        assert split_page_view is False
+        filename.write_text(
+            '<!doctype html>\r\n<html><head></head><img '
+            'src="data:image/png;base64,cG5n"></html>',
+            encoding="utf-8",
+        )
+
+    def save_as_json(
+        self,
+        filename: Path,
+        *,
+        artifacts_dir: Path,
+        **_kwargs: Any,
+    ) -> None:
+        assert artifacts_dir == Path("assets")
+        filename.write_text(
+            '{"image":{"uri":"assets\\\\picture.png"},"text":"assets\\\\literal"}',
+            encoding="utf-8",
+        )
+
+
+@dataclass
+class FakeEngineResult:
+    document: Any = field(default_factory=FakeDocument)
+    pages: int = 2
+    pictures_found: int = 1
+    pictures_retained: int = 1
+    office_pictures_ocrd: int = 1
+    quality: DocumentQualityReport = field(
+        default_factory=lambda: DocumentQualityReport(
+            repeated_decorative_pictures_removed=0,
+            repeated_decorative_picture_pages=(),
+            embedded_pictures_requiring_visual_review=0,
+            visual_review_picture_pages=(),
+            picture_ocr_text_nodes_isolated=0,
+            repeated_text_nodes_normalized=0,
+            merged_multipage_tables=(),
+            possible_cross_page_table_pairs=(),
+        )
+    )
+    warnings: list[str] = field(default_factory=list)
+    conversion_version: dict[str, Any] = field(default_factory=lambda: {"docling_version": "test"})
+    ocr_usage: NaverOcrUsage | None = None
+
+
+class SuccessfulEngine:
+    def __init__(self, _profile: Any):
+        pass
+
+    def convert(self, _source: Path) -> FakeEngineResult:
+        return FakeEngineResult()
+
+
+def test_parse_document_publishes_complete_portable_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", SuccessfulEngine)
+    source = tmp_path / "sample.docx"
+    source.write_bytes(b"source")
+
+    bundle = parse_document(source, tmp_path / "outputs", "local")
+
+    assert bundle.profile_id == LOCAL_PROFILE_ID
+    markdown = bundle.markdown_path.read_text(encoding="utf-8")
+    assert markdown.endswith("\n")
+    assert "\r" not in markdown
+    assert "assets/picture.png" in markdown
+    html = bundle.html_path.read_text(encoding="utf-8")
+    assert html.endswith("\n")
+    assert "\r" not in html
+    assert '<html lang="ko">' in html
+    assert '<style id="ace3-document-review">' in html
+    assert "max-width: 1400px" in html
+    assert "data:image/png;base64,cG5n" in html
+    docling_json = json.loads(bundle.docling_json_path.read_text(encoding="utf-8"))
+    assert docling_json["image"]["uri"] == "assets/picture.png"
+    assert docling_json["text"] == "assets\\literal"
+    assert (bundle.assets_dir / "picture.png").read_bytes() == b"png"
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 7
+    assert manifest["status"] == "success"
+    assert manifest["bundle_id"] == bundle.bundle_id
+    assert manifest["bundle_id"] != bundle.output_dir.name
+    assert manifest["source"]["filename"] == source.name
+    assert manifest["source"]["sha256"] == bundle.source_sha256
+    assert "path" not in manifest["source"]
+    assert manifest["profile"]["digest"] == bundle.profile_digest
+    assert manifest["profile"]["options"]["ocr_provider"] == "local"
+    assert manifest["ocr_usage"] == {"provider": "local"}
+    assert manifest["artifacts"]["markdown"] == "document.md"
+    assert manifest["artifacts"]["html"] == "document.html"
+    assert manifest["artifacts"]["html_sha256"] == artifacts_module.sha256_file(
+        bundle.html_path
+    )
+    assert bundle.to_dict()["html_path"] == str(bundle.html_path)
+    assert manifest["quality_signals"] == {
+        "merged_multipage_tables": [],
+        "possible_cross_page_table_pairs": []
+    }
+
+
+def test_manifest_records_naver_api_and_cache_usage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    usage = NaverOcrUsage(
+        image_requests=4,
+        api_calls=4,
+        cache_hits=1,
+        cache_misses=3,
+        retry_attempts=1,
+    )
+
+    class SuccessfulNaverEngine:
+        def __init__(self, profile: Any):
+            assert profile.id == NAVER_PROFILE_ID
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            return FakeEngineResult(ocr_usage=usage)
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", SuccessfulNaverEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+
+    bundle = parse_document(
+        source,
+        tmp_path / "outputs",
+        "naver",
+        confirm_external_transfer=True,
+    )
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["ocr_usage"] == {
+        "provider": "naver",
+        "image_requests": 4,
+        "api_calls": 4,
+        "cache_hits": 1,
+        "cache_misses": 3,
+        "retry_attempts": 1,
+    }
+
+
+def test_parse_document_refuses_to_overwrite_existing_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", SuccessfulEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "outputs"
+    parse_document(source, output_dir, "local")
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(source, output_dir, "local")
+
+    assert caught.value.code == "OUTPUT_EXISTS"
+
+
+def test_manifest_records_merged_multipage_table_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    merged = MergedMultipageTable(
+        table_ref="#/tables/3",
+        pages=(4, 5),
+        segments=(
+            MergedTableSegment(
+                source_table_ref="#/tables/3",
+                page_no=4,
+                source_rows=10,
+                output_row_start=0,
+                output_row_end=10,
+                repeated_header_rows_removed=0,
+                continuation_row_merged_into=None,
+            ),
+            MergedTableSegment(
+                source_table_ref="#/tables/4",
+                page_no=5,
+                source_rows=3,
+                output_row_start=10,
+                output_row_end=12,
+                repeated_header_rows_removed=0,
+                continuation_row_merged_into=9,
+            ),
+        ),
+    )
+
+    class MergedTableEngine:
+        def __init__(self, _profile: Any):
+            pass
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            result = FakeEngineResult()
+            return replace(
+                result,
+                quality=replace(
+                    result.quality,
+                    merged_multipage_tables=(merged,),
+                ),
+            )
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", MergedTableEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+
+    bundle = parse_document(source, tmp_path / "outputs", "local")
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["stats"]["multipage_tables_merged"] == 1
+    assert manifest["stats"]["multipage_table_segments_absorbed"] == 1
+    assert manifest["quality_signals"]["merged_multipage_tables"] == [
+        merged.to_dict()
+    ]
+
+
+def test_unexpandable_source_path_is_returned_as_parser_error(tmp_path: Path) -> None:
+    with pytest.raises(ParserError) as caught:
+        parse_document(
+            Path("~__ace3_missing_user__/sample.pdf"),
+            tmp_path / "outputs",
+            "local",
+        )
+
+    assert caught.value.code == "SOURCE_NOT_FOUND"
+
+
+def test_source_symlink_is_rejected(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"source")
+    link = tmp_path / "linked.pdf"
+    try:
+        link.symlink_to(source)
+    except OSError:
+        pytest.skip("symlink를 만들 권한이 없습니다.")
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(link, tmp_path / "outputs", "local")
+
+    assert caught.value.code == "SOURCE_PATH_REDIRECTED"
+
+
+def test_output_symlink_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", SuccessfulEngine)
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"source")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    output_link = tmp_path / "outputs"
+    try:
+        output_link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink를 만들 권한이 없습니다.")
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(source, output_link, "local")
+
+    assert caught.value.code == "OUTPUT_PATH_REDIRECTED"
+    assert not list(outside.iterdir())
+
+
+def test_parse_failure_leaves_no_partial_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingEngine:
+        def __init__(self, _profile: Any):
+            pass
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", FailingEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "outputs"
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(source, output_dir, "local")
+
+    assert caught.value.code == "PARSE_FAILED"
+    assert not list(output_dir.glob("sample--*"))
+    assert not list(output_dir.glob(".docling-parser-*"))
+
+
+def test_html_export_failure_leaves_no_partial_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingHtmlDocument(FakeDocument):
+        def save_as_html(self, _filename: Path, **_kwargs: Any) -> None:
+            raise RuntimeError("synthetic HTML failure")
+
+    class FailingHtmlEngine:
+        def __init__(self, _profile: Any):
+            pass
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            return FakeEngineResult(document=FailingHtmlDocument())
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", FailingHtmlEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "outputs"
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(source, output_dir, "local")
+
+    assert caught.value.code == "PARSE_FAILED"
+    assert not list(output_dir.glob("sample--*"))
+    assert not list(output_dir.glob(".docling-parser-*"))
+
+
+def test_source_read_error_is_returned_as_parser_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    monkeypatch.setattr(
+        artifacts_module,
+        "sha256_file",
+        lambda _path: (_ for _ in ()).throw(OSError("read failed")),
+    )
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(source, tmp_path / "outputs", "local")
+
+    assert caught.value.code == "SOURCE_UNAVAILABLE"
+
+
+def test_naver_requires_confirmation_and_never_falls_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingNaverEngine:
+        def __init__(self, profile: Any):
+            assert profile.id == NAVER_PROFILE_ID
+
+        def convert(self, _source: Path) -> FakeEngineResult:
+            raise NaverOcrError("NAVER OCR returned HTTP 503")
+
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", FailingNaverEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "outputs"
+
+    with pytest.raises(ParserError) as not_confirmed:
+        parse_document(source, output_dir, "naver")
+    assert not_confirmed.value.code == "EXTERNAL_TRANSFER_NOT_CONFIRMED"
+
+    with pytest.raises(ParserError) as failed:
+        parse_document(
+            source,
+            output_dir,
+            "naver",
+            confirm_external_transfer=True,
+        )
+    assert failed.value.code == "NAVER_OCR_FAILED"
+    assert not list(output_dir.glob("sample--*"))

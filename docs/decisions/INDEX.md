@@ -7,4 +7,7 @@
 | 2026-08-02 | process | accepted | [가벼운 Conventional Commits 채택](20260802-ace-1-commit-convention.md) |
 | 2026-08-02 | process | accepted | [브랜치명을 유형과 설명으로 단순화](20260802-ace-3-branch-naming.md) |
 | 2026-08-03 | architecture | accepted | [HTTP 인터페이스 모듈명을 `api`로 지정](20260803-api-interface-module.md) |
+| 2026-08-03 | architecture | accepted | [Docling 파서를 독립 오프라인 도구와 중앙 운영 정책으로 관리](20260803-docling-parser-operations.md) |
+| 2026-08-03 | architecture | accepted | [Docling 파서 실행 계층을 단일 Python 스크립트로 단순화](20260803-docling-parser-script-interface.md) |
 | 2026-08-03 | architecture | accepted | [모듈 의존성 방향을 단방향으로 제한](20260803-module-dependency-direction.md) |
+| 2026-08-05 | process | accepted | [공통 프로젝트 규칙을 도구 중립 파일로 분리](20260805-tool-neutral-project-rules.md) |

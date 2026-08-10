@@ -1,0 +1,4 @@
+interface:
+  display_name: "로컬 OCR 문서 파싱"
+  short_description: "고정 로컬 Docling OCR 프로필로 문서를 안전하게 파싱"
+  default_prompt: "$parse-with-local-ocr 스킬을 사용해 이 저장소의 문서를 로컬 OCR로 파싱해 주세요."

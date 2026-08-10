@@ -10,6 +10,7 @@ data/raw/
 data/processed/
 data/ocr/
 data/indexes/
+.docling-parser/
 *.zip
 
 # 인덱스 산출물 (재생성 가능, 용량 큼)
