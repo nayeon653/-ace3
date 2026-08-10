@@ -3,6 +3,12 @@
 3인 팀이 충돌 없이 병렬로 작업하기 위한 규칙 전문이다. 역할과 담당 영역은
 고정하지 않고 작업별로 정한다. 요약은 [`PROJECT_RULES.md`](../PROJECT_RULES.md) 참고.
 
+## 이슈
+
+GitHub Issues를 작업의 단일 원본으로 사용한다. 이슈 작성, 라벨, 상태 흐름,
+브랜치·PR 연결 방법은
+[`docs/operations/issue-management.md`](operations/issue-management.md)를 따른다.
+
 ## 브랜치
 
 ```
