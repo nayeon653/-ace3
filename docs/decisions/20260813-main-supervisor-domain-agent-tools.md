@@ -48,7 +48,8 @@ flowchart LR
     R --> S["SupervisorState.domain_results<br/>전체 결과"]
     R --> C["DomainToolResult<br/>축약 결과"]
     C --> M
-    M --> A["AgentAnswer"]
+    M --> N["최종 자연어 AIMessage"]
+    N --> A["Python AgentAnswer 변환"]
     S --> F["API 응답 조립"]
     A --> F
 ```
@@ -109,9 +110,11 @@ API 조립 대상은 `execution_status == completed`이면서 `decision.status`�
 `not_applicable`이 아닌 결과다. `CalculationResult`는 확정 수치의 출처 검증에
 사용하고 평가 API에는 직접 노출하지 않는다.
 
-Main LLM은 `DomainToolResult`의 결론과 조건을 통합해 `AgentAnswer.answer`만 생성한다.
-API 조립 코드는 `AgentAnswer`와 `SupervisorState`를 다음과 같이 평가 API의 정확한
-5개 필드로 변환한다.
+Main LLM은 `DomainToolResult`의 결론과 조건을 통합해 최종 자연어 메시지를 생성한다.
+애플리케이션은 마지막 자연어 `AIMessage`를 Pydantic `AgentAnswer`로 검증해 변환한다.
+Function Calling과 Structured Outputs를 같은 요청에 결합하지 않으며, 구체적인
+HyperCLOVA X 모델은 Factory 외부에서 주입한다. API 조립 코드는 `AgentAnswer`와
+`SupervisorState`를 다음과 같이 평가 API의 정확한 5개 필드로 변환한다.
 
 | API 필드 | 출처와 생성 방식 |
 |---|---|
@@ -155,6 +158,8 @@ stack trace, DB 주소, 내부 경로와 모델 내부 메시지는 별도 관�
 - 팀원은 공통 계약을 기준으로 세 도메인 Agent를 독립적으로 개발하고 교체할 수 있다.
 - Main LLM의 컨텍스트는 답변 작성에 필요한 축약 결론으로 제한되고, 근거와 계산의
   원본은 결정론적인 API 조립·검증 경로에 남는다.
+- Main Agent의 Function Calling 요청은 Provider별 Structured Outputs 지원 차이에
+  의존하지 않고, 최종 자연어 메시지는 애플리케이션 계약으로 변환된다.
 - 검색 근거, 확정 계산과 사용자 답변의 출처를 `DomainResult`에서 추적할 수 있다.
 - Tool이 `DomainResult`의 State 누적과 `DomainToolResult` 메시지 생성을 함께 책임하므로
   두 결과가 불일치하지 않도록 계약 테스트가 필요하다.
