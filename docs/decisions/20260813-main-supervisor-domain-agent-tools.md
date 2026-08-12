@@ -82,6 +82,11 @@ Main과 도메인 Agent 사이의 계약은 `DomainRequest -> DomainResult`로 �
 | `AgentAnswer` | Main LLM이 생성한 최종 자연어 `answer`만 보관 |
 | `SupervisorState` | 질문과 실행된 전체 `DomainResult`를 요청 수명 동안 보관 |
 
+Main LLM은 Tool 요청에서 하나의 판단 목표인 `objective`만 생성한다. Tool Adapter는
+`SupervisorState.question`의 사용자 원문과 `objective`를 결합해 `DomainRequest`를
+만들며, 모델이 사용자 질문을 요약하거나 조건을 추가한 값은 도메인 Agent에 전달하지
+않는다.
+
 실행 상태와 비즈니스 판단 상태를 분리한다.
 
 - `execution_status`는 `completed`, `failed`, `timeout` 중 하나다.

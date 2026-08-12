@@ -27,9 +27,13 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
         return self
 
 
-def _runner(domain: DomainName, conclusion: str):
+def _runner(
+    domain: DomainName,
+    conclusion: str,
+    requests: list[DomainRequest],
+):
     def run(request: DomainRequest) -> DomainResult:
-        assert request["question"]
+        requests.append(request)
         return {
             "domain": domain,
             "execution_status": "completed",
@@ -49,24 +53,25 @@ def _runner(domain: DomainName, conclusion: str):
 def _tool_call(name: str, call_id: str, objective: str) -> dict[str, Any]:
     return {
         "name": name,
-        "args": {"request": {"question": "이전 후 상품을 바꿀 수 있나요?", "objective": objective}},
+        "args": {"objective": objective},
         "id": call_id,
         "type": "tool_call",
     }
 
 
 def test_main_supervisor_runs_domain_tools_and_accumulates_results() -> None:
+    requests: list[DomainRequest] = []
     policy_tool = create_domain_agent_tool(
         name="analyze_policy",
         description="업무 판단",
         domain="policy",
-        runner=_runner("policy", "이전할 수 있습니다."),
+        runner=_runner("policy", "이전할 수 있습니다.", requests),
     )
     product_tool = create_domain_agent_tool(
         name="analyze_product",
         description="상품 판단",
         domain="product",
-        runner=_runner("product", "상품을 비교할 수 있습니다."),
+        runner=_runner("product", "상품을 비교할 수 있습니다.", requests),
     )
     model = ToolCallingFakeModel(
         responses=[
@@ -104,6 +109,11 @@ def test_main_supervisor_runs_domain_tools_and_accumulates_results() -> None:
     assert all("근거 본문" not in str(message.content) for message in tool_messages)
     assert all(set(names) == {"analyze_policy", "analyze_product"} for names, _ in model.bindings)
     assert all(kwargs.get("tool_choice") is None for _, kwargs in model.bindings)
+    assert {request["question"] for request in requests} == {"이전 후 상품을 바꿀 수 있나요?"}
+    assert {request["objective"] for request in requests} == {
+        "이전 가능 여부 판단",
+        "상품 변경 범위 판단",
+    }
 
 
 def test_main_supervisor_prompt_is_packaged() -> None:

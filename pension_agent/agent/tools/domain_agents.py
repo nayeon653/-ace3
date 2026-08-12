@@ -3,11 +3,13 @@
 import json
 import logging
 from collections.abc import Callable
+from typing import Annotated
 
 from langchain.messages import ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
+from pydantic import Field
 
 from pension_agent.agent.schemas import (
     DomainName,
@@ -16,6 +18,7 @@ from pension_agent.agent.schemas import (
     DomainToolResult,
     validate_domain_result,
 )
+from pension_agent.agent.state import SupervisorState
 
 DomainRunner = Callable[[DomainRequest], DomainResult]
 
@@ -59,7 +62,17 @@ def create_domain_agent_tool(
     """주입된 도메인 실행 함수를 호출하는 Main용 Tool을 만든다."""
 
     @tool(name, description=description)
-    def domain_agent_tool(request: DomainRequest, runtime: ToolRuntime) -> Command:
+    def domain_agent_tool(
+        objective: Annotated[
+            str,
+            Field(description="이 Tool이 수행할 하나의 구체적인 비즈니스 판단"),
+        ],
+        runtime: ToolRuntime[None, SupervisorState],
+    ) -> Command:
+        request: DomainRequest = {
+            "question": runtime.state["question"],
+            "objective": objective,
+        }
         try:
             result = runner(request)
             validate_domain_result(result)
