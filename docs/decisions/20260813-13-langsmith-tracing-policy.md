@@ -1,12 +1,13 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-13
 type: operations
 related:
   - 20260813-main-supervisor-domain-agent-tools.md
   - 20260813-hcx-005-model-factory.md
 supersedes: []
-superseded-by: []
+superseded-by:
+  - 20260814-langsmith-full-tracing-policy.md
 ---
 
 # 합성 데이터 개발 실행에 한해 LangSmith 전체 추적을 허용

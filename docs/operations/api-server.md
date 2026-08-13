@@ -80,9 +80,10 @@ curl --get http://127.0.0.1:8000/answer \
   --data-urlencode 'question=연금계좌를 이전할 수 있나요?'
 ```
 
-이 요청은 실제 HCX API를 호출할 수 있다. 실제 질문, 대회 평가 질문이나 제공 문서를
-사용하기 전에는 [`LangSmith 추적 운영 정책`](langsmith-tracing.md)에 따라 외부 추적이
-비활성화되어 있는지 확인한다.
+이 요청은 실제 HCX API를 호출할 수 있다. 개발자가 개인 로컬 `.env`에서
+`LANGSMITH_TRACING=true`로 설정했다면 LangChain 기본 연동이 질문, Supervisor state,
+Tool 입출력과 최종 답변을 개인 LangSmith project에 기록한다. 개인 계정 설정과
+활성화·비활성화 절차는 [`LangSmith 추적 운영 정책`](langsmith-tracing.md)을 따른다.
 
 ## Agent 객체 수명주기
 
