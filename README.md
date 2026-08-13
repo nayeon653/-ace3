@@ -47,8 +47,7 @@ GET /answer → api(FastAPI) → agent(라우터/도구 오케스트레이션)
                                 ├→ retrieval(검색)
                                 ├→ rules(결정론적 세제 계산)
                                 └→ prompts + HyperCLOVA X
-                                   (function calling: HCX-005,
-                                    생성: HCX-DASH-002)
+                                   (Tool 선택·최종 답변: HCX-005)
 ```
 
 원칙: **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도·세율 등 확정
@@ -87,6 +86,38 @@ PR과 `main` 브랜치 push에는 Python 3.12 기반 Backend CI가 실행되며,
 
 Docling 오프라인 파싱 스크립트는 제공됩니다. 제품 검색·API·평가 실행 진입점은 아직
 구현하지 않았으며 각 기능을 구현하는 PR에서 함께 추가합니다.
+
+### HyperCLOVA X 설정
+
+Main Supervisor는 Tool 선택과 최종 답변 생성에 같은 HCX-005 인스턴스를 사용합니다.
+모델명, 생성 토큰 수, temperature, timeout과 retry는 환경변수가 아니라
+[`pension_agent/config/hcx.py`](pension_agent/config/hcx.py)의 불변 config에서 버전
+관리합니다. 현재 모델명과 생성 파라미터는 실연결 검증 전에 임의로 정한 초기값이며,
+후속 검증 결과에 따라 HyperCLOVA X 범위 안에서 config와 결정 기록을 변경할 수
+있습니다.
+
+Pydantic Settings가 로컬 `.env` 또는 프로세스 환경에서 인증·연결 정보만 읽습니다.
+
+```dotenv
+CLOVASTUDIO_API_KEY=<발급받은 API 키>
+CLOVASTUDIO_API_BASE_URL=https://clovastudio.stream.ntruss.com/v1/openai
+```
+
+애플리케이션 조립 경계에서는 환경 설정을 읽은 뒤 Factory가 만든 모델을 Main
+Supervisor에 주입합니다.
+
+```python
+from pension_agent.agent.model_factory import create_chat_clovax
+from pension_agent.agent.supervisor import create_main_supervisor
+from pension_agent.config import MAIN_SUPERVISOR_HCX_CONFIG, ClovaStudioConnection
+
+connection = ClovaStudioConnection()
+model = create_chat_clovax(
+    config=MAIN_SUPERVISOR_HCX_CONFIG,
+    connection=connection,
+)
+supervisor = create_main_supervisor(model=model, tools=domain_tools)
+```
 
 ## 디렉토리 구조
 

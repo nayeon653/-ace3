@@ -5,6 +5,7 @@ type: architecture
 related:
   - 20260803-api-interface-module.md
   - 20260803-module-dependency-direction.md
+  - 20260813-hcx-005-model-factory.md
 supersedes: []
 superseded-by: []
 ---
