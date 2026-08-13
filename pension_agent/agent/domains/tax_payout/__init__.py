@@ -3,11 +3,11 @@
 from pension_agent.agent.domains.tax_payout.agent import (
     TAX_PAYOUT_TOOL_DESCRIPTION,
     TAX_PAYOUT_TOOL_NAME,
-    TbdTaxPayoutAgent,
+    TaxPayoutAgent,
 )
 
 __all__ = [
     "TAX_PAYOUT_TOOL_DESCRIPTION",
     "TAX_PAYOUT_TOOL_NAME",
-    "TbdTaxPayoutAgent",
+    "TaxPayoutAgent",
 ]

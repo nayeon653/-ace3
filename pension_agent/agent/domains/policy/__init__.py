@@ -3,11 +3,11 @@
 from pension_agent.agent.domains.policy.agent import (
     POLICY_TOOL_DESCRIPTION,
     POLICY_TOOL_NAME,
-    TbdPolicyAgent,
+    PolicyAgent,
 )
 
 __all__ = [
     "POLICY_TOOL_DESCRIPTION",
     "POLICY_TOOL_NAME",
-    "TbdPolicyAgent",
+    "PolicyAgent",
 ]

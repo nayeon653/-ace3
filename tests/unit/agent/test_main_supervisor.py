@@ -8,7 +8,7 @@ from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
 
-from pension_agent.agent.assembly import create_tbd_main_supervisor
+from pension_agent.agent.assembly import create_default_main_supervisor
 from pension_agent.agent.schemas import DomainName, DomainRequest, DomainResult
 from pension_agent.agent.supervisor import build_agent_answer, create_main_supervisor
 from pension_agent.agent.tools import create_domain_agent_tool
@@ -128,29 +128,29 @@ def test_main_supervisor_prompt_is_packaged() -> None:
     assert "JSON이나 Tool 호출 형식을 직접 출력하지 않는다" in prompt
 
 
-def test_tbd_main_supervisor_uses_placeholder_result_for_final_answer() -> None:
+def test_default_main_supervisor_uses_placeholder_result_for_final_answer() -> None:
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(
                 content="",
                 tool_calls=[_tool_call("analyze_policy", "policy-call", "이전 가능 여부 판단")],
             ),
-            AIMessage(content="업무·제도 Agent가 TBD 상태이므로 추후 판단할 수 있습니다."),
+            AIMessage(content="업무·제도 Agent가 아직 구현되지 않아 추후 판단할 수 있습니다."),
         ]
     )
-    supervisor = create_tbd_main_supervisor(model=model)
+    supervisor = create_default_main_supervisor(model=model)
 
     result = supervisor.invoke(
         {
             "messages": [{"role": "user", "content": "연금계좌를 이전할 수 있나요?"}],
-            "question_id": "Q-TBD",
+            "question_id": "Q-PLACEHOLDER",
             "question": "연금계좌를 이전할 수 있나요?",
             "domain_results": [],
         }
     )
 
     assert result["domain_results"][0]["decision"]["status"] == "undetermined"
-    assert "TBD" in result["domain_results"][0]["decision"]["conclusion"]
+    assert "구현 전" in result["domain_results"][0]["decision"]["conclusion"]
     assert build_agent_answer(result["messages"]).answer == (
-        "업무·제도 Agent가 TBD 상태이므로 추후 판단할 수 있습니다."
+        "업무·제도 Agent가 아직 구현되지 않아 추후 판단할 수 있습니다."
     )
