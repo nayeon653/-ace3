@@ -29,17 +29,22 @@ CLOVASTUDIO_API_BASE_URL=https://clovastudio.stream.ntruss.com/v1/openai
 일반적인 로컬 테스트는 다음 한 줄이면 충분하다.
 
 ```bash
-uv run uvicorn pension_agent.api.app:app
+uv run uvicorn pension_agent.api.app:app --env-file .env
 ```
 
 Uvicorn 기본값에 따라 `127.0.0.1:8000`에서 실행된다. 로컬에서는 배포 버전 추적이
 필수가 아니므로 `DEPLOY_COMMIT_SHA`를 생략할 수 있다. 생략하면 `/health`의
 `commit_sha`는 `unknown`이다.
 
+`--env-file .env`는 `.env`의 값을 Uvicorn이 실행하는 애플리케이션 프로세스의
+환경변수로 주입한다. `ClovaStudioConnection`은 Pydantic Settings를 통해 `.env`를
+직접 읽지만, LangSmith 기본 tracing은 프로세스 환경의 `LANGSMITH_*`를 읽으므로
+LangSmith를 활성화한 로컬 실행에는 이 옵션이 필요하다.
+
 코드 변경 시 서버를 자동 재시작하려면 다음과 같이 실행한다.
 
 ```bash
-uv run uvicorn pension_agent.api.app:app --reload
+uv run uvicorn pension_agent.api.app:app --env-file .env --reload
 ```
 
 자동 재시작 때마다 서버 프로세스와 Agent 객체가 새로 생성된다.
@@ -51,6 +56,7 @@ uv run uvicorn pension_agent.api.app:app --reload
 ```bash
 DEPLOY_COMMIT_SHA="$(git rev-parse HEAD)" \
 uv run uvicorn pension_agent.api.app:app \
+  --env-file .env \
   --host 127.0.0.1 \
   --port 8000
 ```
@@ -121,6 +127,7 @@ uv run uvicorn pension_agent.api.app:app \
 | 증상 | 확인할 내용 |
 |---|---|
 | 서버 시작 실패 | `.env`의 `CLOVASTUDIO_API_KEY`와 `CLOVASTUDIO_API_BASE_URL` 확인 |
+| LangSmith에 trace가 생성되지 않음 | `.env`의 `LANGSMITH_*` 설정을 확인하고 서버를 `--env-file .env` 옵션으로 완전히 재시작 |
 | `Address already in use` | 8000번 포트를 쓰는 프로세스를 종료하거나 `--port 8001` 사용 |
 | `/health`의 SHA가 `unknown` | 로컬에서는 정상이다. 배포 환경이면 SHA 주입 설정 확인 |
 | 다른 기기에서 로컬 서버에 접속할 수 없음 | `127.0.0.1`은 로컬 전용이다. 외부 공개가 필요할 때만 보안 설정 후 바인딩 범위를 변경 |
