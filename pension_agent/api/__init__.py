@@ -1,1 +1,1 @@
-"""HTTP API interface for the pension agent."""
+"""연금 Agent의 FastAPI 인터페이스."""

@@ -81,11 +81,28 @@ make setup-parser  # Docling 파서 전용 환경 설치
 make parser-test   # 파서 단위 테스트
 ```
 
+`.env`에 CLOVA Studio 연결 정보를 설정한 뒤 FastAPI 서버를 로컬에서 실행합니다.
+Uvicorn 기본값인 `127.0.0.1:8000`을 사용하므로 별도 host와 port 옵션은 필요하지
+않습니다.
+
+```bash
+uv run uvicorn pension_agent.api.app:app
+```
+
+로컬에서는 `DEPLOY_COMMIT_SHA`를 생략해도 되며 `/health`에 `unknown`으로 표시됩니다.
+서버 시작 과정에서 HCX 모델, Main Supervisor와 `AnswerService`를 프로세스당 한 번
+조립하고 모든 `/answer` 요청에서 재사용합니다.
+
+운영 확인용 `GET /health`는 LLM이나 검색 시스템을 호출하지 않습니다. 평가용
+`GET /answer`의 정확한 요청·응답과 오류 계약은
+[`docs/api-spec.md`](docs/api-spec.md)를 참고하세요. 로컬 확인, 배포 실행, 환경변수와
+문제 해결 방법은 [`API 서버 실행과 확인`](docs/operations/api-server.md)에 있습니다.
+
 PR과 `main` 브랜치 push에는 Python 3.12 기반 Backend CI가 실행되며,
 `make check`와 패키지 빌드·설치 가능 여부를 검증합니다.
 
-Docling 오프라인 파싱 스크립트는 제공됩니다. 제품 검색·API·평가 실행 진입점은 아직
-구현하지 않았으며 각 기능을 구현하는 PR에서 함께 추가합니다.
+Docling 오프라인 파싱 스크립트와 FastAPI 평가 실행 진입점이 제공됩니다. 제품 검색과
+평가 하네스는 각 기능을 구현하는 PR에서 함께 추가합니다.
 
 ### HyperCLOVA X 설정
 
@@ -146,5 +163,6 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 - [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 브랜치·커밋·PR·리뷰·태그 규칙 전문
 - [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
+- [`docs/operations/api-server.md`](docs/operations/api-server.md) — API 서버 로컬 실행·배포·문제 해결
 - [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md) — Docling 실행·저장·검수 정책
 - [`SUBMISSION.md`](SUBMISSION.md) — 제출물 체크리스트 및 마감
