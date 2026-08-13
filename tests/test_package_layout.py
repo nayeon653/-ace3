@@ -9,6 +9,11 @@ import pytest
     "module_name",
     [
         "pension_agent.agent",
+        "pension_agent.agent.assembly",
+        "pension_agent.agent.domains",
+        "pension_agent.agent.domains.policy",
+        "pension_agent.agent.domains.product",
+        "pension_agent.agent.domains.tax_payout",
         "pension_agent.api",
         "pension_agent.config",
         "pension_agent.core",
