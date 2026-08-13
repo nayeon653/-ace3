@@ -90,6 +90,11 @@ uv run uvicorn pension_agent.api.app:app
 ```
 
 로컬에서는 `DEPLOY_COMMIT_SHA`를 생략해도 되며 `/health`에 `unknown`으로 표시됩니다.
+
+LangSmith tracing은 기본적으로 꺼져 있습니다. 개발자가 개인 무료 계정의 환경변수를
+로컬에 등록해 활성화하면 일반 `/answer` 요청을 포함한 모든 Agent 실행을 추적합니다.
+개인 계정·project 설정과 활성화 방법은
+[`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 따릅니다.
 서버 시작 과정에서 HCX 모델, Main Supervisor와 `AnswerService`를 프로세스당 한 번
 조립하고 모든 `/answer` 요청에서 재사용합니다.
 
