@@ -45,7 +45,8 @@ jobs:
           uv run --isolated --no-project
           --with "$GITHUB_WORKSPACE"/dist/pension_agent-*.whl
           python -c
-          'from importlib import resources; import pension_agent.retrieval;
+          'from importlib import resources; import pension_agent.api.app;
+          import pension_agent.retrieval;
           root = resources.files("pension_agent");
           assert root.joinpath("config", "defaults").is_dir();
           assert root.joinpath("prompts").is_dir()'

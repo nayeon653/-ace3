@@ -1,7 +1,7 @@
 # 평가용 API 명세
 
-주최측이 평가기간(2026-09-07 ~ 09-20) 중 GET으로 호출할 API 명세 골격이다.
-엔드포인트 URL은 배포 후 확정한다.
+주최측이 평가기간(2026-09-07 ~ 09-20) 중 GET으로 호출할 API 명세다.
+배포 호스트는 배포 후 확정하며 경로와 응답 계약은 아래와 같이 고정한다.
 
 ## Endpoint
 
@@ -28,13 +28,37 @@ GET {TBD}/answer
 | `think_trace` | string | 조건 분기 판단 과정 요약 |
 | `answer` | string | 최종 답변. 확인이 필요한 조건과 조건별 결론을 포함할 수 있음 |
 
+`retrieved_context`의 각 객체는 아래 필드를 포함한다. 완료된 도메인 판단 중
+`decision.status`가 `not_applicable`이 아닌 결과에서 최종 답변에 실제 사용한
+근거만 포함한다.
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `chunk_id` | string | 근거 청크 식별자 |
+| `source_file_name` | string | 출처 문서 파일명 |
+| `title` | string | 근거 구간 제목 |
+| `locator` | string | 원문에서 근거 위치를 찾기 위한 표시 |
+| `content` | string | 답변에 실제 사용한 근거 본문 |
+
+`think_trace`는 실제 도메인 호출·실행 상태, 판단 결론과 누락 조건을 서버가
+결정론적으로 요약한 문장이다. LLM 내부 사고 과정, 원시 Tool 로그, 원시 예외,
+stack trace, 내부 경로와 모델 내부 메시지는 포함하지 않는다.
+
 ```json
 {
-  "question_id": "TBD",
-  "question": "TBD",
-  "retrieved_context": [],
-  "think_trace": "TBD",
-  "answer": "TBD"
+  "question_id": "Q-001",
+  "question": "연금계좌를 이전할 수 있나요?",
+  "retrieved_context": [
+    {
+      "chunk_id": "CH-001",
+      "source_file_name": "policy.pdf",
+      "title": "연금계좌 업무 지침",
+      "locator": "3쪽",
+      "content": "가입 유형에 따라 이전 범위가 달라집니다."
+    }
+  ],
+  "think_trace": "도메인 호출: policy(완료). 판단 요약: policy=조건부: 가입 유형에 따라 이전할 수 있습니다. 확인이 필요한 조건: policy=가입 유형.",
+  "answer": "가입 유형을 확인한 뒤 이전 가능 여부를 판단하세요."
 }
 ```
 
@@ -42,11 +66,17 @@ GET {TBD}/answer
 
 | 상태 코드 | 상황 |
 |---|---|
-| 400 | 필수 파라미터 누락 |
-| 500 | 내부 오류 (근거 검색/생성 실패 등) |
+| 400 | 필수 파라미터 누락, 빈 값 등 입력 오류 |
+| 500 | 의존성 초기화, 근거 검색, Agent 실행이나 응답 조립 오류 |
 
-에러 응답도 최소한 `question_id`, `question`은 포함해 반환한다 (TBD —
-주최측 요구사항 확인 필요).
+오류 응답은 원시 입력 검증 내용이나 내부 실행 정보를 노출하지 않고 다음 형태로
+반환한다.
+
+```json
+{
+  "detail": "요청 파라미터가 올바르지 않습니다."
+}
+```
 
 ## Health Check
 
@@ -60,6 +90,18 @@ GET {TBD}/health
 ```json
 {
   "status": "ok",
-  "commit_sha": "TBD"
+  "commit_sha": "abc123def456"
 }
 ```
+
+`/health`는 LLM과 검색 시스템을 호출하지 않는다. `commit_sha`는 배포 환경의
+`DEPLOY_COMMIT_SHA` 값이며, 로컬에서 주입하지 않으면 `unknown`을 반환한다. 운영
+배포에서는 이미지나 릴리스를 만든 정확한 Git 커밋 SHA를 반드시 주입한다.
+
+FastAPI lifespan은 서버 시작 시 HCX 모델, Main Supervisor와 `AnswerService`를
+프로세스당 한 번 조립한다. `/answer` 요청은 조립된 동일 객체를 재사용하며 요청별
+상태는 공유하지 않는다. 필수 인증·연결 설정이 없거나 조립에 실패하면 서버 시작이
+실패한다. `/health` 요청 자체는 조립된 Agent를 실행하지 않는다.
+
+서버 실행, 환경변수, 로컬 확인과 배포 방법은
+[`API 서버 실행과 확인`](operations/api-server.md)을 따른다.
