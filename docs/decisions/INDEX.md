@@ -13,3 +13,4 @@
 | 2026-08-05 | process | accepted | [공통 프로젝트 규칙을 도구 중립 파일로 분리](20260805-tool-neutral-project-rules.md) |
 | 2026-08-13 | architecture | accepted | [Main Supervisor와 도메인 Agent Tool 구조를 채택](20260813-main-supervisor-domain-agent-tools.md) |
 | 2026-08-13 | architecture | accepted | [HCX-005 단일 모델과 ChatClovaX Factory를 채택](20260813-hcx-005-model-factory.md) |
+| 2026-08-13 | operations | accepted | [합성 데이터 개발 실행에 한해 LangSmith 전체 추적을 허용](20260813-13-langsmith-tracing-policy.md) |
