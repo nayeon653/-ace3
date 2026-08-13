@@ -1,0 +1,75 @@
+"""네트워크 호출 없이 ChatClovaX Factory 계약을 검증한다."""
+
+import pytest
+from langchain_naver import ChatClovaX
+from pydantic import SecretStr
+
+from pension_agent.agent.model_factory import (
+    ChatClovaXFactoryError,
+    create_chat_clovax,
+)
+from pension_agent.agent.supervisor import create_main_supervisor
+from pension_agent.config import MAIN_SUPERVISOR_HCX_CONFIG, ClovaStudioConnection
+
+
+def test_factory_creates_configured_hcx_005_without_network_call() -> None:
+    connection = ClovaStudioConnection(
+        api_key=SecretStr("test-secret-key"),
+        api_base_url="https://example.test/v1/openai",
+    )
+
+    model = create_chat_clovax(
+        config=MAIN_SUPERVISOR_HCX_CONFIG,
+        connection=connection,
+    )
+
+    assert isinstance(model, ChatClovaX)
+    assert model.model_name == "HCX-005"
+    assert model.max_tokens == 1024
+    assert model.temperature == 0.1
+    assert model.request_timeout == 30.0
+    assert model.max_retries == 2
+    assert "test-secret-key" not in repr(model)
+
+    supervisor = create_main_supervisor(model=model, tools=[])
+
+    assert supervisor.name == "main_supervisor"
+
+
+def test_factory_reports_missing_api_key_without_secret_or_network() -> None:
+    connection = ClovaStudioConnection(
+        api_key=None,
+        api_base_url="https://example.test/v1/openai",
+    )
+
+    with pytest.raises(ChatClovaXFactoryError) as error:
+        create_chat_clovax(
+            config=MAIN_SUPERVISOR_HCX_CONFIG,
+            connection=connection,
+        )
+
+    assert str(error.value) == "CLOVASTUDIO_API_KEY가 설정되지 않았습니다."
+
+
+def test_factory_sanitizes_provider_initialization_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = "provider-secret-key"
+    connection = ClovaStudioConnection(
+        api_key=SecretStr(secret),
+        api_base_url="https://example.test/v1/openai",
+    )
+
+    def fail_to_initialize(**_: object) -> None:
+        raise RuntimeError(f"인증 실패: {secret}")
+
+    monkeypatch.setattr("pension_agent.agent.model_factory.ChatClovaX", fail_to_initialize)
+
+    with pytest.raises(ChatClovaXFactoryError) as error:
+        create_chat_clovax(
+            config=MAIN_SUPERVISOR_HCX_CONFIG,
+            connection=connection,
+        )
+
+    assert str(error.value) == "ChatClovaX 모델 초기화에 실패했습니다."
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert secret not in str(error.value)

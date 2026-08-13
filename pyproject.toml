@@ -13,6 +13,7 @@ dependencies = [
     "langgraph>=1,<2",
     "numpy",
     "pydantic",
+    "pydantic-settings>=2,<3",
     "python-dotenv",
     "pyyaml",
     "rank-bm25",
