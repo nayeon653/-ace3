@@ -124,6 +124,7 @@ def test_answer_service_normalizes_supervisor_execution_failure() -> None:
 
     assert str(exc_info.value) == "Main Supervisor 실행에 실패했습니다."
     assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_answer_service_rejects_missing_final_answer() -> None:

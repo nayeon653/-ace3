@@ -60,11 +60,7 @@ class AnswerService:
             "question": question,
             "domain_results": [],
         }
-        try:
-            raw_state = self._supervisor.invoke(initial_state)
-        # Supervisor 경계에서 모든 실행 오류를 애플리케이션 오류로 정규화한다.
-        except Exception:  # noqa: BLE001
-            raise SupervisorExecutionError("Main Supervisor 실행에 실패했습니다.") from None
+        raw_state = _invoke_supervisor(self._supervisor, initial_state)
 
         state = _validate_supervisor_state(
             raw_state,
@@ -79,6 +75,21 @@ class AnswerService:
             ) from None
 
         return AnswerServiceResult(answer=answer, state=state)
+
+
+def _invoke_supervisor(
+    supervisor: SupervisorRunner,
+    initial_state: dict[str, Any],
+) -> Mapping[str, Any]:
+    """원본 예외 연결을 남기지 않고 Supervisor 실행 오류를 정규화한다."""
+
+    try:
+        return supervisor.invoke(initial_state)
+    # Supervisor 경계에서 모든 실행 오류를 애플리케이션 오류로 정규화한다.
+    except Exception:  # noqa: BLE001
+        error = SupervisorExecutionError("Main Supervisor 실행에 실패했습니다.")
+
+    raise error
 
 
 def _validate_supervisor_state(
