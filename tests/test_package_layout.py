@@ -9,6 +9,7 @@ import pytest
     "module_name",
     [
         "pension_agent.agent",
+        "pension_agent.agent.answer_service",
         "pension_agent.agent.assembly",
         "pension_agent.agent.domains",
         "pension_agent.agent.domains.policy",
