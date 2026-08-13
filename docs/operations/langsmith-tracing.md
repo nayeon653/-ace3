@@ -54,8 +54,13 @@ secret manager, 배포 환경변수나 공유 문서에 등록하지 않는다.
 로컬 `.env`에서 `LANGSMITH_TRACING=true`로 설정하고 API 서버를 재시작한다.
 
 ```bash
-uv run uvicorn pension_agent.api.app:app
+uv run uvicorn pension_agent.api.app:app --env-file .env
 ```
+
+`.env` 파일을 만드는 것만으로 해당 값이 서버 프로세스 환경에 자동 등록되지는 않는다.
+`--env-file .env`는 Uvicorn이 애플리케이션을 import하기 전에 `LANGSMITH_*`를 포함한
+로컬 설정을 프로세스 환경변수로 주입한다. LangSmith 기본 tracing은 이 프로세스
+환경변수를 읽어 활성화 여부, endpoint, workspace와 project를 결정한다.
 
 서버가 실행되면 원하는 질문을 직접 호출한다.
 

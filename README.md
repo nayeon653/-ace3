@@ -86,8 +86,12 @@ Uvicorn 기본값인 `127.0.0.1:8000`을 사용하므로 별도 host와 port 옵
 않습니다.
 
 ```bash
-uv run uvicorn pension_agent.api.app:app
+uv run uvicorn pension_agent.api.app:app --env-file .env
 ```
+
+`--env-file .env`는 로컬 설정을 Uvicorn 서버 프로세스의 환경변수로 주입한다.
+`ClovaStudioConnection`은 Pydantic Settings로 `.env`를 직접 읽지만, LangSmith 기본
+tracing은 프로세스 환경의 `LANGSMITH_*`를 읽으므로 이 옵션이 필요하다.
 
 로컬에서는 `DEPLOY_COMMIT_SHA`를 생략해도 되며 `/health`에 `unknown`으로 표시됩니다.
 
