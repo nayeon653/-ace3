@@ -1,6 +1,8 @@
 # 로컬 Qdrant 실행과 확인
 
 Docker Compose로 단일 노드 Qdrant를 로컬에서 실행하고 연결을 확인하는 방법을 정리한다.
+Point payload, filter와 조회 응답 계약은
+[`docs/qdrant-retrieval-spec.md`](../qdrant-retrieval-spec.md)를 따른다.
 이 구성은 개발과 적재 실험 전용이며 인증·TLS·백업·고가용성을 제공하는 운영 배포
 구성이 아니다.
 
