@@ -77,9 +77,16 @@ make setup   # 런타임 + 개발 의존성 설치
 make check   # Ruff 린트·포맷 + mypy 타입 검사 + pytest
 make build   # wheel + source distribution 빌드
 
+make qdrant-up     # 로컬 Qdrant 실행
+make qdrant-check  # readiness + Python 클라이언트 연결 확인
+make qdrant-down   # 로컬 Qdrant 종료 (데이터 유지)
+
 make setup-parser  # Docling 파서 전용 환경 설치
 make parser-test   # 파서 단위 테스트
 ```
+
+로컬 Qdrant의 대시보드, 연결 주소, 데이터 유지와 초기화 방법은
+[`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md)를 따른다.
 
 `.env`에 CLOVA Studio 연결 정보를 설정한 뒤 FastAPI 서버를 로컬에서 실행합니다.
 Uvicorn 기본값인 `127.0.0.1:8000`을 사용하므로 별도 host와 port 옵션은 필요하지
@@ -173,5 +180,6 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 - [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
 - [`docs/operations/api-server.md`](docs/operations/api-server.md) — API 서버 로컬 실행·배포·문제 해결
+- [`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md) — 로컬 Qdrant 실행·연결·데이터 관리
 - [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md) — Docling 실행·저장·검수 정책
 - [`SUBMISSION.md`](SUBMISSION.md) — 제출물 체크리스트 및 마감
