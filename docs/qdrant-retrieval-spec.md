@@ -13,6 +13,7 @@ Point, payload, filter와 응답 변환 계약의 단일 원본이다. 실제 �
 이 문서에서 결정하는 범위는 다음과 같다.
 
 - Qdrant Point ID와 payload 필드
+- Dense·sparse named vector와 hybrid fusion
 - Docling 청크에서 payload를 만드는 규칙
 - Qdrant payload index
 - 문서 내부 검색과 인접 청크 조회 입력·출력
@@ -20,7 +21,6 @@ Point, payload, filter와 응답 변환 계약의 단일 원본이다. 실제 �
 
 다음 항목은 이 문서의 범위가 아니다.
 
-- 임베딩 모델, vector 차원과 distance metric 선택
 - 청크 최대 토큰 수와 overlap 값
 - 문서 파싱 및 청킹 구현
 - 실제 Qdrant Repository 구현
@@ -32,18 +32,24 @@ Qdrant의 Point ID를 `chunk_id`로 사용한다. Point ID는 UUID로 생성하�
 `chunk_id`를 중복 저장하지 않는다. 같은 파일을 다시 적재해야 할 때는
 `source_file_name`으로 기존 Point를 제거한 후 새 UUID로 적재한다.
 
-vector는 `embedding_content`로 생성한다. vector 이름, 차원과 distance metric은
-임베딩 모델을 선택하는 후속 작업에서 확정한다.
+한 Point에 `dense`와 `sparse` named vector를 함께 저장한다. Dense vector는 의미
+유사도를, sparse vector는 BM25 기반 어휘 일치도를 계산한다. 두 검색 결과는 Query
+API의 RRF로 결합한다.
 
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
-  "vector": [0.012, -0.034, 0.056],
+  "vector": {
+    "dense": [0.012, -0.034, 0.056],
+    "sparse": {
+      "indices": [14, 125, 973],
+      "values": [0.8, 1.2, 0.4]
+    }
+  },
   "payload": {
     "source_file_name": "미래에셋_글로벌AI_투자설명서.pdf",
     "source_format": "pdf",
     "document_type": "investment_prospectus",
-    "chunking_version": "docling-hybrid-v1",
     "chunk_index": 17,
     "content": "이 투자신탁은 원금 손실이 발생할 수 있습니다.",
     "embedding_content": "제2부 집합투자기구에 관한 사항\n투자위험\n이 투자신탁은 원금 손실이 발생할 수 있습니다.",
@@ -66,6 +72,111 @@ vector는 `embedding_content`로 생성한다. vector 이름, 차원과 distance
 }
 ```
 
+## Collection vector schema
+
+초기 hybrid 검색은 다음 조합을 사용한다.
+
+| 역할 | 이름 | 모델 | Qdrant 설정 |
+| --- | --- | --- | --- |
+| 의미 검색 | `dense` | CLOVA Studio Embedding v2 `bge-m3` | 1,024차원, cosine |
+| 어휘 검색 | `sparse` | `qdrant/bm25` | Sparse vector, IDF modifier |
+| 결과 결합 | - | RRF | Query API fusion |
+
+```python
+from qdrant_client import models
+
+client.create_collection(
+    collection_name="pension_documents",
+    vectors_config={
+        "dense": models.VectorParams(
+            size=1024,
+            distance=models.Distance.COSINE,
+        ),
+    },
+    sparse_vectors_config={
+        "sparse": models.SparseVectorParams(
+            modifier=models.Modifier.IDF,
+        ),
+    },
+)
+```
+
+CLOVA Studio Embedding v2의 `bge-m3`는 dense 출력만 반환하므로 sparse vector는
+Qdrant의 server-side BM25로 생성한다. `bge-m3`는 한국어를 포함한 다국어 문서에
+사용할 수 있고 최대 8,192 token 입력과 1,024차원 출력을 지원한다.
+
+Qdrant BM25의 기본 전처리는 영어 기준이므로 한국어 문서에는 다음 설정을 적재와
+질의에 동일하게 적용한다. 이 language-neutral 설정은 Qdrant 1.19 이상을 요구하며
+현재 로컬 이미지 `qdrant/qdrant:v1.19.0`과 일치한다.
+
+```python
+BM25_OPTIONS = models.Bm25Config(
+    k=1.2,
+    b=0.75,
+    avg_len=256,
+    tokenizer=models.TokenizerType.MULTILINGUAL,
+    stemmer=models.DisabledStemmerParams(type=models.NoStemmer.NONE),
+    stopwords=models.StopwordsSet(),
+)
+```
+
+적재 파이프라인은 dense vector를 CLOVA Studio에서 생성하고, sparse 입력은 Qdrant가
+처리할 `Document`로 전달한다.
+
+```python
+models.PointStruct(
+    id=chunk_id,
+    vector={
+        "dense": dense_vector,
+        "sparse": models.Document(
+            text=embedding_content,
+            model="qdrant/bm25",
+            options=BM25_OPTIONS,
+        ),
+    },
+    payload=payload,
+)
+```
+
+Qdrant는 적재 요청의 `Document`를 실제 sparse vector로 변환해 저장한다. 따라서 Point
+조회 결과와 이 문서 상단의 저장 예시에는 `indices`와 `values`가 나타난다.
+
+초기에는 dense와 sparse 모두 `embedding_content`를 입력으로 사용한다. 제목이나
+반복 표 헤더가 BM25 점수를 과도하게 높이는 것이 평가에서 확인될 때만 sparse 입력을
+`heading_path + content`로 분리한다. 입력 조합을 분리하더라도 별도 payload 필드는
+추가하지 않는다.
+
+### Retrieval build manifest
+
+모델과 청킹 설정은 모든 Point payload에 반복하지 않고 collection을 만든 적재 작업의
+manifest에서 한 번만 관리한다.
+
+```json
+{
+  "schema_version": "qdrant-hybrid-v1",
+  "chunking_version": "docling-hybrid-v1",
+  "dense_model": "clova-studio/bge-m3",
+  "dense_size": 1024,
+  "dense_distance": "cosine",
+  "sparse_model": "qdrant/bm25",
+  "sparse_modifier": "idf",
+  "sparse_k": 1.2,
+  "sparse_b": 0.75,
+  "sparse_avg_len": 256,
+  "sparse_tokenizer": "multilingual",
+  "sparse_stemmer": "none",
+  "sparse_stopwords": [],
+  "fusion": "rrf"
+}
+```
+
+Dense 모델, 차원, sparse 모델 또는 입력 전처리가 바뀌면 기존 collection에 섞어
+적재하지 않고 새 collection을 만들어 전체 문서를 다시 적재한다.
+
+한국어 상품명·조항명·수치 질의에서 BM25의 품질이 부족하다고 평가될 때는 로컬
+`BAAI/bge-m3`의 sparse lexical weights를 대안으로 비교한다. CLOVA Studio의
+`bge-m3` API는 dense vector만 반환하므로 이 대안은 별도 로컬 추론 운영이 필요하다.
+
 ## Payload 필드
 
 | 필드 | 자료형 | 필수 | 생성 주체 | 용도 |
@@ -73,7 +184,6 @@ vector는 `embedding_content`로 생성한다. vector 이름, 차원과 distance
 | `source_file_name` | `str` | 예 | 수집 단계 | 문서 식별과 특정 파일 내부 검색 |
 | `source_format` | `str` | 예 | 수집 단계 | PDF와 Office 문서의 위치 표시 방식 구분 |
 | `document_type` | `str` | 예 | 수집 단계 | 투자설명서 등 문서 종류 필터 |
-| `chunking_version` | `str` | 예 | 청킹 설정 | 청킹 규칙 식별과 문제 추적 |
 | `chunk_index` | `int` | 예 | 청킹 단계 | 문서 내 순서 복원과 인접 청크 조회 |
 | `content` | `str` | 예 | Docling chunk | 사용자에게 인용할 청크 본문 |
 | `embedding_content` | `str` | 예 | Docling chunker | vector 생성에 사용한 문맥 보강 본문 |
@@ -119,12 +229,6 @@ vector는 `embedding_content`로 생성한다. vector 이름, 차원과 distance
 분류할 수 없는 문서를 임의로 가장 가까운 유형에 넣지 않고 `unknown`으로 저장한다.
 후속 ingest 구현은 적용한 분류 규칙을 테스트로 고정한다.
 
-### `chunking_version`
-
-Docling chunker 종류, tokenizer, 최대 토큰 수, merge와 table header 반복 정책을
-포함하는 청킹 설정의 버전이다. 초기값은 `docling-hybrid-v1`이다. 설정이 바뀌면
-기존 값의 의미를 변경하지 않고 새 버전을 사용한다.
-
 ### `chunk_index`
 
 같은 `source_file_name` 안에서 0부터 증가하는 청크 순서다. vector 유사도 점수나
@@ -138,8 +242,8 @@ Docling chunker 종류, tokenizer, 최대 토큰 수, merge와 table header 반�
 - `content`: `DocChunk.text`에 해당하는 인용용 청크 직렬화 결과다. 검색 결과와
   최종 근거에는 이 값을 사용한다.
 - `embedding_content`: `chunker.contextualize(chunk)` 결과다. 제목 계층, 캡션과
-  반복된 표 헤더처럼 검색 문맥을 위한 문자열이 포함될 수 있으며 vector 생성에는
-  이 값을 사용한다.
+  반복된 표 헤더처럼 검색 문맥을 위한 문자열이 포함될 수 있으며 dense와 sparse
+  vector 생성에는 이 값을 사용한다.
 
 `embedding_content`에 추가된 제목이나 반복 표 헤더를 원문 본문인 것처럼 인용하지
 않는다. 평가 API의 근거 본문에는 항상 `content`만 전달한다.
@@ -219,7 +323,6 @@ page_numbers = sorted(
 | `source_file_name` | parser manifest의 원본 파일명 |
 | `source_format` | parser manifest의 원본 확장자 |
 | `document_type` | ingest 경로·파일명 분류 규칙 |
-| `chunking_version` | 청킹 설정의 명시적인 버전 |
 | `chunk_index` | `chunker.chunk()` 결과의 0 기반 열거 순서 |
 | `content` | `DocChunk.text` |
 | `embedding_content` | `chunker.contextualize(chunk)` |
@@ -314,7 +417,6 @@ def make_locator(
 
 ```text
 source_format
-chunking_version
 content
 embedding_content
 heading_path
@@ -331,11 +433,28 @@ page_numbers
 않고 `pension_agent/retrieval/` 안에서 변환한다. `api`는 프로젝트 의존성 규칙에 따라
 `retrieval`을 직접 호출하지 않는다.
 
+Embedding 경계는 사용자 질의를 dense vector로 변환하고, Qdrant BM25 생성에 사용할
+원문 질의와 함께 Repository에 전달한다.
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class HybridQuery:
+    text: str
+    dense: list[float]
+```
+
+Qdrant SDK 타입이 공용 계약으로 새지 않도록 프로젝트 타입을 `core`에 두고,
+`retrieval` 구현 안에서 `text`를 `models.Document`로 변환한다. 이 계약은 호출자가
+Qdrant의 sparse vector index와 value를 직접 만들 필요가 없게 한다.
+
 ### 공통 검색
 
 ```python
 search_chunks(
-    query_vector: list[float],
+    query: HybridQuery,
     *,
     source_file_name: str | None = None,
     document_type: str | None = None,
@@ -344,17 +463,50 @@ search_chunks(
 ) -> list[SearchHit]
 ```
 
-- vector 유사도 검색에 지정된 payload filter를 `must` 조건으로 결합한다.
+- `dense`와 `sparse`를 각각 같은 payload filter로 prefetch한다.
+- 각 prefetch 결과는 최종 `limit`보다 넓게 가져오고 RRF로 결합한다.
+- 지정된 payload filter를 각 prefetch의 `must` 조건으로 결합한다.
 - `element_types`가 여러 개면 하나 이상을 포함하는 청크를 허용한다.
-- 점수 내림차순으로 반환한다.
+- RRF 결합 점수 내림차순으로 반환한다.
 - payload 누락이나 잘못된 자료형은 조용히 보정하지 않고 retrieval 경계의 데이터
   오류로 처리한다.
+
+```python
+client.query_points(
+    collection_name="pension_documents",
+    prefetch=[
+        models.Prefetch(
+            query=models.Document(
+                text=query.text,
+                model="qdrant/bm25",
+                options=BM25_OPTIONS,
+            ),
+            using="sparse",
+            limit=30,
+            filter=query_filter,
+        ),
+        models.Prefetch(
+            query=query.dense,
+            using="dense",
+            limit=30,
+            filter=query_filter,
+        ),
+    ],
+    query=models.FusionQuery(fusion=models.Fusion.RRF),
+    limit=10,
+    with_payload=True,
+    with_vectors=False,
+)
+```
+
+초기값은 각 검색에서 30개를 prefetch하고 RRF 결과 10개를 반환한다. 이 값은 계약이
+아니며 검색 평가셋의 recall과 precision을 근거로 조정한다.
 
 ### 특정 문서 내부 검색
 
 ```python
 search_within_document(
-    query_vector: list[float],
+    query: HybridQuery,
     *,
     source_file_name: str,
     document_type: str | None = None,
@@ -405,6 +557,7 @@ get_chunk(chunk_id: str) -> Chunk | None
 | `document_version_id` | 공모전 중 문서 개정이 없다고 가정함 | 같은 문서의 여러 버전을 함께 보관할 때 |
 | `source_hash` | 원본 해시는 parser manifest에 이미 존재함 | Qdrant만으로 원본 무결성을 검사할 때 |
 | `content_hash` | 증분 재임베딩과 청크 중복 제거를 하지 않음 | 변경된 청크만 다시 임베딩할 때 |
+| `chunking_version` | 모든 Point가 같은 적재 작업의 청킹 설정을 사용함 | payload가 아니라 retrieval build manifest에서 관리 |
 | `corpus` | 현재 검색 범위는 `document_type`으로 충분함 | 수집 출처 자체를 독립적으로 filter할 때 |
 | `title` | `heading_path`에서 파생 가능함 | 저장이 아니라 응답 변환에서 생성 |
 | `section_title` | 정확한 제목 filter 요구가 아직 없음 | 같은 소제목의 청크만 정확히 filter할 때 |
@@ -432,5 +585,9 @@ get_chunk(chunk_id: str) -> Chunk | None
 - [문서 파싱 운영](operations/document-parsing.md)
 - [Qdrant payload](https://qdrant.tech/documentation/concepts/payload/)
 - [Qdrant indexing](https://qdrant.tech/documentation/manage-data/indexing/)
+- [Qdrant hybrid queries](https://qdrant.tech/documentation/search/hybrid-queries/)
+- [Qdrant BM25](https://qdrant.tech/documentation/inference/inference-bm25/)
+- [CLOVA Studio 임베딩](https://guide.ncloud-docs.com/docs/ko/clovastudio-explorer03)
+- [BAAI BGE-M3](https://huggingface.co/BAAI/bge-m3)
 - [Docling chunking](https://docling-project.github.io/docling/concepts/chunking/)
 - [GitHub 이슈 #33](https://github.com/nayeon653/-ace3/issues/33)
