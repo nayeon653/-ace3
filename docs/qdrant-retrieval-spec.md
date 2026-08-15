@@ -11,7 +11,7 @@ Docling 청크를 Qdrant에 저장하고 hybrid 검색하는 계약이다. 실�
 | --- | --- |
 | Point ID | 청크마다 생성한 UUID. payload에 중복 저장하지 않음 |
 | Dense vector | `dense`, CLOVA Studio `bge-m3`, 1,024차원, cosine |
-| Sparse vector | `sparse`, `qdrant/bm25`, IDF modifier |
+| Sparse vector | `sparse`, Kiwi 전처리 + `qdrant/bm25`, IDF modifier |
 | Hybrid 결합 | Query API의 RRF |
 | 문서 식별 | `source_file_name` |
 | 문서 분류 | `fund_prospectus`, `pension_reference` |
@@ -75,24 +75,46 @@ client.create_collection(
 )
 ```
 
-CLOVA Studio `bge-m3`는 dense vector만 반환한다. Sparse vector는 Qdrant의
-server-side BM25로 생성한다.
+CLOVA Studio `bge-m3`는 dense vector만 반환한다. Sparse vector는 Kiwi가 만든
+형태소 token 문자열을 Qdrant의 server-side BM25에 전달해 생성한다.
 
-한국어 문서에는 영어 기본 전처리 대신 다음 설정을 적재와 질의에 동일하게 적용한다.
-이 설정은 현재 로컬 이미지인 Qdrant 1.19 이상을 요구한다.
+Kiwi는 명사·용언·수식언과 영문·한자·숫자·어근만 남긴다. 조사·어미·문장부호는
+제외하고 적재와 질의에 같은 함수를 사용한다.
+
+```python
+from kiwipiepy import Kiwi
+
+
+KIWI = Kiwi()
+CONTENT_TAG_PREFIXES = ("N", "V", "M")
+CONTENT_TAGS = {"SL", "SH", "SN", "XR"}
+
+
+def to_bm25_text(text: str) -> str:
+    return " ".join(
+        token.form
+        for token in KIWI.tokenize(text)
+        if token.tag.startswith(CONTENT_TAG_PREFIXES) or token.tag in CONTENT_TAGS
+    )
+```
+
+Qdrant는 이미 분리된 token을 다시 분석하지 않도록 `whitespace` tokenizer를 사용한다.
+영어 token만 소문자로 정규화하며 Qdrant의 stemming과 stopword 처리는 비활성화한다.
 
 ```python
 BM25_OPTIONS = models.Bm25Config(
     k=1.2,
     b=0.75,
     avg_len=256,
-    tokenizer=models.TokenizerType.MULTILINGUAL,
+    tokenizer=models.TokenizerType.WHITESPACE,
+    lowercase=True,
     stemmer=models.DisabledStemmerParams(type=models.NoStemmer.NONE),
     stopwords=models.StopwordsSet(),
 )
 ```
 
-적재 시에는 두 vector 모두 `embedding_content`를 입력으로 사용한다.
+Dense는 `embedding_content`를 그대로 사용하고, sparse는 같은 본문을 Kiwi로 전처리한
+결과를 사용한다. 전처리 결과를 별도 payload로 저장하지 않는다.
 
 ```python
 models.PointStruct(
@@ -100,7 +122,7 @@ models.PointStruct(
     vector={
         "dense": dense_vector,
         "sparse": models.Document(
-            text=embedding_content,
+            text=to_bm25_text(embedding_content),
             model="qdrant/bm25",
             options=BM25_OPTIONS,
         ),
@@ -109,8 +131,9 @@ models.PointStruct(
 )
 ```
 
-Qdrant는 `Document`를 `indices`와 `values`로 변환해 저장한다. 한국어 BM25 품질이
-부족한 경우에만 로컬 `BAAI/bge-m3`의 sparse lexical weights를 비교한다.
+Qdrant는 `Document`를 `indices`와 `values`로 변환해 저장한다. 적재할 청크의 Kiwi
+결과가 비어 있으면 잘못된 청크로 처리해 적재하지 않는다. 질의 결과만 비어 있으면
+sparse prefetch를 생략하고 dense 검색만 수행한다.
 
 ### Retrieval build manifest
 
@@ -133,8 +156,13 @@ data/processed/retrieval/pension_documents_v1/manifest.json
   },
   "sparse": {
     "model": "qdrant/bm25",
+    "preprocessor": "kiwi-content-v1",
+    "kiwipiepy_version": "0.23.2",
+    "pos_prefixes": ["N", "V", "M"],
+    "pos_tags": ["SL", "SH", "SN", "XR"],
     "modifier": "idf",
-    "tokenizer": "multilingual",
+    "tokenizer": "whitespace",
+    "lowercase": true,
     "stemmer": "none",
     "stopwords": [],
     "k": 1.2,
@@ -157,7 +185,7 @@ collection을 만들어 전체 문서를 다시 적재한다.
 | `document_type` | `DocumentType` | ingest 분류값 | 문서군 필터 |
 | `chunk_index` | `int` | 문서별 0 기반 순서 | 순서 복원·인접 조회 |
 | `content` | `str` | `DocChunk.text` | 인용·응답 |
-| `embedding_content` | `str` | `chunker.contextualize(chunk)` | dense·sparse 입력 |
+| `embedding_content` | `str` | `chunker.contextualize(chunk)` | dense 입력·Kiwi 전처리 원문 |
 | `heading_path` | `list[str]` | `meta.headings` | 제목 계층·검색 문맥 |
 | `captions` | `list[str]` | `meta.captions` | 표·그림 문맥 |
 | `element_types` | `list[str]` | document item label | 요소 필터 |
@@ -193,7 +221,8 @@ class DocumentType(StrEnum):
 ### 본문과 구조
 
 - `content`만 최종 근거로 인용한다.
-- `embedding_content`에는 제목, 캡션과 반복 표 헤더가 포함될 수 있다.
+- `embedding_content`에는 제목, 캡션과 반복 표 헤더가 포함될 수 있다. Sparse 입력은
+  이 값에 `to_bm25_text()`를 적용해 생성한다.
 - `heading_path`는 큰 제목부터 가까운 제목 순서로 저장한다. `title`은 저장하지 않고
   마지막 원소에서 만든다.
 - `captions`는 연결된 표·그림 순서를 유지한다.
@@ -312,8 +341,8 @@ get_neighbor_chunks(
 get_chunk(chunk_id: str) -> Chunk | None
 ```
 
-Hybrid 검색은 같은 payload filter로 dense와 sparse 결과를 각각 prefetch한 뒤 RRF로
-결합한다.
+Hybrid 검색은 원문 질의를 dense embedding과 Kiwi token 문자열로 각각 변환한다. 같은
+payload filter로 두 결과를 prefetch한 뒤 RRF로 결합한다.
 
 ```python
 client.query_points(
@@ -321,7 +350,7 @@ client.query_points(
     prefetch=[
         models.Prefetch(
             query=models.Document(
-                text=query.text,
+                text=to_bm25_text(query.text),
                 model="qdrant/bm25",
                 options=BM25_OPTIONS,
             ),
@@ -346,6 +375,7 @@ client.query_points(
 - `element_types`가 여러 개면 하나 이상 포함한 청크를 허용한다.
 - 결과는 RRF 점수 내림차순으로 반환한다.
 - prefetch 30개와 최종 10개는 초기값이며 평가 결과로 조정한다.
+- `to_bm25_text(query.text)`가 비어 있으면 sparse prefetch를 생략한다.
 - 인접 청크는 같은 파일에서 `chunk_index` 범위를 조회하고 오름차순으로 반환한다.
 - 잘못된 UUID와 누락되거나 잘못된 payload는 retrieval 경계의 데이터 오류로 처리한다.
 
@@ -380,6 +410,7 @@ client.query_points(
 - [Qdrant indexing](https://qdrant.tech/documentation/manage-data/indexing/)
 - [Qdrant hybrid queries](https://qdrant.tech/documentation/search/hybrid-queries/)
 - [Qdrant BM25](https://qdrant.tech/documentation/inference/inference-bm25/)
+- [Kiwi·kiwipiepy](https://github.com/bab2min/kiwipiepy)
 - [CLOVA Studio 임베딩](https://guide.ncloud-docs.com/docs/ko/clovastudio-explorer03)
 - [Docling chunking](https://docling-project.github.io/docling/concepts/chunking/)
 - [GitHub 이슈 #33](https://github.com/nayeon653/-ace3/issues/33)
