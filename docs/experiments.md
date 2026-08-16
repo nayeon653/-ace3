@@ -17,3 +17,90 @@ append-only. 실패한 실험도 남긴다 — 같은 시도를 반복하지 않
 ---
 
 <!-- 첫 실험 기록을 여기부터 추가한다. -->
+
+## 2026-08-15 청킹 전 Normalization layer 필요성 A/B
+
+- 가설: DoclingDocument(raw dict)를 chunker가 직접 순회하는 것보다, 얇은
+  NormalizedDocument(heading/text/table/faq 블록 + page/level)로 변환 후
+  chunker가 그 블록만 소비하는 편이 코드 복잡도·문서유형 확장성 면에서 낫다.
+- 방법: `experiments/chunking-ab/`에 최소 prototype 작성 (production 코드 미변경,
+  embedding/Qdrant 미구현). 샘플 4건(doc55/doc29/KR5113420013/doc56 NAVER OCR)에
+  대해 variant A(DoclingDocument 직접 순회)와 variant B(정규화 후 순회)가 동일한
+  청크를 만드는지 확인하고, `run_ab.py`가 LOC/문서유형분기 수/Docling 스키마
+  식별자 수를 소스에서 직접 세어 표로 뽑는다. doc55는 기존
+  `pension_agent.ingest.heading_recovery.recover_doc55_heading_hierarchy`를
+  그대로 재사용(읽기 전용)해 두 variant가 공통으로 쓰는 마크다운 경로로 처리.
+- 결과: (수치 — `python experiments/chunking-ab/run_ab.py` 실행 결과)
+  - 4개 샘플 전부 A/B 청크 결과 완전 일치 (assert 통과).
+  - LOC: A의 청커(variant_a.py) 48줄(스키마 탐색+분기+정책 진입점이 한 파일에 혼재).
+    B는 정규화 계층(normalize_b.py) 48줄 + 청커 본체(variant_b.py) 6줄로 분리.
+    청킹 정책(chunk_core.py, 양쪽 동일 사용) 72줄은 공통.
+  - Docling 스키마 식별자($ref/self_ref/table_cells/prov/children/groups/bbox)
+    참조 수: A의 청커 11회, B의 청커(variant_b.py) 0회 — B는 청커에서
+    Docling 스키마 의존성이 완전히 격리된다.
+  - 문서유형별 분기 수(`# doc-type-branch` 표시 기준): A=3, B의 정규화 계층=3,
+    B의 청커=0. **정규화가 분기 자체를 없애주지는 않는다 — 위치만 정규화
+    계층으로 옮긴다.**
+  - metadata/page/table 보존: A/B 사이에 차이 없음(같은 walk 로직을 공유하므로
+    당연). doc55만 heading_recovery의 마크다운 경로를 타서 page=0(정보 없음) —
+    이건 A/B 공통 한계이며 normalization 도입 여부와 무관.
+  - 중복 로직: variant_a.py와 normalize_b.py 텍스트 유사도 82% (실험 안에서는
+    사실상 같은 walk 코드가 두 벌 존재 — 실제로는 A/B 중 하나만 구현하므로
+    운영에서는 발생하지 않는 실험 특유의 중복).
+- 결론: **KEEP_NORMALIZATION** (보류 아님, 채택 방향으로 판단하되 이번 PR에서
+  운영 코드에 반영하지 않음 — 요청 범위가 실험까지였음).
+  - 근거: (1) `PROJECT_RULES.md`가 `retrieved_context` precision 평가와
+    근거 문서 표시를 요구한다 — page/heading 메타데이터를 청킹 이외의 소비자
+    (agent의 근거 인용, evals)에서도 재사용할 가능성이 높고, 이는 정규화
+    계층이 이미 제공하는 안정적 산출물이다. (2) 문서 유형이 이미 10종
+    검증되었고 앞으로 늘어날 여지가 있는데(`docs/operations/document-parsing.md`
+    문서유형별 채택 정책), B는 새 유형 추가 시 변경 범위를 정규화 계층
+    한 파일로 제한한다 — chunk_core/청커 본체는 건드리지 않는다. (3) Docling
+    스키마 의존성이 청커에서 0으로 격리되어, 향후 Docling 버전/파싱 프로필이
+    바뀌어도 청킹 정책 코드는 영향받지 않는다.
+  - 단서: 문서유형별 분기 수 자체는 줄어들지 않으므로(3=3), "normalization이
+    분기를 없애준다"는 과장된 기대는 하지 않는다. 실제 도입 시 스키마 대신
+    얇게 유지(4종 블록 그대로) — 이번 실험 이상의 class/schema 설계는 불필요.
+- 관련 PR/이슈: 없음 (prototype만, 미커밋).
+
+## 2026-08-17 투자설명서 hierarchy recovery + 92개 chunk validation
+
+- 가설: raw Docling JSON 단계(정규화 계층)에서 marker/orig/document
+  order/page provenance만으로 "제N부 → N. 항목 → 가/나/다" 3단 계층을
+  파일명·운용사 하드코딩 없이 일반화해 복원할 수 있고, chunker는 그 결과
+  (`NormalizedBlock.level`)만 신뢰하면 Docling label/marker/orig를 몰라도 된다.
+- 방법: `data/raw/prospectus` 100개 원본을 SHA-256 기준 92개 unique content로
+  정리 → 전량 Docling local-ocr-v1 파싱(실패 0) → `pension_agent/ingest/normalize.py`
+  에 pictures.children 재귀(본문 텍스트가 picture 자식에 붙는 corpus-wide 구조
+  대응) + marker/orig 기반 hierarchy 복원(표지/목차 echo는 document order + 1→5
+  monotonic sequence로 배제, 합쳐진 부모/자식 노드는 문자열 내 모든 패턴
+  occurrence로 분리) 구현 → `pension_agent/retrieval/chunker.py`는 자체 정규식
+  재판정(`_COVER_PART_ECHO`/`_prospectus_heading_level` 등)을 전부 제거하고
+  `block.level`만 신뢰하도록 축소 → 대표 5개 문서 chunk QA에서 "제1부 진입 전
+  법정 유의사항도 N. 번호를 써서 level2 heading으로 오승격되는" corpus-wide
+  false positive를 발견 → `normalize.py`에 state 플래그(실제 제1~5부 진입
+  여부) 추가해 본문 진입 전 승격을 차단(내용은 text로 보존) → 92개 unique
+  전체에 대해 normalize+chunk를 실행해 자동 validation.
+- 결과: (수치 — `experiments/prospectus-full-chunk-validation/validate.py` 실행 결과, 미커밋 조사 스크립트)
+  - normalize 92/92, chunk 92/92 성공. 실패 0.
+  - total chunks 18,995(text 12,247 / table·faq 6,748). chunk 길이 p50=206,
+    p90=759, p95=793, p99=813, max=968.
+  - empty chunk 0, heading-only-like chunk 0, page_start>page_end 0.
+  - state 플래그 도입 전 대표 문서(R2_KR5118420036)에서 확인된 "제1부 이전
+    법정 유의사항이 heading으로 오승격돼 이후 17개 chunk의 section_path를
+    오염시키는" 문제 — 92개 전체 재검증 결과 재발 0건.
+  - 핵심 section(투자전략/투자위험/매입환매/보수수수료) 92/92 문서에서 전부 검출.
+  - known non-blocking anomaly 3건: R2_KR5127450117·R2_KR514X450008(raw JSON
+    자체에 제3부 본문 heading occurrence 결측), R2_KR5156450026(subitem 1건
+    보수적 미승격, 내용은 text 보존) — 전부 chunk 생성 자체는 정상.
+  - WARN 87건(전부 chunking층, 특정 section에 chunk 20~46건 집중) — 표본
+    확인 결과 실적표/클래스별 설명처럼 실제로 많은 개별 chunk가 있는 정상
+    케이스, blocker 아님.
+- 결론: **READY_FOR_EXPORT**. hierarchy 복원은 파일명/운용사 하드코딩 없이
+  marker/orig/document order/page provenance 조합만으로 일반화됐고, chunker는
+  Docling 세부사항을 몰라도 되는 계약을 유지한 채 canonical level만 신뢰한다.
+  - 단서: 짧은 text chunk(30자 미만) 비율과 large table chunk 크기는 이번
+    validation에서 의도적으로 FAIL 기준에서 제외했다 — retrieval evaluation
+    단계에서 별도 판단 필요.
+- 관련 PR/이슈: `feat/prospectus-normalization-chunking` 브랜치, PR 생성 예정.
+  상위 이슈 #35(연금 Agent Knowledge Base / Vector DB 구축)의 하위 범위.
