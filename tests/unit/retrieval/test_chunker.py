@@ -165,7 +165,9 @@ def test_heading_level_is_trusted_as_is_regardless_of_text_shape() -> None:
         "prospectusB",
         "pdf",
         [
-            NormalizedBlock(type="heading", text="제2부. 집합투자기구에 관한 사항", level=1),  # 공백 없음
+            NormalizedBlock(
+                type="heading", text="제2부. 집합투자기구에 관한 사항", level=1
+            ),  # 공백 없음
             NormalizedBlock(type="text", text="본문1"),
         ],
     )
@@ -286,7 +288,9 @@ def test_heading_then_table_inherits_full_3level_section_path() -> None:
             NormalizedBlock(type="heading", text="제 2 부", level=1),
             NormalizedBlock(type="heading", text="9. 투자전략", level=2),
             NormalizedBlock(type="heading", text="가. 일반위험", level=3),
-            NormalizedBlock(type="table", table_data=[["구분", "위험"], ["원금손실", "있음"]], page=5),
+            NormalizedBlock(
+                type="table", table_data=[["구분", "위험"], ["원금손실", "있음"]], page=5
+            ),
         ],
     )
 

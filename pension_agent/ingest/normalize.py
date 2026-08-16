@@ -115,12 +115,19 @@ def _walk(
             elif prospectus_parts is not None:
                 yield from _prospectus_text_blocks(item, prospectus_parts, prospectus_state)
             elif label == "section_header":
-                yield NormalizedBlock(type="heading", text=item["text"], level=item.get("level") or 1, page=_first_page(item))
+                yield NormalizedBlock(
+                    type="heading",
+                    text=item["text"],
+                    level=item.get("level") or 1,
+                    page=_first_page(item),
+                )
             else:
                 yield NormalizedBlock(type="text", text=item["text"], page=_first_page(item))
         elif collection == "tables":
             block_type = "faq" if sheet and "FAQ" in sheet else "table"
-            yield NormalizedBlock(type=block_type, table_data=_table_grid(item), page=_first_page(item))
+            yield NormalizedBlock(
+                type=block_type, table_data=_table_grid(item), page=_first_page(item)
+            )
         elif collection in ("groups", "pictures"):
             next_sheet = item.get("name") if item["label"] == "sheet" else sheet
             yield from _walk(
@@ -133,7 +140,9 @@ def _walk(
             )
 
 
-def _collect_ordered_texts(raw: dict, refs: list[dict], visited: set[tuple[str, int]] | None = None) -> Iterator[dict]:
+def _collect_ordered_texts(
+    raw: dict, refs: list[dict], visited: set[tuple[str, int]] | None = None
+) -> Iterator[dict]:
     """texts만, document order 그대로. 제N부 표지/본문 판정을 위한 사전 스캔용."""
 
     if visited is None:
@@ -213,7 +222,9 @@ def _prospectus_events(source: str) -> list[tuple[int, str]]:
     return events
 
 
-def _prospectus_text_blocks(item: dict, real_parts: dict[str, int], state: list[bool]) -> Iterator[NormalizedBlock]:
+def _prospectus_text_blocks(
+    item: dict, real_parts: dict[str, int], state: list[bool]
+) -> Iterator[NormalizedBlock]:
     """실제 제1~5부 본문(state[0])에 들어가기 전에는 N./가나다를 heading으로
 
     승격하지 않는다. 법정 유의사항·안내문 등도 "1.", "2.", "13." 같은 번호를
@@ -226,7 +237,9 @@ def _prospectus_text_blocks(item: dict, real_parts: dict[str, int], state: list[
     page = _first_page(item)
     if item.get("self_ref") in real_parts:
         state[0] = True
-        yield NormalizedBlock(type="heading", text=_prospectus_source_text(item), level=1, page=page)
+        yield NormalizedBlock(
+            type="heading", text=_prospectus_source_text(item), level=1, page=page
+        )
         return
 
     if not state[0]:
@@ -274,7 +287,9 @@ def _blocks_from_recovered_markdown(markdown: str) -> list[NormalizedBlock]:
         flush_table()
         heading = _HEADING_LINE.match(stripped)
         if heading:
-            blocks.append(NormalizedBlock(type="heading", text=heading.group(2), level=len(heading.group(1))))
+            blocks.append(
+                NormalizedBlock(type="heading", text=heading.group(2), level=len(heading.group(1)))
+            )
         elif stripped:
             blocks.append(NormalizedBlock(type="text", text=stripped))
     flush_table()

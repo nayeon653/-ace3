@@ -102,7 +102,9 @@ def chunk_document(doc: NormalizedDocument) -> list[Chunk]:
     return chunks
 
 
-def _split_by_block_boundary(blocks: list[NormalizedBlock], max_chars: int) -> list[list[NormalizedBlock]]:
+def _split_by_block_boundary(
+    blocks: list[NormalizedBlock], max_chars: int
+) -> list[list[NormalizedBlock]]:
     """block 경계에서만 나눈다 — block 텍스트 내부는 자르지 않는다."""
 
     pieces: list[list[NormalizedBlock]] = []
@@ -146,7 +148,9 @@ def _build_chunk(
     )
 
 
-def _emit_text_chunk(chunks: list[Chunk], doc: NormalizedDocument, path: list[str], blocks: list[NormalizedBlock]) -> None:
+def _emit_text_chunk(
+    chunks: list[Chunk], doc: NormalizedDocument, path: list[str], blocks: list[NormalizedBlock]
+) -> None:
     text = "\n".join((b.text or "").strip() for b in blocks).strip()
     if not text:
         return
@@ -160,7 +164,9 @@ def _render_table(path: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines).strip()
 
 
-def _emit_table_chunk(chunks: list[Chunk], doc: NormalizedDocument, path: list[str], block: NormalizedBlock) -> None:
+def _emit_table_chunk(
+    chunks: list[Chunk], doc: NormalizedDocument, path: list[str], block: NormalizedBlock
+) -> None:
     rows = block.table_data or []
     if not rows:
         return
@@ -206,8 +212,18 @@ def _emit_faq_chunks(
             continue
         extra_metadata = None
         if source_col is not None and source_col < len(row):
-            ids = [source_id.strip() for source_id in row[source_col].split(",") if source_id.strip()]
-            sources = {source_id: source_lookup[source_id] for source_id in ids if source_id in source_lookup}
+            ids = [
+                source_id.strip() for source_id in row[source_col].split(",") if source_id.strip()
+            ]
+            sources = {
+                source_id: source_lookup[source_id]
+                for source_id in ids
+                if source_id in source_lookup
+            }
             if sources:
                 extra_metadata = {"sources": sources}
-        chunks.append(_build_chunk(doc, len(chunks), path, text, pages, block_type="faq", extra_metadata=extra_metadata))
+        chunks.append(
+            _build_chunk(
+                doc, len(chunks), path, text, pages, block_type="faq", extra_metadata=extra_metadata
+            )
+        )
