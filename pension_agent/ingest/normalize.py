@@ -98,8 +98,11 @@ def _walk(
 
     if visited is None:
         visited = set()
-    if prospectus_parts is not None and prospectus_state is None:
-        prospectus_state = [False]
+    # prospectus_state는 hierarchy recovery 동안 공유되는 mutable state다. 최초
+    # 진입 시(호출자가 안 넘겼을 때)만 [False]로 만들고, 이후 현재 호출과 모든
+    # recursive _walk 호출이 동일한 리스트 객체를 그대로 재사용해야 상태가
+    # 중간에 리셋되지 않는다 — 아래에서 non-optional 지역 변수로 정규화한다.
+    state: list[bool] = prospectus_state if prospectus_state is not None else [False]
     for ref in refs:
         collection, idx = _resolve_ref(ref)
         key = (collection, idx)
@@ -113,14 +116,21 @@ def _walk(
             if label in _FURNITURE_LABELS:
                 pass
             elif prospectus_parts is not None:
-                yield from _prospectus_text_blocks(item, prospectus_parts, prospectus_state)
+                yield from _prospectus_text_blocks(item, prospectus_parts, state)
             elif label == "section_header":
-                yield NormalizedBlock(type="heading", text=item["text"], level=item.get("level") or 1, page=_first_page(item))
+                yield NormalizedBlock(
+                    type="heading",
+                    text=item["text"],
+                    level=item.get("level") or 1,
+                    page=_first_page(item),
+                )
             else:
                 yield NormalizedBlock(type="text", text=item["text"], page=_first_page(item))
         elif collection == "tables":
             block_type = "faq" if sheet and "FAQ" in sheet else "table"
-            yield NormalizedBlock(type=block_type, table_data=_table_grid(item), page=_first_page(item))
+            yield NormalizedBlock(
+                type=block_type, table_data=_table_grid(item), page=_first_page(item)
+            )
         elif collection in ("groups", "pictures"):
             next_sheet = item.get("name") if item["label"] == "sheet" else sheet
             yield from _walk(
@@ -129,11 +139,13 @@ def _walk(
                 sheet=next_sheet,
                 visited=visited,
                 prospectus_parts=prospectus_parts,
-                prospectus_state=prospectus_state,
+                prospectus_state=state,
             )
 
 
-def _collect_ordered_texts(raw: dict, refs: list[dict], visited: set[tuple[str, int]] | None = None) -> Iterator[dict]:
+def _collect_ordered_texts(
+    raw: dict, refs: list[dict], visited: set[tuple[str, int]] | None = None
+) -> Iterator[dict]:
     """texts만, document order 그대로. 제N부 표지/본문 판정을 위한 사전 스캔용."""
 
     if visited is None:
@@ -213,7 +225,9 @@ def _prospectus_events(source: str) -> list[tuple[int, str]]:
     return events
 
 
-def _prospectus_text_blocks(item: dict, real_parts: dict[str, int], state: list[bool]) -> Iterator[NormalizedBlock]:
+def _prospectus_text_blocks(
+    item: dict, real_parts: dict[str, int], state: list[bool]
+) -> Iterator[NormalizedBlock]:
     """실제 제1~5부 본문(state[0])에 들어가기 전에는 N./가나다를 heading으로
 
     승격하지 않는다. 법정 유의사항·안내문 등도 "1.", "2.", "13." 같은 번호를
@@ -226,7 +240,9 @@ def _prospectus_text_blocks(item: dict, real_parts: dict[str, int], state: list[
     page = _first_page(item)
     if item.get("self_ref") in real_parts:
         state[0] = True
-        yield NormalizedBlock(type="heading", text=_prospectus_source_text(item), level=1, page=page)
+        yield NormalizedBlock(
+            type="heading", text=_prospectus_source_text(item), level=1, page=page
+        )
         return
 
     if not state[0]:
@@ -274,7 +290,9 @@ def _blocks_from_recovered_markdown(markdown: str) -> list[NormalizedBlock]:
         flush_table()
         heading = _HEADING_LINE.match(stripped)
         if heading:
-            blocks.append(NormalizedBlock(type="heading", text=heading.group(2), level=len(heading.group(1))))
+            blocks.append(
+                NormalizedBlock(type="heading", text=heading.group(2), level=len(heading.group(1)))
+            )
         elif stripped:
             blocks.append(NormalizedBlock(type="text", text=stripped))
     flush_table()

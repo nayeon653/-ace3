@@ -51,5 +51,39 @@ jobs:
           assert root.joinpath("config", "defaults").is_dir();
           assert root.joinpath("prompts").is_dir()'
 
+  qdrant-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      COMPOSE_PROJECT_NAME: ace3-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Validate Qdrant Compose configuration
+        run: docker compose -f infra/compose.yaml config --quiet
+
+      - name: Start Qdrant
+        run: make qdrant-up
+
+      - name: Check Qdrant readiness and client connection
+        run: make qdrant-check
+
+      - name: Print Qdrant logs on failure
+        if: failure()
+        run: docker compose -f infra/compose.yaml logs --no-color qdrant
+
+      - name: Remove Qdrant CI resources
+        if: always()
+        run: docker compose -f infra/compose.yaml down --volumes
+
 # 전체 평가셋 회귀 테스트는 HCX 호출 비용이 있으므로 평가 하네스 구현 후
 # 수동 실행(workflow_dispatch) 워크플로로 분리한다.

@@ -12,7 +12,9 @@ _MANIFEST = {
 }
 
 
-def _write_bundle(bundle_dir: Path, raw: dict, manifest: dict | None = None, markdown: str = "") -> None:
+def _write_bundle(
+    bundle_dir: Path, raw: dict, manifest: dict | None = None, markdown: str = ""
+) -> None:
     bundle_dir.mkdir(parents=True, exist_ok=True)
     (bundle_dir / "document.docling.json").write_text(json.dumps(raw), encoding="utf-8")
     (bundle_dir / "manifest.json").write_text(json.dumps(manifest or _MANIFEST), encoding="utf-8")
@@ -21,7 +23,9 @@ def _write_bundle(bundle_dir: Path, raw: dict, manifest: dict | None = None, mar
 
 def test_generic_document_extracts_heading_text_table_with_page(tmp_path: Path) -> None:
     raw = {
-        "body": {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"}, {"$ref": "#/tables/0"}]},
+        "body": {
+            "children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"}, {"$ref": "#/tables/0"}]
+        },
         "texts": [
             {"label": "section_header", "level": 2, "text": "제목", "prov": [{"page_no": 3}]},
             {"label": "text", "text": "본문", "prov": [{"page_no": 3}]},
@@ -49,7 +53,11 @@ def test_generic_document_extracts_heading_text_table_with_page(tmp_path: Path) 
 
     assert doc.doc_id == "doc99"
     assert doc.doc_type == "pdf"
-    assert doc.metadata == {"filename": "doc99.pdf", "ocr_profile": "docling-local-ocr-v1", "pages": 3}
+    assert doc.metadata == {
+        "filename": "doc99.pdf",
+        "ocr_profile": "docling-local-ocr-v1",
+        "pages": 3,
+    }
     assert [b.type for b in doc.blocks] == ["heading", "text", "table"]
     assert doc.blocks[0].level == 2
     assert doc.blocks[0].page == 3
@@ -79,8 +87,24 @@ def test_xlsx_sheet_group_marks_faq_vs_table(tmp_path: Path) -> None:
         "body": {"children": [{"$ref": "#/groups/0"}, {"$ref": "#/groups/1"}]},
         "texts": [],
         "tables": [
-            {"data": {"num_rows": 1, "num_cols": 1, "table_cells": [{"start_row_offset_idx": 0, "start_col_offset_idx": 0, "text": "q&a"}]}},
-            {"data": {"num_rows": 1, "num_cols": 1, "table_cells": [{"start_row_offset_idx": 0, "start_col_offset_idx": 0, "text": "readme"}]}},
+            {
+                "data": {
+                    "num_rows": 1,
+                    "num_cols": 1,
+                    "table_cells": [
+                        {"start_row_offset_idx": 0, "start_col_offset_idx": 0, "text": "q&a"}
+                    ],
+                }
+            },
+            {
+                "data": {
+                    "num_rows": 1,
+                    "num_cols": 1,
+                    "table_cells": [
+                        {"start_row_offset_idx": 0, "start_col_offset_idx": 0, "text": "readme"}
+                    ],
+                }
+            },
         ],
         "groups": [
             {"label": "sheet", "name": "FAQ_100", "children": [{"$ref": "#/tables/0"}]},
@@ -100,7 +124,12 @@ def test_picture_children_text_is_walked_into_blocks(tmp_path: Path) -> None:
         "body": {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/pictures/0"}]},
         "texts": [
             {"label": "text", "text": "본문1", "prov": [{"page_no": 1}]},
-            {"label": "section_header", "level": 1, "text": "그림 안 헤딩", "prov": [{"page_no": 2}]},
+            {
+                "label": "section_header",
+                "level": 1,
+                "text": "그림 안 헤딩",
+                "prov": [{"page_no": 2}],
+            },
         ],
         "tables": [],
         "groups": [],
@@ -137,7 +166,9 @@ def test_walk_tolerates_cyclic_picture_group_reference(tmp_path: Path) -> None:
         "body": {"children": [{"$ref": "#/pictures/0"}]},
         "texts": [{"label": "text", "text": "본문", "prov": [{"page_no": 1}]}],
         "tables": [],
-        "groups": [{"label": "list", "children": [{"$ref": "#/pictures/0"}, {"$ref": "#/texts/0"}]}],
+        "groups": [
+            {"label": "list", "children": [{"$ref": "#/pictures/0"}, {"$ref": "#/texts/0"}]}
+        ],
         "pictures": [{"label": "picture", "children": [{"$ref": "#/groups/0"}]}],
     }
     _write_bundle(tmp_path, raw)
@@ -147,8 +178,20 @@ def test_walk_tolerates_cyclic_picture_group_reference(tmp_path: Path) -> None:
     assert [b.text for b in doc.blocks] == ["본문"]
 
 
-def _text(idx: int, label: str, text: str, page: int | None = None, marker: str | None = None, orig: str | None = None) -> dict:
-    item = {"label": label, "text": text, "self_ref": f"#/texts/{idx}", "prov": [{"page_no": page}] if page else []}
+def _text(
+    idx: int,
+    label: str,
+    text: str,
+    page: int | None = None,
+    marker: str | None = None,
+    orig: str | None = None,
+) -> dict:
+    item = {
+        "label": label,
+        "text": text,
+        "self_ref": f"#/texts/{idx}",
+        "prov": [{"page_no": page}] if page else [],
+    }
     if marker is not None:
         item["marker"] = marker
         item["enumerated"] = True
@@ -169,7 +212,12 @@ def test_prospectus_recovers_part_item_subitem_with_spacing_variation(tmp_path: 
         _text(7, "section_header", "나 . 특수위험", page=6),  # 마침표 앞 공백 변형
         _text(8, "text", "특수위험 본문", page=6),
     ]
-    raw = {"body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]}, "texts": texts, "tables": [], "groups": []}
+    raw = {
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]},
+        "texts": texts,
+        "tables": [],
+        "groups": [],
+    }
     _write_bundle(tmp_path, raw)
 
     doc = normalize_document(tmp_path)
@@ -187,21 +235,33 @@ def test_prospectus_recovers_part_item_subitem_with_spacing_variation(tmp_path: 
 
 def test_prospectus_selects_real_part_over_cover_echo_by_monotonic_order(tmp_path: Path) -> None:
     texts = [
-        _text(0, "section_header", "제3부. 집합투자기구의 재무 및 운용실적 등에 관한 사항", page=1),  # 표지 echo
+        _text(
+            0, "section_header", "제3부. 집합투자기구의 재무 및 운용실적 등에 관한 사항", page=1
+        ),  # 표지 echo
         _text(1, "section_header", "제1부. 모집 또는 매출에 관한 사항", page=1),  # 표지 echo
         _text(2, "text", "목차 요약", page=1),
         _text(3, "section_header", "제 1 부. 모집 또는 매출에 관한 사항", page=3),  # 실제 본문
         _text(4, "text", "본문1", page=3),
-        _text(5, "section_header", "제 3 부. 집합투자기구의 재무 및 운용실적 등에 관한 사항", page=40),  # 실제 본문
+        _text(
+            5, "section_header", "제 3 부. 집합투자기구의 재무 및 운용실적 등에 관한 사항", page=40
+        ),  # 실제 본문
         _text(6, "text", "본문2", page=40),
     ]
-    raw = {"body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]}, "texts": texts, "tables": [], "groups": []}
+    raw = {
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]},
+        "texts": texts,
+        "tables": [],
+        "groups": [],
+    }
     _write_bundle(tmp_path, raw)
 
     doc = normalize_document(tmp_path)
 
     l1 = [b.text for b in doc.blocks if b.type == "heading" and b.level == 1]
-    assert l1 == ["제 1 부. 모집 또는 매출에 관한 사항", "제 3 부. 집합투자기구의 재무 및 운용실적 등에 관한 사항"]
+    assert l1 == [
+        "제 1 부. 모집 또는 매출에 관한 사항",
+        "제 3 부. 집합투자기구의 재무 및 운용실적 등에 관한 사항",
+    ]
     # 표지 echo 2건은 heading이 아니라 본문 text로 접힌다
     text_values = [b.text for b in doc.blocks if b.type == "text"]
     assert "제3부. 집합투자기구의 재무 및 운용실적 등에 관한 사항" in text_values
@@ -211,9 +271,21 @@ def test_prospectus_selects_real_part_over_cover_echo_by_monotonic_order(tmp_pat
 def test_prospectus_splits_merged_parent_child_node(tmp_path: Path) -> None:
     texts = [
         _text(0, "section_header", "제 1 부. 모집 또는 매출에 관한 사항", page=1),
-        _text(1, "list_item", "집합투자기구의 공시에 관한 사항 가. 정기 보고서", page=2, marker="3.", orig="3. 집합투자기구의 공시에 관한 사항 가. 정기 보고서"),
+        _text(
+            1,
+            "list_item",
+            "집합투자기구의 공시에 관한 사항 가. 정기 보고서",
+            page=2,
+            marker="3.",
+            orig="3. 집합투자기구의 공시에 관한 사항 가. 정기 보고서",
+        ),
     ]
-    raw = {"body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]}, "texts": texts, "tables": [], "groups": []}
+    raw = {
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]},
+        "texts": texts,
+        "tables": [],
+        "groups": [],
+    }
     _write_bundle(tmp_path, raw)
 
     doc = normalize_document(tmp_path)
@@ -229,16 +301,31 @@ def test_prospectus_splits_merged_parent_child_node(tmp_path: Path) -> None:
 def test_prospectus_recovers_list_item_number_from_marker_and_orig(tmp_path: Path) -> None:
     texts = [
         _text(0, "section_header", "제 2 부. 집합투자기구에 관한 사항", page=1),
-        _text(1, "list_item", "집합투자기구의 투자위험", page=5, marker="10.", orig="10. 집합투자기구의 투자위험"),
+        _text(
+            1,
+            "list_item",
+            "집합투자기구의 투자위험",
+            page=5,
+            marker="10.",
+            orig="10. 집합투자기구의 투자위험",
+        ),
         _text(2, "text", "투자위험 본문", page=5),
     ]
-    raw = {"body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]}, "texts": texts, "tables": [], "groups": []}
+    raw = {
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]},
+        "texts": texts,
+        "tables": [],
+        "groups": [],
+    }
     _write_bundle(tmp_path, raw)
 
     doc = normalize_document(tmp_path)
 
     headings = [(b.level, b.text) for b in doc.blocks if b.type == "heading"]
-    assert headings == [(1, "제 2 부. 집합투자기구에 관한 사항"), (2, "10. 집합투자기구의 투자위험")]
+    assert headings == [
+        (1, "제 2 부. 집합투자기구에 관한 사항"),
+        (2, "10. 집합투자기구의 투자위험"),
+    ]
 
 
 def test_prospectus_does_not_promote_numbered_notice_before_real_part1(tmp_path: Path) -> None:
@@ -250,14 +337,28 @@ def test_prospectus_does_not_promote_numbered_notice_before_real_part1(tmp_path:
     """
 
     texts = [
-        _text(0, "section_header", "제1부. 모집 또는 매출에 관한 사항", page=1),  # 표지 재인용(echo)
-        _text(1, "list_item", "ESG집합투자기구의 경우...", page=1, marker="13.", orig="13. ESG집합투자기구의 경우..."),
+        _text(
+            0, "section_header", "제1부. 모집 또는 매출에 관한 사항", page=1
+        ),  # 표지 재인용(echo)
+        _text(
+            1,
+            "list_item",
+            "ESG집합투자기구의 경우...",
+            page=1,
+            marker="13.",
+            orig="13. ESG집합투자기구의 경우...",
+        ),
         _text(2, "text", "요약정보 본문", page=1),
         _text(3, "section_header", "제 1 부. 모집 또는 매출에 관한 사항", page=2),  # 실제 본문
         _text(4, "section_header", "1. 집합투자기구의 명칭", page=2),
         _text(5, "text", "본문1", page=2),
     ]
-    raw = {"body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]}, "texts": texts, "tables": [], "groups": []}
+    raw = {
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(len(texts))]},
+        "texts": texts,
+        "tables": [],
+        "groups": [],
+    }
     _write_bundle(tmp_path, raw)
 
     doc = normalize_document(tmp_path)
@@ -277,7 +378,12 @@ def test_non_prospectus_document_keeps_old_label_based_behavior(tmp_path: Path) 
     raw = {
         "body": {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"}]},
         "texts": [
-            {"label": "section_header", "level": 2, "text": "3. 아무 제목", "prov": [{"page_no": 1}]},
+            {
+                "label": "section_header",
+                "level": 2,
+                "text": "3. 아무 제목",
+                "prov": [{"page_no": 1}],
+            },
             {"label": "text", "text": "본문", "prov": [{"page_no": 1}]},
         ],
         "tables": [],

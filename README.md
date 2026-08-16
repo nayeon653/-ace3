@@ -77,19 +77,35 @@ make setup   # 런타임 + 개발 의존성 설치
 make check   # Ruff 린트·포맷 + mypy 타입 검사 + pytest
 make build   # wheel + source distribution 빌드
 
+make qdrant-up     # 로컬 Qdrant 실행
+make qdrant-check  # readiness + Python 클라이언트 연결 확인
+make qdrant-down   # 로컬 Qdrant 종료 (데이터 유지)
+
 make setup-parser  # Docling 파서 전용 환경 설치
 make parser-test   # 파서 단위 테스트
 ```
+
+로컬 Qdrant의 대시보드, 연결 주소, 데이터 유지와 초기화 방법은
+[`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md)를 따른다.
 
 `.env`에 CLOVA Studio 연결 정보를 설정한 뒤 FastAPI 서버를 로컬에서 실행합니다.
 Uvicorn 기본값인 `127.0.0.1:8000`을 사용하므로 별도 host와 port 옵션은 필요하지
 않습니다.
 
 ```bash
-uv run uvicorn pension_agent.api.app:app
+uv run uvicorn pension_agent.api.app:app --env-file .env
 ```
 
+`--env-file .env`는 로컬 설정을 Uvicorn 서버 프로세스의 환경변수로 주입한다.
+`ClovaStudioConnection`은 Pydantic Settings로 `.env`를 직접 읽지만, LangSmith 기본
+tracing은 프로세스 환경의 `LANGSMITH_*`를 읽으므로 이 옵션이 필요하다.
+
 로컬에서는 `DEPLOY_COMMIT_SHA`를 생략해도 되며 `/health`에 `unknown`으로 표시됩니다.
+
+LangSmith tracing은 기본적으로 꺼져 있습니다. 개발자가 개인 무료 계정의 환경변수를
+로컬에 등록해 활성화하면 일반 `/answer` 요청을 포함한 모든 Agent 실행을 추적합니다.
+개인 계정·project 설정과 활성화 방법은
+[`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 따릅니다.
 서버 시작 과정에서 HCX 모델, Main Supervisor와 `AnswerService`를 프로세스당 한 번
 조립하고 모든 `/answer` 요청에서 재사용합니다.
 
@@ -164,5 +180,6 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 - [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
 - [`docs/operations/api-server.md`](docs/operations/api-server.md) — API 서버 로컬 실행·배포·문제 해결
+- [`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md) — 로컬 Qdrant 실행·연결·데이터 관리
 - [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md) — Docling 실행·저장·검수 정책
 - [`SUBMISSION.md`](SUBMISSION.md) — 제출물 체크리스트 및 마감

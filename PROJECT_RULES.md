@@ -124,12 +124,16 @@
 - LangSmith 추적의 데이터 범위와 활성화·삭제 절차는
   [`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 유일한
   운영 기준으로 사용한다.
-- 저장소와 CI의 기본값은 비활성화다. 팀이 통제하는 개발 환경에서 합성 데이터만
-  사용할 때 명시적으로 활성화하며 입력·출력을 포함해 100% 추적할 수 있다.
-- 실제 질문, 대회 평가 질문, 제공 문서와 실제 사용자 계산 데이터가 실행 경로에
-  들어오면 개발 환경에서도 외부 tracing을 비활성화한다.
-- 시크릿은 어떤 trace에도 포함하지 않는다. LangSmith 설정이나 장애가 제품 실행과
-  평가 API에 영향을 주어서는 안 된다.
+- 저장소, CI와 배포 환경의 기본값은 비활성화다. 개발자가 개인 로컬 환경에서
+  `LANGSMITH_TRACING=true`로 활성화하면 `/answer`를 포함한 모든 Agent 실행의
+  입력·출력을 LangSmith 기본 tracing으로 100% 추적한다.
+- LangSmith는 팀 협업용 유료 Plus plan이나 공용 workspace를 구매하지 않는다. 각
+  개발자가 개인 Developer 계정에서 API key와 개인 project를 만들고 커밋되지 않는
+  로컬 `.env`에 등록한다.
+- 현재 시스템에는 고객정보나 개인정보가 들어오는 구조가 없다는 전제의 결정이다. 해당
+  구조를 추가하기 전에는 데이터 범위와 masking 정책을 새 결정 기록으로 다시 정한다.
+- LangSmith key와 workspace·project 설정은 팀 시크릿이나 배포 설정으로 공유하지 않는다.
+  LangSmith 설정이나 장애가 제품 실행과 평가 API에 영향을 주어서는 안 된다.
 
 ## 개발 메모
 
