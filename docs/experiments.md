@@ -104,3 +104,46 @@ append-only. 실패한 실험도 남긴다 — 같은 시도를 반복하지 않
     단계에서 별도 판단 필요.
 - 관련 PR/이슈: `feat/prospectus-normalization-chunking` 브랜치, PR 생성 예정.
   상위 이슈 #35(연금 Agent Knowledge Base / Vector DB 구축)의 하위 범위.
+
+## 2026-08-16 Knowledge Docs 58개 automatic ingestion + NAVER raster fallback 실패
+
+- 가설: `data/raw/knowledge_docs` 58개 원본을 기존 accepted bundle 재사용(6) +
+  신규 local(35) + 신규 NAVER(14) 자동 라우팅으로 완전히 reconciliation하고,
+  자동 처리 불가 문서는 manual_normalization으로 명확히 분리할 수 있다.
+- 방법: `experiments/knowledge-docs-batch-parse/run_batch.py`(dry-run 기본,
+  `--live`로만 실행)로 SHA-256+profile 기준 기존 success bundle skip, 실패해도
+  다음 파일 계속, 파일별 timeout, `.env.parser` 기반 NAVER 호출을 구현해 실행.
+  NAVER 14건 중 실패 3건(doc24/doc28/doc30)은 `experiments/manual-docs-inspection/`,
+  `experiments/knowledge-docs-naver-raster-fallback/`에서 원인 조사와 fallback을
+  추가로 시도.
+- 결과:
+  - 100→92 reconciliation처럼: 58 = reuse 6 + 신규 local 35 + 신규 NAVER 13(성공)
+    + manual_normalization 4(doc7, doc24, doc28, doc30). 누락 0, 미분류 0.
+  - **버그 발견/수정**: `uv run --env-file`에 Windows backslash 절대경로
+    (`C:\Users\...`)를 넘기면 경로의 백슬래시가 전부 삭제돼(`C:Users...`)
+    `--env-file` 파싱 단계에서 즉시 실패(exit 2, uv 자체 에러) — NAVER 14건이
+    전부 이 버그로 실패했던 것이었고 실제 NAVER API/인증 문제가 아니었다.
+    `run_batch.py`에서 `ENV_FILE.as_posix()`로 우회해 해결, doc3 단독 재실행으로
+    실제 성공(`docling-naver-ocr-v1`, `api_calls=7, retry_attempts=0`) 확인.
+    별도로 자식 프로세스 stdout/stderr가 Windows cp949로 나와 부모의
+    UTF-8 강제 디코딩이 `UnicodeDecodeError`로 죽던 문제도 함께 발견해
+    `PYTHONIOENCODING=utf-8` 자식 env 설정 + 안전한 fallback 디코딩으로 수정.
+  - 버그 수정 후 재실행한 NAVER 13/14건은 정상 성공. 나머지 doc24/doc28/doc30은
+    `NaverOcrError("NAVER OCR image inference failed")`
+    (`tools/docling_parser/.../ocr/naver_plugin.py`의 `inferResult != "SUCCESS"`
+    분기, HTTP/인증 문제 아니고 retry 경로도 없음) — 동일 원본으로 1회
+    재시도해도 동일 실패, 원본 페이지를 pdfium으로 다시 렌더링한 clean
+    full-page raster PDF(원본 구조 우회)로 바꿔도 **완전히 동일한 실패
+    패턴**(에러 메시지/반복 횟수까지 일치)이 재현됐다 — 원인이 원본 PDF의
+    이미지 구조(예: doc28의 77개 line-slice 조각화)가 아니라 더 깊은
+    단계(Docling의 OCR 영역 crop 로직 또는 NAVER 응답 자체)에 있음을 시사.
+  - doc7은 기존 로컬 bundle에 정보 손실은 없으나(848 block 전부 복원됨)
+    UI 스크린샷 조각화로 자연스러운 문장순서가 없어 `chunker.py`가 이미
+    `_PENDING_MANUAL_NORMALIZATION_DOC_IDS`로 차단 중 — 재파싱 불필요, 경량
+    후처리(순수기호 fragment 필터 + heading 하위 텍스트 연결)만 필요.
+- 결론: **자동 파싱은 54/58에서 종료, doc7/doc24/doc28/doc30 4건은
+  manual_normalization으로 최종 확정**. NAVER raster fallback까지 시도했음에도
+  동일하게 실패하는 문서는 더 이상 automatic NAVER 재시도를 반복하지 않고 바로
+  manual_normalization으로 분류한다(운영 정책에 반영, 아래 문서 참고).
+- 관련 PR/이슈: `feat/knowledge-docs-ingestion` 브랜치, PR 생성 예정. 상위
+  이슈 #35(연금 Agent Knowledge Base / Vector DB 구축)의 하위 범위.

@@ -197,6 +197,13 @@ uv run --frozen --project "<parser-project>" --env-file "<repo-root>/.env.parser
 - doc7류처럼 NAVER OCR이 실패(`NAVER_OCR_FAILED`)하는 사례가 단일 문서에
   그치면 VLM 파이프라인을 새로 들이지 않고, 로컬 OCR 결과에 수동
   normalization을 적용한다. 같은 실패가 반복되면 VLM 도입을 다시 검토한다.
+- doc24·doc28·doc30류처럼 NAVER OCR이 (1) 원본 그대로, (2) 동일 입력 재시도,
+  (3) 페이지를 다시 렌더링한 clean full-page raster 입력까지 세 방식 모두에서
+  동일하게 실패하면, 추가 automatic NAVER 재시도를 반복하지 않고
+  manual_normalization으로 분류한다. 세 시도가 전부 같은 실패로 귀결된다는
+  것은 원인이 입력 파일 구조가 아니라 더 깊은 단계(파서의 OCR 영역 분할 또는
+  NAVER 응답 자체)에 있다는 신호이며, 같은 조건으로 자동 재시도를 반복해도
+  결과가 달라지지 않는다.
 - doc55류 매뉴얼처럼 로컬 OCR 산출물에 heading 계층이 없는 문서는
   `pension_agent/ingest/heading_recovery.py`로 후처리해 헤딩 레벨(Ⅰ~Ⅳ→H1,
   굵은 `N. 제목`→H2, 가/나/다→H3)을 복원한다. `N)`과 `①②③`은 본문으로 둔다.
