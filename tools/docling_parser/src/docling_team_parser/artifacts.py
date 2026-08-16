@@ -7,6 +7,7 @@ import platform
 import shutil
 import sys
 import tempfile
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -44,6 +45,8 @@ _RUNTIME_PACKAGES = (
     "torchvision",
     "transformers",
 )
+_PUBLISH_RETRY_ATTEMPTS = 3
+_PUBLISH_RETRY_DELAY_SECONDS = 0.5
 
 
 def _unresolved_absolute(path: Path) -> Path:
@@ -295,12 +298,21 @@ def parse_document(
         }
         write_json_atomic(stage / "manifest.json", manifest)
 
-        try:
-            stage.replace(target)
-        except OSError as exc:
+        # Windows에서 방금 쓴 큰 파일을 백신·인덱서가 잠깐 잠가 rename이 실패하는
+        # 경우가 있어, 짧게 재시도해 그 순간만 넘긴다.
+        publish_error: OSError | None = None
+        for attempt in range(_PUBLISH_RETRY_ATTEMPTS):
+            try:
+                stage.replace(target)
+                break
+            except OSError as exc:
+                publish_error = exc
+                if attempt < _PUBLISH_RETRY_ATTEMPTS - 1:
+                    time.sleep(_PUBLISH_RETRY_DELAY_SECONDS)
+        else:
             raise ParserError(
                 "OUTPUT_PUBLISH_FAILED", f"결과를 게시할 수 없습니다: {target}"
-            ) from exc
+            ) from publish_error
 
         return ArtifactBundle(
             bundle_id=bundle_id,
