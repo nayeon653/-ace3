@@ -98,8 +98,11 @@ def _walk(
 
     if visited is None:
         visited = set()
-    if prospectus_parts is not None and prospectus_state is None:
-        prospectus_state = [False]
+    # prospectus_state는 hierarchy recovery 동안 공유되는 mutable state다. 최초
+    # 진입 시(호출자가 안 넘겼을 때)만 [False]로 만들고, 이후 현재 호출과 모든
+    # recursive _walk 호출이 동일한 리스트 객체를 그대로 재사용해야 상태가
+    # 중간에 리셋되지 않는다 — 아래에서 non-optional 지역 변수로 정규화한다.
+    state: list[bool] = prospectus_state if prospectus_state is not None else [False]
     for ref in refs:
         collection, idx = _resolve_ref(ref)
         key = (collection, idx)
@@ -113,7 +116,7 @@ def _walk(
             if label in _FURNITURE_LABELS:
                 pass
             elif prospectus_parts is not None:
-                yield from _prospectus_text_blocks(item, prospectus_parts, prospectus_state)
+                yield from _prospectus_text_blocks(item, prospectus_parts, state)
             elif label == "section_header":
                 yield NormalizedBlock(
                     type="heading",
@@ -136,7 +139,7 @@ def _walk(
                 sheet=next_sheet,
                 visited=visited,
                 prospectus_parts=prospectus_parts,
-                prospectus_state=prospectus_state,
+                prospectus_state=state,
             )
 
 
