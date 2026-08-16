@@ -23,6 +23,11 @@ from pension_agent.ingest.heading_recovery import recover_doc55_heading_hierarch
 _FURNITURE_LABELS = {"page_header", "page_footer", "checkbox_unselected"}
 _HEADING_LINE = re.compile(r"^(#{1,3}) (.+)$")
 
+# NAVER OCR이 원본/재시도/raster fallback 세 방식 모두에서 반복 실패해 bundle
+# 자체가 없는 문서 — data/processed/docling/knowledge_docs_manual/<doc_id>/
+# manual_blocks.json(NormalizedBlock 리스트를 그대로 dict로 직렬화)에서 읽는다.
+_MANUAL_BLOCK_DOC_IDS = {"doc24", "doc28", "doc30"}
+
 # 투자설명서 hierarchy 복원 — 공백 변형(제2부/제 2 부, 가./가 .)을 전부 허용한다.
 _PART_RE = re.compile(r"^제\s*(\d+)\s*부\s*[.\s]?")
 _ITEM_EVENT_RE = re.compile(r"(?<!\d)(\d{1,2})\s*\.(?=\s)")
@@ -31,7 +36,6 @@ _SUBITEM_EVENT_RE = re.compile(r"([가나다라마바사아자차카타파하])\
 
 def normalize_document(bundle_dir: Path) -> NormalizedDocument:
     manifest = json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
-    raw = json.loads((bundle_dir / "document.docling.json").read_text(encoding="utf-8"))
 
     source = manifest["source"]
     doc_id = Path(source["filename"]).stem
@@ -45,12 +49,80 @@ def normalize_document(bundle_dir: Path) -> NormalizedDocument:
     if doc_id == "doc55":
         markdown = (bundle_dir / "document.md").read_text(encoding="utf-8")
         blocks = _blocks_from_recovered_markdown(markdown)
+    elif doc_id in _MANUAL_BLOCK_DOC_IDS:
+        manual_blocks = json.loads((bundle_dir / "manual_blocks.json").read_text(encoding="utf-8"))
+        blocks = [NormalizedBlock(**block) for block in manual_blocks]
     else:
+        raw = json.loads((bundle_dir / "document.docling.json").read_text(encoding="utf-8"))
         ordered_texts = list(_collect_ordered_texts(raw, raw["body"]["children"]))
         real_parts = _select_real_prospectus_parts(ordered_texts) or None
         blocks = list(_walk(raw, raw["body"]["children"], sheet=None, prospectus_parts=real_parts))
+        if doc_id == "doc7":
+            blocks = _filter_doc7_noise(blocks)
 
     return NormalizedDocument(doc_id=doc_id, doc_type=doc_type, metadata=metadata, blocks=blocks)
+
+
+def _filter_doc7_noise(blocks: list[NormalizedBlock]) -> list[NormalizedBlock]:
+    """doc7의 명백한 OCR 잡음만 제거하고 반복되는 명확한 OCR 오독을 보정한다."""
+
+    drop_exact = {
+        "Contents",
+        "Day s",
+        "BONDS",
+    }
+
+    # doc7 page 5의 장식 이미지에서 나온 OCR 조각
+    drop_page5_text = {
+        "change",
+        "50",
+        "Oo",
+    }
+
+    text_replacements = {
+        "금움상품 매매 메뉴": "금융상품 매매 메뉴",
+        "주간 핵심금움상품": "주간 핵심금융상품",
+        "금움상품매매": "금융상품매매",
+    }
+
+    cleaned: list[NormalizedBlock] = []
+
+    for block in blocks:
+        text = (block.text or "").strip()
+
+        # 명백한 장식/목차 OCR 제거
+        if text in drop_exact:
+            continue
+
+        # doc7 page 5에서 확인된 장식성 OCR 조각만 제거
+        if block.type == "text" and block.page == 5 and text in drop_page5_text:
+            continue
+
+        if block.type == "text":
+            # 빈 문자열 / 1글자 OCR 조각 제거
+            if len(text) <= 1:
+                continue
+
+            # 특수문자 위주의 OCR garbage 제거
+            meaningful_chars = sum(char.isalnum() or "가" <= char <= "힣" for char in text)
+
+            if len(text) >= 10 and meaningful_chars / len(text) < 0.2:
+                continue
+
+        if block.type == "table" and block.table_data:
+            # doc7의 장식/목차가 거대한 특수문자 표로 OCR된 경우 제거
+            table_text = " ".join(cell for row in block.table_data for cell in row)
+
+            if table_text.count("〮") >= 20:
+                continue
+
+        # 반복적으로 확인된 OCR 오독만 보정
+        if text in text_replacements:
+            block.text = text_replacements[text]
+
+        cleaned.append(block)
+
+    return cleaned
 
 
 def _resolve_ref(ref: dict) -> tuple[str, int]:
