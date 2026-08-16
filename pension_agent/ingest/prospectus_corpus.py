@@ -64,14 +64,19 @@ def _find_success_bundles(processed_root: Path) -> dict[str, Path]:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if manifest.get("status") == "success" and manifest.get("profile", {}).get("id") == PROFILE_ID:
+        if (
+            manifest.get("status") == "success"
+            and manifest.get("profile", {}).get("id") == PROFILE_ID
+        ):
             sha = manifest.get("source", {}).get("sha256")
             if sha:
                 bundles.setdefault(sha, manifest_path.parent)
     return bundles
 
 
-def build_source_manifest(source_root: Path = SOURCE_ROOT, processed_root: Path = PROCESSED_ROOT) -> list[dict[str, Any]]:
+def build_source_manifest(
+    source_root: Path = SOURCE_ROOT, processed_root: Path = PROCESSED_ROOT
+) -> list[dict[str, Any]]:
     """원본 100개 각각 1 row. rows 순서는 경로 정렬로 고정(재실행 시 동일)."""
 
     bundles_by_hash = _find_success_bundles(processed_root)
@@ -119,7 +124,9 @@ def _canonical_chunk_row(chunk, cdoc_id: str, index: int) -> dict[str, Any]:
     }
 
 
-def export_canonical_chunks(source_rows: list[dict[str, Any]], processed_root: Path = PROCESSED_ROOT) -> list[dict[str, Any]]:
+def export_canonical_chunks(
+    source_rows: list[dict[str, Any]], processed_root: Path = PROCESSED_ROOT
+) -> list[dict[str, Any]]:
     """source manifest rows에서 unique source_sha256(92개)만 뽑아 1회씩 chunk한다.
 
     canonical_doc_id 오름차순으로 순회한다 — 원본 디렉터리 나열 순서가 아니라

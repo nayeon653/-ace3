@@ -33,7 +33,11 @@ def _write_bundle(processed_root: Path, bundle_name: str, sha256: str) -> None:
     manifest = {
         "status": "success",
         "profile": {"id": pc.PROFILE_ID},
-        "source": {"filename": f"{bundle_name.split('--')[0]}.pdf", "sha256": sha256, "extension": ".pdf"},
+        "source": {
+            "filename": f"{bundle_name.split('--')[0]}.pdf",
+            "sha256": sha256,
+            "extension": ".pdf",
+        },
         "stats": {"pages": 1},
     }
     (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -64,7 +68,9 @@ def _build_fixture(tmp_path: Path) -> tuple[Path, Path, str, str]:
     return source_root, processed_root, sha_x, sha_y
 
 
-def test_source_manifest_has_one_row_per_raw_source_and_shares_canonical_id_for_dup(tmp_path: Path) -> None:
+def test_source_manifest_has_one_row_per_raw_source_and_shares_canonical_id_for_dup(
+    tmp_path: Path,
+) -> None:
     source_root, processed_root, sha_x, sha_y = _build_fixture(tmp_path)
 
     rows = pc.build_source_manifest(source_root, processed_root)
@@ -74,7 +80,11 @@ def test_source_manifest_has_one_row_per_raw_source_and_shares_canonical_id_for_
     by_id = {r["source_id"]: r for r in rows}
 
     assert by_id["CODE_A"]["source_sha256"] == by_id["CODE_B"]["source_sha256"] == sha_x
-    assert by_id["CODE_A"]["canonical_doc_id"] == by_id["CODE_B"]["canonical_doc_id"] == pc.canonical_doc_id(sha_x)
+    assert (
+        by_id["CODE_A"]["canonical_doc_id"]
+        == by_id["CODE_B"]["canonical_doc_id"]
+        == pc.canonical_doc_id(sha_x)
+    )
     assert by_id["CODE_C"]["canonical_doc_id"] == pc.canonical_doc_id(sha_y)
     assert by_id["CODE_A"]["canonical_doc_id"] != by_id["CODE_C"]["canonical_doc_id"]
 
@@ -94,12 +104,18 @@ def test_canonical_doc_id_independent_of_which_product_code_was_parsed(tmp_path:
     _write_source(source_root, "CODE_A", content_x)
     _write_source(source_root, "CODE_B", content_x)
     sha_x = hashlib.sha256(content_x).hexdigest()
-    _write_bundle(processed_root, f"R2_CODE_B--{sha_x[:12]}--{pc.PROFILE_ID}", sha_x)  # 대표가 B로 바뀜
+    _write_bundle(
+        processed_root, f"R2_CODE_B--{sha_x[:12]}--{pc.PROFILE_ID}", sha_x
+    )  # 대표가 B로 바뀜
 
     rows = pc.build_source_manifest(source_root, processed_root)
     by_id = {r["source_id"]: r for r in rows}
 
-    assert by_id["CODE_A"]["canonical_doc_id"] == by_id["CODE_B"]["canonical_doc_id"] == pc.canonical_doc_id(sha_x)
+    assert (
+        by_id["CODE_A"]["canonical_doc_id"]
+        == by_id["CODE_B"]["canonical_doc_id"]
+        == pc.canonical_doc_id(sha_x)
+    )
 
 
 def test_known_anomaly_note_attached_by_source_id(tmp_path: Path) -> None:
