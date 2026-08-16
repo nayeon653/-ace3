@@ -360,6 +360,69 @@ def test_html_export_failure_leaves_no_partial_bundle(
     assert not list(output_dir.glob(".docling-parser-*"))
 
 
+def test_publish_retries_transient_replace_failure_then_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", SuccessfulEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "outputs"
+
+    original_replace = Path.replace
+    attempts: list[Path] = []
+
+    def flaky_replace(self: Path, target: Path) -> Path:
+        if self.is_dir():
+            attempts.append(self)
+            if len(attempts) < 2:
+                raise OSError("synthetic transient lock")
+        return original_replace(self, target)
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(artifacts_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+
+    bundle = parse_document(source, output_dir, "local")
+
+    assert len(attempts) == 2
+    assert sleep_calls == [artifacts_module._PUBLISH_RETRY_DELAY_SECONDS]
+    assert bundle.output_dir.exists()
+    assert not list(output_dir.glob(".docling-parser-*"))
+
+
+def test_publish_fails_after_exhausting_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(artifacts_module, "DoclingEngine", SuccessfulEngine)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "outputs"
+
+    original_replace = Path.replace
+    attempts: list[Path] = []
+
+    def always_failing_replace(self: Path, target: Path) -> Path:
+        if self.is_dir():
+            attempts.append(self)
+            raise OSError("synthetic persistent lock")
+        return original_replace(self, target)
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(artifacts_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(Path, "replace", always_failing_replace)
+
+    with pytest.raises(ParserError) as caught:
+        parse_document(source, output_dir, "local")
+
+    assert caught.value.code == "OUTPUT_PUBLISH_FAILED"
+    assert len(attempts) == artifacts_module._PUBLISH_RETRY_ATTEMPTS
+    assert len(sleep_calls) == artifacts_module._PUBLISH_RETRY_ATTEMPTS - 1
+    assert not list(output_dir.glob("sample--*"))
+    assert not list(output_dir.glob(".docling-parser-*"))
+
+
 def test_source_read_error_is_returned_as_parser_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
