@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from pension_agent.agent import create_search_agent, create_search_tools
 from pension_agent.agent.search_agent import load_search_agent_prompt
+from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG, SearchAgentConfig
 from pension_agent.core import (
     DocumentType,
     ElementType,
@@ -121,10 +122,15 @@ def _tools(
     *,
     embedder: FakeEmbedder | None = None,
     backend: FakeSearchBackend | None = None,
+    config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
 ) -> tuple[dict[str, BaseTool], FakeEmbedder, FakeSearchBackend]:
     resolved_embedder = embedder or FakeEmbedder()
     resolved_backend = backend or FakeSearchBackend()
-    tools = create_search_tools(embedder=resolved_embedder, backend=resolved_backend)
+    tools = create_search_tools(
+        embedder=resolved_embedder,
+        backend=resolved_backend,
+        config=config,
+    )
     return {tool.name: tool for tool in tools}, resolved_embedder, resolved_backend
 
 
@@ -307,6 +313,34 @@ def test_search_tools_have_stable_names_and_argument_schemas() -> None:
     }
 
 
+def test_search_tools_use_configured_defaults() -> None:
+    config = SearchAgentConfig(
+        max_model_calls=3,
+        max_tool_calls=2,
+        default_search_mode=SearchMode.SPARSE,
+        default_result_limit=5,
+        default_neighbor_before=2,
+        default_neighbor_after=3,
+    )
+    tools, embedder, backend = _tools(config=config)
+
+    tools["search_chunks"].invoke({"text": "IRP 이전"})
+    tools["get_neighbor_chunks"].invoke({"source_file_name": "guide.pdf", "chunk_index": 4})
+
+    query, _filters, limit = backend.chunk_searches[0]
+    assert query.mode is SearchMode.SPARSE
+    assert limit == 5
+    assert backend.neighbor_requests == [
+        NeighborRequest(
+            source_file_name="guide.pdf",
+            chunk_index=4,
+            before=2,
+            after=3,
+        )
+    ]
+    assert embedder.calls == []
+
+
 def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     chunk = _chunk()
     backend = FakeSearchBackend(hits=[SearchHit(chunk=chunk, score=0.9)])
@@ -344,7 +378,7 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     assert model.bindings[-1][1]["tool_choice"] is None
 
 
-def test_search_agent_stops_repeated_tool_calls_at_run_limit() -> None:
+def test_search_agent_stops_repeated_tool_calls_at_configured_run_limit() -> None:
     backend = FakeSearchBackend()
     responses = [
         AIMessage(
@@ -362,11 +396,24 @@ def test_search_agent_stops_repeated_tool_calls_at_run_limit() -> None:
     ]
     model = ToolCallingFakeModel(responses=responses)
     model.bindings.clear()
-    agent = create_search_agent(model=model, embedder=FakeEmbedder(), backend=backend)
+    config = SearchAgentConfig(
+        max_model_calls=3,
+        max_tool_calls=2,
+        default_search_mode=SearchMode.HYBRID,
+        default_result_limit=10,
+        default_neighbor_before=1,
+        default_neighbor_after=1,
+    )
+    agent = create_search_agent(
+        model=model,
+        embedder=FakeEmbedder(),
+        backend=backend,
+        config=config,
+    )
 
     result = agent.invoke({"messages": [{"role": "user", "content": "반복 검색"}]})
 
-    assert len(backend.chunk_searches) == 3
+    assert len(backend.chunk_searches) == 2
     assert "검색 호출 한도" in result["messages"][-1].text
 
 

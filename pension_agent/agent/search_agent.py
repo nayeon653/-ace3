@@ -22,6 +22,7 @@ from langchain_core.tools import BaseTool, tool
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import Field
 
+from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG, SearchAgentConfig
 from pension_agent.core import (
     DocumentType,
     NeighborRequest,
@@ -34,8 +35,6 @@ from pension_agent.core import (
 )
 
 _MAX_RESULT_LIMIT = 100
-_MAX_MODEL_CALLS = 4
-_MAX_TOOL_CALLS = 3
 _SEARCH_LIMIT_MESSAGE = (
     "검색 호출 한도에 도달해 추가 근거를 확인하지 못했습니다. "
     "현재까지 확인된 검색 결과만 사용하거나 검색 범위를 좁혀야 합니다."
@@ -124,13 +123,14 @@ class _RequireSearchToolResult(AgentMiddleware[Any, Any, Any]):
 class _SearchModelCallLimit(ModelCallLimitMiddleware):
     """모델 호출 상한에서 안전한 Search Agent 응답으로 종료한다."""
 
-    def __init__(self) -> None:
-        super().__init__(run_limit=_MAX_MODEL_CALLS, exit_behavior="end")
+    def __init__(self, *, max_model_calls: int) -> None:
+        super().__init__(run_limit=max_model_calls, exit_behavior="end")
+        self._max_model_calls = max_model_calls
 
     @hook_config(can_jump_to=["end"])
     def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
-        if state.get("run_model_call_count", 0) < _MAX_MODEL_CALLS:
+        if state.get("run_model_call_count", 0) < self._max_model_calls:
             return None
         return {
             "jump_to": "end",
@@ -233,6 +233,7 @@ def create_search_tools(
     *,
     embedder: QueryEmbedder,
     backend: SearchBackend,
+    config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
 ) -> tuple[BaseTool, ...]:
     """Search Agent가 선택해서 호출할 검색 Tool을 만든다."""
 
@@ -247,7 +248,7 @@ def create_search_tools(
         mode: Annotated[
             SearchMode,
             Field(description="dense, sparse, hybrid 중 사용할 검색 방식"),
-        ] = SearchMode.HYBRID,
+        ] = config.default_search_mode,
         document_type: Annotated[
             DocumentType | None,
             Field(description="검색 범위를 제한할 문서 유형"),
@@ -255,7 +256,7 @@ def create_search_tools(
         limit: Annotated[
             int,
             Field(ge=1, le=_MAX_RESULT_LIMIT, strict=True, description="반환할 청크 수"),
-        ] = 10,
+        ] = config.default_result_limit,
     ) -> str:
         filters = SearchFilters(document_type=document_type) if document_type is not None else None
         return _tool_payload(
@@ -285,11 +286,11 @@ def create_search_tools(
         mode: Annotated[
             SearchMode,
             Field(description="dense, sparse, hybrid 중 사용할 검색 방식"),
-        ] = SearchMode.HYBRID,
+        ] = config.default_search_mode,
         limit: Annotated[
             int,
             Field(ge=1, le=_MAX_RESULT_LIMIT, strict=True, description="반환할 청크 수"),
-        ] = 10,
+        ] = config.default_result_limit,
     ) -> str:
         return _tool_payload(
             lambda: {
@@ -320,7 +321,7 @@ def create_search_tools(
                 strict=True,
                 description="앞쪽 청크 수. before + after + 1은 100 이하여야 한다.",
             ),
-        ] = 1,
+        ] = config.default_neighbor_before,
         after: Annotated[
             int,
             Field(
@@ -329,7 +330,7 @@ def create_search_tools(
                 strict=True,
                 description="뒤쪽 청크 수. before + after + 1은 100 이하여야 한다.",
             ),
-        ] = 1,
+        ] = config.default_neighbor_after,
     ) -> str:
         def operation() -> dict[str, object]:
             invalid_request = False
@@ -374,17 +375,18 @@ def create_search_agent(
     model: BaseChatModel,
     embedder: QueryEmbedder,
     backend: SearchBackend,
+    config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """HCX 모델에 검색 Tool을 바인딩한 Search Agent를 만든다."""
 
     return create_agent(
         model=model,
-        tools=create_search_tools(embedder=embedder, backend=backend),
+        tools=create_search_tools(embedder=embedder, backend=backend, config=config),
         system_prompt=load_search_agent_prompt(),
         middleware=(
             _RequireSearchToolResult(),
-            _SearchModelCallLimit(),
-            ToolCallLimitMiddleware(run_limit=_MAX_TOOL_CALLS, exit_behavior="continue"),
+            _SearchModelCallLimit(max_model_calls=config.max_model_calls),
+            ToolCallLimitMiddleware(run_limit=config.max_tool_calls, exit_behavior="continue"),
         ),
         name="search_agent",
     )
