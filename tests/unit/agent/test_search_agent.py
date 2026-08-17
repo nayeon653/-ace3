@@ -1,5 +1,6 @@
 """도메인 Agent용 Search Agent 계약을 검증한다."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import pytest
@@ -28,6 +29,11 @@ class FakeEmbedder:
         if self.error is not None:
             raise self.error
         return self.vector
+
+
+class ExplodingVector(list[float]):
+    def __iter__(self) -> Iterator[float]:
+        raise RuntimeError("provider secret=LAZY")
 
 
 @dataclass
@@ -176,6 +182,7 @@ def test_lookup_functions_delegate_without_embedding() -> None:
         (FakeEmbedder(error=RuntimeError("provider secret")), "생성에 실패했습니다"),
         (FakeEmbedder(vector=[]), "결과가 올바르지 않습니다"),
         (FakeEmbedder(vector=[float("nan")]), "결과가 올바르지 않습니다"),
+        (FakeEmbedder(vector=ExplodingVector()), "결과가 올바르지 않습니다"),
     ],
 )
 def test_embedding_failure_is_sanitized(embedder: FakeEmbedder, message: str) -> None:

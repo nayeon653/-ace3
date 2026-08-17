@@ -131,7 +131,8 @@ class SearchAgent:
         invalid_result = False
         try:
             query = SearchQuery(text=normalized_text, dense=tuple(raw_dense), mode=mode)
-        except (TypeError, ValueError):
+        # 지연 평가되는 Provider 반환값의 순회·변환 예외도 원문을 노출하지 않는다.
+        except Exception:  # noqa: BLE001
             invalid_result = True
 
         if invalid_result:
