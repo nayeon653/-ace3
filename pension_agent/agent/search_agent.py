@@ -1,11 +1,22 @@
-"""도메인 Agent가 사용하는 검색 오케스트레이터."""
+"""검색 기능을 Tool로 사용하는 ReAct Search Agent."""
 
 from __future__ import annotations
 
-from typing import Protocol
+import json
+from collections.abc import Callable
+from importlib import resources
+from typing import Annotated, Any, Protocol
+
+from langchain.agents import create_agent
+from langchain_core.language_models import BaseChatModel
+from langchain_core.tools import BaseTool, tool
+from langgraph.graph.state import CompiledStateGraph
+from pydantic import Field
 
 from pension_agent.core import (
+    DocumentType,
     NeighborRequest,
+    RetrievalError,
     RetrievedChunk,
     SearchFilters,
     SearchHit,
@@ -24,7 +35,7 @@ class QueryEmbedder(Protocol):
 
 
 class SearchBackend(Protocol):
-    """Agent가 의존하는 도메인 중립 검색 기능."""
+    """검색 Tool이 의존하는 도메인 중립 검색 기능."""
 
     def search_chunks(
         self,
@@ -55,8 +66,8 @@ class QueryEmbeddingError(RuntimeError):
     """검색문 dense embedding을 안전하게 생성하지 못한 경우."""
 
 
-class SearchAgent:
-    """검색문 준비와 검색 Backend 호출을 캡슐화한다."""
+class _SearchOperations:
+    """Search Agent Tool의 결정론적 실행부."""
 
     def __init__(self, *, embedder: QueryEmbedder, backend: SearchBackend) -> None:
         self._embedder = embedder
@@ -70,8 +81,6 @@ class SearchAgent:
         mode: SearchMode = SearchMode.HYBRID,
         limit: int = 10,
     ) -> list[SearchHit]:
-        """원문 검색어만 받아 전체 corpus 검색을 실행한다."""
-
         _validate_limit(limit)
         return self._backend.search_chunks(
             self._build_query(text, mode=mode),
@@ -87,8 +96,6 @@ class SearchAgent:
         mode: SearchMode = SearchMode.HYBRID,
         limit: int = 10,
     ) -> list[SearchHit]:
-        """원문 검색어만 받아 문서 범위 검색을 실행한다."""
-
         _validate_limit(limit)
         source_file_name = source_file_name.strip()
         if not source_file_name:
@@ -101,13 +108,9 @@ class SearchAgent:
         )
 
     def get_neighbor_chunks(self, request: NeighborRequest) -> list[RetrievedChunk]:
-        """인접 청크 조회를 검색 Backend에 위임한다."""
-
         return self._backend.get_neighbor_chunks(request)
 
     def get_chunk(self, chunk_id: str) -> RetrievedChunk | None:
-        """단건 청크 조회를 검색 Backend에 위임한다."""
-
         return self._backend.get_chunk(chunk_id)
 
     def _build_query(self, text: str, *, mode: SearchMode) -> SearchQuery:
@@ -138,6 +141,196 @@ class SearchAgent:
         if invalid_result:
             raise QueryEmbeddingError("검색문 임베딩 결과가 올바르지 않습니다.")
         return query
+
+
+def load_search_agent_prompt() -> str:
+    """패키지 리소스에서 Search Agent 프롬프트를 읽는다."""
+
+    return (
+        resources.files("pension_agent.prompts")
+        .joinpath("search-agent.md")
+        .read_text(encoding="utf-8")
+    )
+
+
+def create_search_tools(
+    *,
+    embedder: QueryEmbedder,
+    backend: SearchBackend,
+) -> tuple[BaseTool, ...]:
+    """Search Agent가 선택해서 호출할 검색 Tool을 만든다."""
+
+    operations = _SearchOperations(embedder=embedder, backend=backend)
+
+    @tool(
+        "search_chunks",
+        description="전체 제공 문서에서 검색어와 관련된 근거 청크를 찾는다.",
+    )
+    def search_chunks(
+        text: Annotated[str, Field(min_length=1, description="근거를 찾을 검색어")],
+        mode: Annotated[
+            SearchMode,
+            Field(description="dense, sparse, hybrid 중 사용할 검색 방식"),
+        ] = SearchMode.HYBRID,
+        document_type: Annotated[
+            DocumentType | None,
+            Field(description="검색 범위를 제한할 문서 유형"),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(ge=1, le=_MAX_RESULT_LIMIT, strict=True, description="반환할 청크 수"),
+        ] = 10,
+    ) -> str:
+        filters = SearchFilters(document_type=document_type) if document_type is not None else None
+        return _tool_payload(
+            lambda: {
+                "hits": [
+                    _search_hit_payload(hit)
+                    for hit in operations.search_chunks(
+                        text,
+                        filters=filters,
+                        mode=mode,
+                        limit=limit,
+                    )
+                ]
+            }
+        )
+
+    @tool(
+        "search_within_document",
+        description="지정한 원본 문서 하나에서 검색어와 관련된 근거 청크를 찾는다.",
+    )
+    def search_within_document(
+        text: Annotated[str, Field(min_length=1, description="근거를 찾을 검색어")],
+        source_file_name: Annotated[
+            str,
+            Field(min_length=1, description="검색 범위를 제한할 원본 파일명"),
+        ],
+        mode: Annotated[
+            SearchMode,
+            Field(description="dense, sparse, hybrid 중 사용할 검색 방식"),
+        ] = SearchMode.HYBRID,
+        limit: Annotated[
+            int,
+            Field(ge=1, le=_MAX_RESULT_LIMIT, strict=True, description="반환할 청크 수"),
+        ] = 10,
+    ) -> str:
+        return _tool_payload(
+            lambda: {
+                "hits": [
+                    _search_hit_payload(hit)
+                    for hit in operations.search_within_document(
+                        text,
+                        source_file_name=source_file_name,
+                        mode=mode,
+                        limit=limit,
+                    )
+                ]
+            }
+        )
+
+    @tool(
+        "get_neighbor_chunks",
+        description="선택한 근거 청크와 같은 문서에서 앞뒤 문맥을 문서 순서로 조회한다.",
+    )
+    def get_neighbor_chunks(
+        source_file_name: Annotated[str, Field(min_length=1, description="원본 파일명")],
+        chunk_index: Annotated[int, Field(ge=0, strict=True, description="기준 청크 순서")],
+        before: Annotated[
+            int,
+            Field(ge=0, le=99, strict=True, description="앞쪽에서 조회할 청크 수"),
+        ] = 1,
+        after: Annotated[
+            int,
+            Field(ge=0, le=99, strict=True, description="뒤쪽에서 조회할 청크 수"),
+        ] = 1,
+    ) -> str:
+        def operation() -> dict[str, object]:
+            request = NeighborRequest(
+                source_file_name=source_file_name,
+                chunk_index=chunk_index,
+                before=before,
+                after=after,
+            )
+            return {
+                "chunks": [
+                    _chunk_payload(chunk) for chunk in operations.get_neighbor_chunks(request)
+                ]
+            }
+
+        return _tool_payload(operation)
+
+    @tool(
+        "get_chunk",
+        description="이미 알고 있는 UUID 청크 ID로 근거 하나를 다시 조회한다.",
+    )
+    def get_chunk(
+        chunk_id: Annotated[str, Field(min_length=1, description="조회할 UUID 청크 ID")],
+    ) -> str:
+        def operation() -> dict[str, object]:
+            chunk = operations.get_chunk(chunk_id)
+            return {"chunk": _chunk_payload(chunk) if chunk is not None else None}
+
+        return _tool_payload(operation)
+
+    return search_chunks, search_within_document, get_neighbor_chunks, get_chunk
+
+
+def create_search_agent(
+    *,
+    model: BaseChatModel,
+    embedder: QueryEmbedder,
+    backend: SearchBackend,
+) -> CompiledStateGraph[Any, Any, Any, Any]:
+    """HCX 모델에 검색 Tool을 바인딩한 Search Agent를 만든다."""
+
+    return create_agent(
+        model=model,
+        tools=create_search_tools(embedder=embedder, backend=backend),
+        system_prompt=load_search_agent_prompt(),
+        name="search_agent",
+    )
+
+
+def _tool_payload(operation: Callable[[], object]) -> str:
+    unexpected_failure = False
+    try:
+        payload = operation()
+    except (QueryEmbeddingError, RetrievalError, TypeError, ValueError) as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    # 구현이 다른 Backend의 원시 예외는 검색 Agent의 ToolMessage에 노출하지 않는다.
+    except Exception:  # noqa: BLE001
+        unexpected_failure = True
+
+    if unexpected_failure:
+        return json.dumps({"error": "검색 Tool 실행에 실패했습니다."}, ensure_ascii=False)
+
+    serialization_failed = False
+    try:
+        return json.dumps(payload, ensure_ascii=False)
+    # Tool 경계 밖으로 직렬화 대상이나 Provider의 원시 예외를 노출하지 않는다.
+    except Exception:  # noqa: BLE001
+        serialization_failed = True
+
+    if serialization_failed:
+        return json.dumps({"error": "검색 Tool 결과를 처리하지 못했습니다."}, ensure_ascii=False)
+    raise AssertionError("도달할 수 없는 검색 Tool 상태입니다.")
+
+
+def _search_hit_payload(hit: SearchHit) -> dict[str, object]:
+    return {"score": hit.score, "chunk": _chunk_payload(hit.chunk)}
+
+
+def _chunk_payload(chunk: RetrievedChunk) -> dict[str, object]:
+    return {
+        "chunk_id": chunk.chunk_id,
+        "source_file_name": chunk.source_file_name,
+        "document_type": chunk.document_type.value,
+        "chunk_index": chunk.chunk_index,
+        "title": chunk.title,
+        "locator": chunk.locator,
+        "content": chunk.content,
+    }
 
 
 def _validate_limit(limit: int) -> None:
