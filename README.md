@@ -179,6 +179,7 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 - [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 브랜치·커밋·PR·리뷰·태그 규칙 전문
 - [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
+- [`docs/qdrant-retrieval-spec.md`](docs/qdrant-retrieval-spec.md) — Qdrant 저장·검색 계약 진입점
 - [`docs/operations/api-server.md`](docs/operations/api-server.md) — API 서버 로컬 실행·배포·문제 해결
 - [`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md) — 로컬 Qdrant 실행·연결·데이터 관리
 - [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md) — Docling 실행·저장·검수 정책
