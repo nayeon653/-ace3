@@ -125,10 +125,12 @@ def test_hybrid_search_falls_back_to_dense_when_sparse_text_is_empty() -> None:
     assert kwargs["prefetch"] is None
 
 
-def test_sparse_search_returns_empty_without_content_tokens() -> None:
+def test_sparse_search_does_not_fallback_to_dense_without_content_tokens() -> None:
     search, client = _search()
 
-    assert search.search_chunks(SearchQuery(text="?!", mode=SearchMode.SPARSE)) == []
+    query = SearchQuery(text="?!", dense=(0.1,), mode=SearchMode.SPARSE)
+
+    assert search.search_chunks(query) == []
     client.query_points.assert_not_called()
 
 

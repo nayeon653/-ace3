@@ -132,8 +132,9 @@ models.PointStruct(
 ```
 
 Qdrant는 `Document`를 `indices`와 `values`로 변환해 저장한다. 적재할 청크의 Kiwi
-결과가 비어 있으면 잘못된 청크로 처리해 적재하지 않는다. 질의 결과만 비어 있으면
-sparse prefetch를 생략하고 dense 검색만 수행한다.
+결과가 비어 있으면 잘못된 청크로 처리해 적재하지 않는다. Hybrid 질의의 Kiwi 결과가
+비어 있으면 sparse prefetch를 생략하고 dense 검색만 수행한다. Sparse 전용 질의의
+Kiwi 결과가 비어 있으면 다른 검색 방식으로 전환하지 않고 빈 결과를 반환한다.
 
 ### Retrieval build manifest
 
@@ -383,7 +384,10 @@ client.query_points(
 
 - 결과는 RRF 점수 내림차순으로 반환한다.
 - prefetch 30개와 최종 10개는 초기값이며 평가 결과로 조정한다.
-- `to_bm25_text(query.text)`가 비어 있으면 sparse prefetch를 생략한다.
+- Hybrid에서 `to_bm25_text(query.text)`가 비어 있으면 sparse prefetch를 생략하고
+  dense 검색만 수행한다.
+- Sparse 전용 검색에서 전처리 결과가 비어 있으면 Qdrant를 호출하지 않고 빈 결과를
+  반환한다.
 - 인접 청크는 같은 파일에서 `chunk_index` 범위를 조회하고 오름차순으로 반환한다.
 - 잘못된 UUID와 누락되거나 잘못된 payload는 retrieval 경계의 데이터 오류로 처리한다.
 
