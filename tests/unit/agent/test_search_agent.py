@@ -249,8 +249,16 @@ def test_embedding_failure_is_sanitized_in_tool_message(embedder: FakeEmbedder) 
     assert backend.chunk_searches == []
 
 
-def test_unexpected_backend_error_is_sanitized_in_tool_message() -> None:
-    backend = FakeSearchBackend(search_error=RuntimeError("backend secret=HIDDEN"))
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("backend secret=RUNTIME"),
+        ValueError("backend secret=VALUE"),
+        TypeError("backend secret=TYPE"),
+    ],
+)
+def test_unexpected_backend_error_is_sanitized_in_tool_message(error: Exception) -> None:
+    backend = FakeSearchBackend(search_error=error)
     tools, _embedder, _backend = _tools(backend=backend)
 
     content = tools["search_chunks"].invoke({"text": "IRP 이전"})
@@ -264,7 +272,19 @@ def test_invalid_neighbor_request_returns_safe_tool_error() -> None:
 
     content = tools["get_neighbor_chunks"].invoke({"source_file_name": "  ", "chunk_index": 2})
 
-    assert json.loads(content) == {"error": "원본 파일명은 비어 있을 수 없습니다."}
+    assert json.loads(content) == {"error": "인접 청크 조회 범위가 올바르지 않습니다."}
+    assert embedder.calls == []
+    assert backend.neighbor_requests == []
+
+
+def test_neighbor_tool_rejects_combined_range_over_limit() -> None:
+    tools, embedder, backend = _tools()
+
+    content = tools["get_neighbor_chunks"].invoke(
+        {"source_file_name": "guide.pdf", "chunk_index": 2, "before": 99, "after": 99}
+    )
+
+    assert json.loads(content) == {"error": "인접 청크 조회 범위가 올바르지 않습니다."}
     assert embedder.calls == []
     assert backend.neighbor_requests == []
 
@@ -320,6 +340,78 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
         == {"search_chunks", "search_within_document", "get_neighbor_chunks", "get_chunk"}
         for names, _kwargs in model.bindings
     )
+    assert model.bindings[0][1]["tool_choice"] == "required"
+    assert model.bindings[-1][1]["tool_choice"] is None
+
+
+def test_search_agent_stops_repeated_tool_calls_at_run_limit() -> None:
+    backend = FakeSearchBackend()
+    responses = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "search_chunks",
+                    "args": {"text": f"IRP 이전 {index}", "mode": "sparse"},
+                    "id": f"search-call-{index}",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        for index in range(6)
+    ]
+    model = ToolCallingFakeModel(responses=responses)
+    model.bindings.clear()
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), backend=backend)
+
+    result = agent.invoke({"messages": [{"role": "user", "content": "반복 검색"}]})
+
+    assert len(backend.chunk_searches) == 3
+    assert "limit" in result["messages"][-1].text.lower()
+
+
+def test_search_agent_requires_another_tool_after_tool_error() -> None:
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_within_document",
+                        "args": {"text": "IRP 이전", "source_file_name": "  "},
+                        "id": "failed-search",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_chunks",
+                        "args": {"text": "IRP 이전", "mode": "sparse"},
+                        "id": "successful-search",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="검색 결과가 없어 근거를 확인하지 못했습니다."),
+        ]
+    )
+    model.bindings.clear()
+    agent = create_search_agent(
+        model=model,
+        embedder=FakeEmbedder(),
+        backend=FakeSearchBackend(),
+    )
+
+    agent.invoke({"messages": [{"role": "user", "content": "IRP 이전 근거 검색"}]})
+
+    assert [kwargs["tool_choice"] for _names, kwargs in model.bindings] == [
+        "required",
+        "required",
+        None,
+    ]
 
 
 def test_search_agent_prompt_is_packaged() -> None:

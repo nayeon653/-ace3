@@ -34,3 +34,13 @@ def test_source_file_filter_rejects_blank_value() -> None:
 def test_neighbor_request_rejects_negative_range() -> None:
     with pytest.raises(ValueError, match="0 이상"):
         NeighborRequest(source_file_name="guide.pdf", chunk_index=3, before=-1)
+
+
+def test_neighbor_request_rejects_combined_range_over_limit() -> None:
+    with pytest.raises(ValueError, match="100개 이하"):
+        NeighborRequest(
+            source_file_name="guide.pdf",
+            chunk_index=2,
+            before=99,
+            after=99,
+        )

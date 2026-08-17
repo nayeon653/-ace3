@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from importlib import resources
 from typing import Annotated, Any, Protocol
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRequest,
+    ModelResponse,
+    ToolCallLimitMiddleware,
+)
+from langchain.messages import ToolMessage
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, tool
 from langgraph.graph.state import CompiledStateGraph
@@ -25,6 +33,11 @@ from pension_agent.core import (
 )
 
 _MAX_RESULT_LIMIT = 100
+_MAX_MODEL_CALLS = 4
+_MAX_TOOL_CALLS = 3
+_SEARCH_TOOL_NAMES = frozenset(
+    {"search_chunks", "search_within_document", "get_neighbor_chunks", "get_chunk"}
+)
 
 
 class QueryEmbedder(Protocol):
@@ -66,6 +79,43 @@ class QueryEmbeddingError(RuntimeError):
     """검색문 dense embedding을 안전하게 생성하지 못한 경우."""
 
 
+class SearchToolInputError(ValueError):
+    """모델이 만든 검색 Tool 인자가 공개 입력 계약을 위반한 경우."""
+
+
+class _RequireSearchToolResult(AgentMiddleware[Any, Any, Any]):
+    """정상 검색 결과를 얻을 때까지 Tool 사용을 강제한다."""
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        return handler(self._with_required_tool(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        return await handler(self._with_required_tool(request))
+
+    @staticmethod
+    def _with_required_tool(request: ModelRequest[Any]) -> ModelRequest[Any]:
+        for message in request.messages:
+            if not isinstance(message, ToolMessage) or message.name not in _SEARCH_TOOL_NAMES:
+                continue
+            if not isinstance(message.content, str):
+                continue
+            try:
+                payload = json.loads(message.content)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict) and "error" not in payload:
+                return request
+        return request.override(tool_choice="required")
+
+
 class _SearchOperations:
     """Search Agent Tool의 결정론적 실행부."""
 
@@ -99,7 +149,7 @@ class _SearchOperations:
         _validate_limit(limit)
         source_file_name = source_file_name.strip()
         if not source_file_name:
-            raise ValueError("원본 파일명 필터는 비어 있을 수 없습니다.")
+            raise SearchToolInputError("원본 파일명 필터는 비어 있을 수 없습니다.")
 
         return self._backend.search_within_document(
             self._build_query(text, mode=mode),
@@ -114,12 +164,12 @@ class _SearchOperations:
         return self._backend.get_chunk(chunk_id)
 
     def _build_query(self, text: str, *, mode: SearchMode) -> SearchQuery:
-        if mode is SearchMode.SPARSE:
-            return SearchQuery(text=text, mode=mode)
-
         normalized_text = text.strip()
         if not normalized_text:
-            raise ValueError("검색문은 비어 있을 수 없습니다.")
+            raise SearchToolInputError("검색문은 비어 있을 수 없습니다.")
+
+        if mode is SearchMode.SPARSE:
+            return SearchQuery(text=normalized_text, mode=mode)
 
         provider_failed = False
         try:
@@ -238,20 +288,37 @@ def create_search_tools(
         chunk_index: Annotated[int, Field(ge=0, strict=True, description="기준 청크 순서")],
         before: Annotated[
             int,
-            Field(ge=0, le=99, strict=True, description="앞쪽에서 조회할 청크 수"),
+            Field(
+                ge=0,
+                le=99,
+                strict=True,
+                description="앞쪽 청크 수. before + after + 1은 100 이하여야 한다.",
+            ),
         ] = 1,
         after: Annotated[
             int,
-            Field(ge=0, le=99, strict=True, description="뒤쪽에서 조회할 청크 수"),
+            Field(
+                ge=0,
+                le=99,
+                strict=True,
+                description="뒤쪽 청크 수. before + after + 1은 100 이하여야 한다.",
+            ),
         ] = 1,
     ) -> str:
         def operation() -> dict[str, object]:
-            request = NeighborRequest(
-                source_file_name=source_file_name,
-                chunk_index=chunk_index,
-                before=before,
-                after=after,
-            )
+            invalid_request = False
+            try:
+                request = NeighborRequest(
+                    source_file_name=source_file_name,
+                    chunk_index=chunk_index,
+                    before=before,
+                    after=after,
+                )
+            except (TypeError, ValueError):
+                invalid_request = True
+
+            if invalid_request:
+                raise SearchToolInputError("인접 청크 조회 범위가 올바르지 않습니다.")
             return {
                 "chunks": [
                     _chunk_payload(chunk) for chunk in operations.get_neighbor_chunks(request)
@@ -288,6 +355,11 @@ def create_search_agent(
         model=model,
         tools=create_search_tools(embedder=embedder, backend=backend),
         system_prompt=load_search_agent_prompt(),
+        middleware=(
+            _RequireSearchToolResult(),
+            ModelCallLimitMiddleware(run_limit=_MAX_MODEL_CALLS, exit_behavior="end"),
+            ToolCallLimitMiddleware(run_limit=_MAX_TOOL_CALLS, exit_behavior="end"),
+        ),
         name="search_agent",
     )
 
@@ -296,7 +368,7 @@ def _tool_payload(operation: Callable[[], object]) -> str:
     unexpected_failure = False
     try:
         payload = operation()
-    except (QueryEmbeddingError, RetrievalError, TypeError, ValueError) as exc:
+    except (QueryEmbeddingError, RetrievalError, SearchToolInputError) as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
     # 구현이 다른 Backend의 원시 예외는 검색 Agent의 ToolMessage에 노출하지 않는다.
     except Exception:  # noqa: BLE001
@@ -335,4 +407,4 @@ def _chunk_payload(chunk: RetrievedChunk) -> dict[str, object]:
 
 def _validate_limit(limit: int) -> None:
     if isinstance(limit, bool) or not 1 <= limit <= _MAX_RESULT_LIMIT:
-        raise ValueError(f"검색 결과 수는 1~{_MAX_RESULT_LIMIT} 사이여야 합니다.")
+        raise SearchToolInputError(f"검색 결과 수는 1~{_MAX_RESULT_LIMIT} 사이여야 합니다.")

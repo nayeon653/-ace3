@@ -34,7 +34,8 @@ Tool을 바인딩한다.
 Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, 검색 방식과 범위를
 선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
 임베딩하고 공용 `SearchQuery`를 만든 뒤 `SearchBackend`에 위임한다. Sparse 검색과
-청크 조회는 임베더를 호출하지 않는다.
+청크 조회는 임베더를 호출하지 않는다. 첫 모델 호출은 `tool_choice=required`로 검색
+Tool 사용을 강제하며, 한 요청은 모델 호출 4회와 검색 Tool 호출 3회를 넘기지 않는다.
 
 ```mermaid
 flowchart LR
@@ -54,6 +55,9 @@ flowchart LR
 vector를 반환하면 Tool 결과의 정제된 `error`로 전달한다. Qdrant 요청·데이터 오류도
 원시 예외 대신 기존 retrieval 오류 계약의 안전한 메시지로 전달한다. 제품 실행에서는
 `PROJECT_RULES.md`에 따라 HCX-005 모델만 Factory에 주입한다.
+
+인접 청크 조회는 `before + after + 1 <= 100`을 공용 `NeighborRequest`와 Tool 실행
+경계에서 함께 검증한다. 합계를 넘는 요청은 Backend를 호출하지 않는다.
 
 ## 입력 계약
 
