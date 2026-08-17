@@ -300,49 +300,59 @@ def make_locator(
 ## 검색 접근 계약
 
 Qdrant SDK 타입은 `pension_agent/retrieval/` 밖으로 노출하지 않는다. 공용 타입은
-`core`에 두고 `retrieval`에서 SDK 타입으로 변환한다.
+`core`에 두고 `retrieval`에서 SDK 타입으로 변환한다. 구현은 DB 교체를 위한 추상
+Repository를 추가하지 않고 다음 세 패턴만 사용한다.
+
+- **Query Object**: `SearchQuery`, `SearchFilters`, `NeighborRequest`가 입력을 검증한다.
+- **Filter Builder**: 허용된 네 payload index만 Qdrant 조건으로 변환한다.
+- **Facade**: `QdrantSearch`가 Agent용 검색·조회 기능을 한 곳에 제공한다.
 
 ```python
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class HybridQuery:
-    text: str
-    dense: list[float]
+query = SearchQuery(
+    text="IRP 중도해지 절차",
+    dense=(0.12, -0.34, 0.56),
+    mode=SearchMode.HYBRID,
+)
+filters = SearchFilters(
+    document_type=DocumentType.PENSION_REFERENCE,
+    element_types=(ElementType.TEXT, ElementType.TABLE),
+)
 ```
 
 ```python
-search_chunks(
-    query: HybridQuery,
-    *,
-    source_file_name: str | None = None,
-    document_type: DocumentType | None = None,
-    element_types: list[str] | None = None,
-    limit: int = 10,
-) -> list[SearchHit]
+search = QdrantSearch(
+    client,
+    collection_name="pension_documents",
+)
 
-search_within_document(
-    query: HybridQuery,
-    *,
-    source_file_name: str,
-    element_types: list[str] | None = None,
-    limit: int = 10,
-) -> list[SearchHit]
+hits = search.search_chunks(
+    query,
+    filters=filters,
+    limit=10,
+)
 
-get_neighbor_chunks(
-    *,
-    source_file_name: str,
-    chunk_index: int,
-    before: int = 1,
-    after: int = 1,
-) -> list[Chunk]
+document_hits = search.search_within_document(
+    query,
+    source_file_name="guide.pdf",
+    element_types=(ElementType.TABLE,),
+    limit=10,
+)
 
-get_chunk(chunk_id: str) -> Chunk | None
+neighbors = search.get_neighbor_chunks(
+    NeighborRequest(
+        source_file_name="guide.pdf",
+        chunk_index=7,
+        before=1,
+        after=1,
+    )
+)
+
+chunk = search.get_chunk("550e8400-e29b-41d4-a716-446655440000")
 ```
 
-Hybrid 검색은 원문 질의를 dense embedding과 Kiwi token 문자열로 각각 변환한다. 같은
-payload filter로 두 결과를 prefetch한 뒤 RRF로 결합한다.
+`SearchMode`는 `dense`, `sparse`, `hybrid`를 지원하며 기본값은 `hybrid`다. Hybrid
+검색은 원문 질의를 dense embedding과 Kiwi token 문자열로 각각 변환한다. 같은 payload
+filter로 두 결과를 prefetch한 뒤 RRF로 결합한다.
 
 ```python
 client.query_points(
@@ -378,6 +388,24 @@ client.query_points(
 - `to_bm25_text(query.text)`가 비어 있으면 sparse prefetch를 생략한다.
 - 인접 청크는 같은 파일에서 `chunk_index` 범위를 조회하고 오름차순으로 반환한다.
 - 잘못된 UUID와 누락되거나 잘못된 payload는 retrieval 경계의 데이터 오류로 처리한다.
+
+### Qdrant 기능 선택
+
+Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않고 현재 payload와 검색
+평가 계획에 필요한 부분만 채택한다.
+
+| 기능 | 상태 | 사용 위치 또는 보류 이유 |
+| --- | --- | --- |
+| dense nearest | 사용 | `SearchMode.DENSE`와 hybrid prefetch |
+| sparse BM25 | 사용 | `SearchMode.SPARSE`와 hybrid prefetch |
+| RRF hybrid | 기본 사용 | `SearchMode.HYBRID` |
+| payload filter | 사용 | 파일명·문서 유형·요소 유형 제한 |
+| point ID retrieve | 사용 | 이미 선택한 근거 재조회 |
+| filter + scroll | 사용 | 같은 파일의 인접 청크 복원 |
+| recommend·discovery | 보류 | positive·negative point 피드백 계약 없음 |
+| grouping·order by 검색 | 보류 | 현재 Agent 검색 요구와 index 없음 |
+| weighted RRF·formula | 보류 | 평가셋으로 가중치를 검증한 뒤 결정 |
+| random sampling | 제외 | 답변 근거 검색 목적에 부적합 |
 
 ## 제외 필드
 
