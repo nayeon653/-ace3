@@ -135,6 +135,27 @@ def test_document_search_builds_query_and_preserves_document_scope() -> None:
     assert limit == 4
 
 
+@pytest.mark.parametrize("limit", [0, 101, True])
+def test_invalid_limit_fails_before_embedding(limit: int) -> None:
+    embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
+    agent = SearchAgent(embedder=embedder, backend=FakeSearchBackend())
+
+    with pytest.raises(ValueError, match="검색 결과 수"):
+        agent.search_chunks("IRP 이전", limit=limit)
+
+    assert embedder.calls == []
+
+
+def test_empty_document_name_fails_before_embedding() -> None:
+    embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
+    agent = SearchAgent(embedder=embedder, backend=FakeSearchBackend())
+
+    with pytest.raises(ValueError, match="원본 파일명"):
+        agent.search_within_document("IRP 이전", source_file_name="  ")
+
+    assert embedder.calls == []
+
+
 def test_lookup_functions_delegate_without_embedding() -> None:
     chunk = _chunk()
     request = NeighborRequest(source_file_name="guide.pdf", chunk_index=2)
@@ -164,6 +185,8 @@ def test_embedding_failure_is_sanitized(embedder: FakeEmbedder, message: str) ->
         agent.search_chunks("IRP 이전")
 
     assert "secret" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_empty_query_fails_before_embedding() -> None:

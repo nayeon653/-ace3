@@ -13,6 +13,8 @@ from pension_agent.core import (
     SearchQuery,
 )
 
+_MAX_RESULT_LIMIT = 100
+
 
 class QueryEmbedder(Protocol):
     """검색문 하나를 dense vector로 변환하는 제공자 경계."""
@@ -70,6 +72,7 @@ class SearchAgent:
     ) -> list[SearchHit]:
         """원문 검색어만 받아 전체 corpus 검색을 실행한다."""
 
+        _validate_limit(limit)
         return self._backend.search_chunks(
             self._build_query(text, mode=mode),
             filters=filters,
@@ -85,6 +88,11 @@ class SearchAgent:
         limit: int = 10,
     ) -> list[SearchHit]:
         """원문 검색어만 받아 문서 범위 검색을 실행한다."""
+
+        _validate_limit(limit)
+        source_file_name = source_file_name.strip()
+        if not source_file_name:
+            raise ValueError("원본 파일명 필터는 비어 있을 수 없습니다.")
 
         return self._backend.search_within_document(
             self._build_query(text, mode=mode),
@@ -110,11 +118,27 @@ class SearchAgent:
         if not normalized_text:
             raise ValueError("검색문은 비어 있을 수 없습니다.")
 
+        provider_failed = False
         try:
-            dense = tuple(self._embedder.embed_query(normalized_text))
-            return SearchQuery(text=normalized_text, dense=dense, mode=mode)
-        except (TypeError, ValueError):
-            raise QueryEmbeddingError("검색문 임베딩 결과가 올바르지 않습니다.") from None
+            raw_dense = self._embedder.embed_query(normalized_text)
         # 외부 임베딩 구현마다 예외 계층이 달라 Provider 경계에서 한 번에 정제한다.
         except Exception:  # noqa: BLE001
-            raise QueryEmbeddingError("검색문 임베딩 생성에 실패했습니다.") from None
+            provider_failed = True
+
+        if provider_failed:
+            raise QueryEmbeddingError("검색문 임베딩 생성에 실패했습니다.")
+
+        invalid_result = False
+        try:
+            query = SearchQuery(text=normalized_text, dense=tuple(raw_dense), mode=mode)
+        except (TypeError, ValueError):
+            invalid_result = True
+
+        if invalid_result:
+            raise QueryEmbeddingError("검색문 임베딩 결과가 올바르지 않습니다.")
+        return query
+
+
+def _validate_limit(limit: int) -> None:
+    if isinstance(limit, bool) or not 1 <= limit <= _MAX_RESULT_LIMIT:
+        raise ValueError(f"검색 결과 수는 1~{_MAX_RESULT_LIMIT} 사이여야 합니다.")
