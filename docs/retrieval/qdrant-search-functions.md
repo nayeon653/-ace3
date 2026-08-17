@@ -20,6 +20,26 @@ Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 �
 생성자는 연결된 `QdrantClient`, 비어 있지 않은 collection 이름과 1~100 범위의
 `prefetch_limit`을 받는다. 기본 prefetch 후보 수는 30이다.
 
+Domain Agent는 `QdrantSearch`를 직접 조립하지 않고 `SearchAgent`에 원문 검색어를
+전달한다. `SearchAgent`는 주입된 `QueryEmbedder`로 Dense·Hybrid 검색문만 임베딩하고,
+공용 `SearchQuery`를 만든 뒤 `SearchBackend`에 검색을 위임한다. Sparse 검색과 청크
+조회는 임베더를 호출하지 않는다.
+
+```mermaid
+flowchart LR
+    D["Domain Agent"] -->|"검색어·모드·필터"| S["SearchAgent"]
+    S -->|"Dense / Hybrid"| E["QueryEmbedder"]
+    E -->|"dense vector"| S
+    S -->|"SearchQuery"| B["SearchBackend"]
+    B -. "구현" .-> Q["QdrantSearch"]
+    Q -->|"SearchHit[]"| D
+```
+
+`QueryEmbedder`와 `SearchBackend`는 Protocol이므로 Agent 계층에 Qdrant SDK나 특정
+임베딩 SDK 타입을 노출하지 않는다. 임베딩 제공자가 예외를 반환하거나 유효하지 않은
+vector를 반환하면 `QueryEmbeddingError`로 정제한다. Qdrant 요청·데이터 오류는 기존
+retrieval 오류 계약을 유지한다.
+
 ## 입력 계약
 
 ### SearchQuery
@@ -242,6 +262,7 @@ payload 계약 위반을 무시하거나 부분 근거로 반환하지 않는다
 
 ## 관련 구현
 
+- [Search Agent](../../pension_agent/agent/search_agent.py)
 - [공용 검색 타입](../../pension_agent/core/retrieval.py)
 - [Qdrant Filter Builder](../../pension_agent/retrieval/filters.py)
 - [Qdrant Search Facade](../../pension_agent/retrieval/qdrant_search.py)
