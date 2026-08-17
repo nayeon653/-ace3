@@ -367,7 +367,32 @@ def test_search_agent_stops_repeated_tool_calls_at_run_limit() -> None:
     result = agent.invoke({"messages": [{"role": "user", "content": "반복 검색"}]})
 
     assert len(backend.chunk_searches) == 3
-    assert "limit" in result["messages"][-1].text.lower()
+    assert "검색 호출 한도" in result["messages"][-1].text
+
+
+def test_parallel_tool_limit_executes_allowed_calls_and_returns_model_answer() -> None:
+    backend = FakeSearchBackend()
+    parallel_calls = [
+        {
+            "name": "search_chunks",
+            "args": {"text": f"IRP 이전 {index}", "mode": "sparse"},
+            "id": f"parallel-search-{index}",
+            "type": "tool_call",
+        }
+        for index in range(4)
+    ]
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=parallel_calls),
+            AIMessage(content="검색 호출 한도 안에서 확인한 근거를 정리했습니다."),
+        ]
+    )
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), backend=backend)
+
+    result = agent.invoke({"messages": [{"role": "user", "content": "병렬 검색"}]})
+
+    assert len(backend.chunk_searches) == 3
+    assert result["messages"][-1].text == "검색 호출 한도 안에서 확인한 근거를 정리했습니다."
 
 
 def test_search_agent_requires_another_tool_after_tool_error() -> None:

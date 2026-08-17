@@ -14,8 +14,9 @@ from langchain.agents.middleware import (
     ModelRequest,
     ModelResponse,
     ToolCallLimitMiddleware,
+    hook_config,
 )
-from langchain.messages import ToolMessage
+from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, tool
 from langgraph.graph.state import CompiledStateGraph
@@ -35,6 +36,10 @@ from pension_agent.core import (
 _MAX_RESULT_LIMIT = 100
 _MAX_MODEL_CALLS = 4
 _MAX_TOOL_CALLS = 3
+_SEARCH_LIMIT_MESSAGE = (
+    "검색 호출 한도에 도달해 추가 근거를 확인하지 못했습니다. "
+    "현재까지 확인된 검색 결과만 사용하거나 검색 범위를 좁혀야 합니다."
+)
 _SEARCH_TOOL_NAMES = frozenset(
     {"search_chunks", "search_within_document", "get_neighbor_chunks", "get_chunk"}
 )
@@ -114,6 +119,27 @@ class _RequireSearchToolResult(AgentMiddleware[Any, Any, Any]):
             if isinstance(payload, dict) and "error" not in payload:
                 return request
         return request.override(tool_choice="required")
+
+
+class _SearchModelCallLimit(ModelCallLimitMiddleware):
+    """모델 호출 상한에서 안전한 Search Agent 응답으로 종료한다."""
+
+    def __init__(self) -> None:
+        super().__init__(run_limit=_MAX_MODEL_CALLS, exit_behavior="end")
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        if state.get("run_model_call_count", 0) < _MAX_MODEL_CALLS:
+            return None
+        return {
+            "jump_to": "end",
+            "messages": [AIMessage(content=_SEARCH_LIMIT_MESSAGE)],
+        }
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.before_model(state, runtime)
 
 
 class _SearchOperations:
@@ -357,8 +383,8 @@ def create_search_agent(
         system_prompt=load_search_agent_prompt(),
         middleware=(
             _RequireSearchToolResult(),
-            ModelCallLimitMiddleware(run_limit=_MAX_MODEL_CALLS, exit_behavior="end"),
-            ToolCallLimitMiddleware(run_limit=_MAX_TOOL_CALLS, exit_behavior="end"),
+            _SearchModelCallLimit(),
+            ToolCallLimitMiddleware(run_limit=_MAX_TOOL_CALLS, exit_behavior="continue"),
         ),
         name="search_agent",
     )
