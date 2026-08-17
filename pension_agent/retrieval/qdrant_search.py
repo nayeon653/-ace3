@@ -176,17 +176,13 @@ class QdrantSearch:
         query: SearchQuery,
         *,
         source_file_name: str,
-        element_types: tuple[ElementType, ...] = (),
         limit: int = 10,
     ) -> list[SearchHit]:
         """원본 파일 하나로 검색 범위를 제한한다."""
 
         return self.search_chunks(
             query,
-            filters=SearchFilters(
-                source_file_name=source_file_name,
-                element_types=element_types,
-            ),
+            filters=SearchFilters(source_file_name=source_file_name),
             limit=limit,
         )
 

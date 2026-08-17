@@ -30,15 +30,6 @@ class QdrantFilterBuilder:
                 )
             )
 
-        element_types = list(dict.fromkeys(value.value for value in filters.element_types))
-        if element_types:
-            must.append(
-                models.FieldCondition(
-                    key="element_types",
-                    match=models.MatchAny(any=element_types),
-                )
-            )
-
         return models.Filter(must=must) if must else None
 
     @staticmethod

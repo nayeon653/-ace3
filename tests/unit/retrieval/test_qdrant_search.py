@@ -64,7 +64,6 @@ def test_hybrid_search_uses_same_filter_for_dense_and_sparse_prefetch() -> None:
     query = SearchQuery(text="퇴직연금 가입 절차", dense=(0.1, 0.2))
     filters = SearchFilters(
         document_type=DocumentType.PENSION_REFERENCE,
-        element_types=(ElementType.TEXT, ElementType.TABLE),
     )
 
     with patch(
@@ -140,7 +139,6 @@ def test_search_within_document_adds_file_filter() -> None:
     search.search_within_document(
         SearchQuery(text="수수료", dense=(0.3,), mode=SearchMode.DENSE),
         source_file_name="fund.pdf",
-        element_types=(ElementType.TABLE,),
     )
 
     query_filter = client.query_points.call_args.kwargs["query_filter"]
@@ -148,10 +146,6 @@ def test_search_within_document_adds_file_filter() -> None:
         models.FieldCondition(
             key="source_file_name",
             match=models.MatchValue(value="fund.pdf"),
-        ),
-        models.FieldCondition(
-            key="element_types",
-            match=models.MatchAny(any=["table"]),
         ),
     ]
 

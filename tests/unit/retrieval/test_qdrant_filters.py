@@ -4,7 +4,6 @@ from qdrant_client import models
 
 from pension_agent.core import (
     DocumentType,
-    ElementType,
     NeighborRequest,
     SearchFilters,
 )
@@ -20,7 +19,6 @@ def test_filter_builder_combines_supported_metadata_fields() -> None:
         SearchFilters(
             source_file_name="guide.pdf",
             document_type=DocumentType.PENSION_REFERENCE,
-            element_types=(ElementType.TABLE, ElementType.TEXT, ElementType.TABLE),
         )
     )
 
@@ -33,10 +31,6 @@ def test_filter_builder_combines_supported_metadata_fields() -> None:
             models.FieldCondition(
                 key="document_type",
                 match=models.MatchValue(value="pension_reference"),
-            ),
-            models.FieldCondition(
-                key="element_types",
-                match=models.MatchAny(any=["table", "text"]),
             ),
         ]
     )

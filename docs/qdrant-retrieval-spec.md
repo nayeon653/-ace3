@@ -188,7 +188,7 @@ collection을 만들어 전체 문서를 다시 적재한다.
 | `embedding_content` | `str` | `chunker.contextualize(chunk)` | dense 입력·Kiwi 전처리 원문 |
 | `heading_path` | `list[str]` | `meta.headings` | 제목 계층·검색 문맥 |
 | `captions` | `list[str]` | `meta.captions` | 표·그림 문맥 |
-| `element_types` | `list[str]` | document item label | 요소 필터 |
+| `element_types` | `list[str]` | document item label | 구조 관측·후속 검색 실험 |
 | `page_numbers` | `list[int]` | provenance page | 원문 위치 |
 
 모든 필드는 필수다. 문자열은 앞뒤 공백을 제거하고 빈 문자열을 허용하지 않는다.
@@ -291,11 +291,12 @@ def make_locator(
 | --- | --- | --- |
 | `source_file_name` | `keyword` | 특정 파일 내부 검색 |
 | `document_type` | `keyword` | 문서군 제한 |
-| `element_types` | `keyword` | 표·그림·텍스트 제한 |
 | `chunk_index` | `integer` | 인접 청크 범위 조회 |
 
-`source_format`, `content`, `embedding_content`, `heading_path`, `captions`,
-`page_numbers`에는 초기 index를 만들지 않는다.
+`element_types`는 payload에 보존하지만 정확성과 Agent 사용 목적을 검증하기 전에는 검색
+필터로 제공하거나 payload index를 만들지 않는다. `source_format`, `content`,
+`embedding_content`, `heading_path`, `captions`, `page_numbers`에도 초기 index를 만들지
+않는다.
 
 ## 검색 접근 계약
 
@@ -304,7 +305,7 @@ Qdrant SDK 타입은 `pension_agent/retrieval/` 밖으로 노출하지 않는다
 Repository를 추가하지 않고 다음 세 패턴만 사용한다.
 
 - **Query Object**: `SearchQuery`, `SearchFilters`, `NeighborRequest`가 입력을 검증한다.
-- **Filter Builder**: 허용된 네 payload index만 Qdrant 조건으로 변환한다.
+- **Filter Builder**: 허용된 세 payload index만 Qdrant 조건으로 변환한다.
 - **Facade**: `QdrantSearch`가 Agent용 검색·조회 기능을 한 곳에 제공한다.
 
 ```python
@@ -315,7 +316,6 @@ query = SearchQuery(
 )
 filters = SearchFilters(
     document_type=DocumentType.PENSION_REFERENCE,
-    element_types=(ElementType.TEXT, ElementType.TABLE),
 )
 ```
 
@@ -334,7 +334,6 @@ hits = search.search_chunks(
 document_hits = search.search_within_document(
     query,
     source_file_name="guide.pdf",
-    element_types=(ElementType.TABLE,),
     limit=10,
 )
 
@@ -382,7 +381,6 @@ client.query_points(
 )
 ```
 
-- `element_types`가 여러 개면 하나 이상 포함한 청크를 허용한다.
 - 결과는 RRF 점수 내림차순으로 반환한다.
 - prefetch 30개와 최종 10개는 초기값이며 평가 결과로 조정한다.
 - `to_bm25_text(query.text)`가 비어 있으면 sparse prefetch를 생략한다.
@@ -399,13 +397,16 @@ Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않�
 | dense nearest | 사용 | `SearchMode.DENSE`와 hybrid prefetch |
 | sparse BM25 | 사용 | `SearchMode.SPARSE`와 hybrid prefetch |
 | RRF hybrid | 기본 사용 | `SearchMode.HYBRID` |
-| payload filter | 사용 | 파일명·문서 유형·요소 유형 제한 |
+| payload filter | 사용 | 파일명·문서 유형 제한 |
 | point ID retrieve | 사용 | 이미 선택한 근거 재조회 |
 | filter + scroll | 사용 | 같은 파일의 인접 청크 복원 |
 | recommend·discovery | 보류 | positive·negative point 피드백 계약 없음 |
 | grouping·order by 검색 | 보류 | 현재 Agent 검색 요구와 index 없음 |
 | weighted RRF·formula | 보류 | 평가셋으로 가중치를 검증한 뒤 결정 |
 | random sampling | 제외 | 답변 근거 검색 목적에 부적합 |
+
+`element_types` 필터는 실제 적재 데이터의 label 정확성과 검색 활용 사례를 확인한 뒤
+payload index 추가 여부와 함께 다시 결정한다.
 
 ## 제외 필드
 

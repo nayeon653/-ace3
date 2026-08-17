@@ -69,7 +69,6 @@ class SearchFilters:
 
     source_file_name: str | None = None
     document_type: DocumentType | None = None
-    element_types: tuple[ElementType, ...] = ()
 
     def __post_init__(self) -> None:
         if self.source_file_name is None:
