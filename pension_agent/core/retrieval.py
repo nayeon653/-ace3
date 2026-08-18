@@ -122,6 +122,8 @@ class NeighborRequest:
             raise ValueError("chunk_index는 0 이상이어야 합니다.")
         if self.before < 0 or self.after < 0:
             raise ValueError("인접 청크 범위는 0 이상이어야 합니다.")
+        if self.before + self.after + 1 > 100:
+            raise ValueError("인접 청크 조회 수는 기준 청크를 포함해 100개 이하여야 합니다.")
         object.__setattr__(self, "source_file_name", source_file_name)
 
 

@@ -20,6 +20,67 @@ Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 �
 생성자는 연결된 `QdrantClient`, 비어 있지 않은 collection 이름과 1~100 범위의
 `prefetch_limit`을 받는다. 기본 prefetch 후보 수는 30이다.
 
+Domain Agent는 `create_search_agent(model, embedder, backend)`로 만든 Search Agent에
+근거 검색 목표를 전달한다. Factory는 `create_agent`에 주입된 HCX 모델과 다음 네 검색
+Tool을 바인딩한다.
+
+| Tool | Agent가 사용하는 시점 |
+| --- | --- |
+| `search_chunks` | 전체 제공 문서에서 첫 후보를 찾을 때 |
+| `search_within_document` | 이미 확인한 원본 문서 안에서 추가 후보를 찾을 때 |
+| `get_neighbor_chunks` | 선택한 청크의 앞뒤 문맥이 필요할 때 |
+| `get_chunk` | 알고 있는 UUID 청크를 다시 검증할 때 |
+
+Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, 검색 방식과 범위를
+선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
+임베딩하고 공용 `SearchQuery`를 만든 뒤 `SearchBackend`에 위임한다. Sparse 검색과
+청크 조회는 임베더를 호출하지 않는다. 첫 모델 호출은 `tool_choice=required`로 검색
+Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 4회, 검색 Tool 호출을
+3회로 제한한다.
+
+```mermaid
+flowchart LR
+    D["Domain Agent"] -->|"검색 목표"| S["Search Agent<br/>create_agent + HCX"]
+    S -->|"Tool 선택·인자 생성"| T["Search Tools"]
+    T -->|"Dense / Hybrid"| E["QueryEmbedder"]
+    E -->|"dense vector"| T
+    T -->|"SearchQuery"| B["SearchBackend"]
+    B -. "구현" .-> Q["QdrantSearch"]
+    Q -->|"SearchHit[]"| T
+    T -->|"JSON ToolMessage"| S
+    S -->|"선택 근거 요약"| D
+```
+
+`QueryEmbedder`와 `SearchBackend`는 Protocol이므로 Agent 계층에 Qdrant SDK나 특정
+임베딩 SDK 타입을 노출하지 않는다. 임베딩 제공자가 예외를 반환하거나 유효하지 않은
+vector를 반환하면 Tool 결과의 정제된 `error`로 전달한다. Qdrant 요청·데이터 오류도
+원시 예외 대신 기존 retrieval 오류 계약의 안전한 메시지로 전달한다. 제품 실행에서는
+`PROJECT_RULES.md`에 따라 HCX-005 모델만 Factory에 주입한다.
+
+## Search Agent 설정
+
+`config/search_agent.py`의 `SearchAgentConfig`는 허용할 필드와 범위, 필드 간 검증을
+정의한다. `config/defaults/search_agent.py`의 `DEFAULT_SEARCH_AGENT_CONFIG`는 저장소가
+현재 선택한 버전 관리 기본 프로필이다. 따라서 설정 구조를 바꾸는 일과 평가 결과에
+따라 기본값을 조정하는 일을 분리할 수 있다.
+
+| 설정 | 기본값 | 목적 |
+| --- | --- | --- |
+| `max_model_calls` | `4` | 한 요청의 모델 호출 상한 |
+| `max_tool_calls` | `3` | 한 요청의 검색 Tool 호출 상한 |
+| `default_search_mode` | `hybrid` | 검색 Tool의 기본 검색 방식 |
+| `default_result_limit` | `10` | 검색 Tool의 기본 결과 수 |
+| `default_neighbor_before` | `1` | 인접 조회의 기본 앞쪽 청크 수 |
+| `default_neighbor_after` | `1` | 인접 조회의 기본 뒤쪽 청크 수 |
+
+Factory에 별도 설정을 넘기지 않으면 이 기본 프로필을 사용한다. 실험이나 테스트에서는
+검증된 `SearchAgentConfig`를 `create_search_agent(..., config=...)`에 주입해 동작을
+바꿀 수 있다. 결과 수 최대 100개, 인접 조회 합계 최대 100개, 원시 Provider·Backend
+오류 정제는 운영 안전 계약이므로 프로필로 완화할 수 없다.
+
+인접 청크 조회는 `before + after + 1 <= 100`을 공용 `NeighborRequest`와 Tool 실행
+경계에서 함께 검증한다. 합계를 넘는 요청은 Backend를 호출하지 않는다.
+
 ## 입력 계약
 
 ### SearchQuery
@@ -242,6 +303,8 @@ payload 계약 위반을 무시하거나 부분 근거로 반환하지 않는다
 
 ## 관련 구현
 
+- [Search Agent](../../pension_agent/agent/search_agent.py)
+- [Search Agent Prompt](../../pension_agent/prompts/search-agent.md)
 - [공용 검색 타입](../../pension_agent/core/retrieval.py)
 - [Qdrant Filter Builder](../../pension_agent/retrieval/filters.py)
 - [Qdrant Search Facade](../../pension_agent/retrieval/qdrant_search.py)
