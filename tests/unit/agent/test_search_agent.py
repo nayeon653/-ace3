@@ -13,12 +13,14 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 
 from pension_agent.agent import create_search_agent, create_search_tools
+from pension_agent.agent.search import SearchHitsPayload, SearchToolErrorPayload
 from pension_agent.agent.search_agent import load_search_agent_prompt
 from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG, SearchAgentConfig
 from pension_agent.core import (
     DocumentType,
     ElementType,
     NeighborRequest,
+    RetrievalError,
     RetrievedChunk,
     SearchFilters,
     SearchHit,
@@ -149,9 +151,9 @@ def test_search_chunks_tool_embeds_and_serializes_hits(mode: SearchMode) -> None
         }
     )
 
-    payload = json.loads(content)
-    assert payload["hits"][0]["chunk"]["chunk_id"] == chunk.chunk_id
-    assert payload["hits"][0]["score"] == 0.8
+    payload = SearchHitsPayload.model_validate_json(content)
+    assert payload.hits[0].chunk.chunk_id == chunk.chunk_id
+    assert payload.hits[0].score == 0.8
     assert embedder.calls == ["IRP 이전 절차"]
     query, filters, limit = backend.chunk_searches[0]
     assert query == SearchQuery(text="IRP 이전 절차", dense=(0.1, 0.2), mode=mode)
@@ -249,8 +251,8 @@ def test_embedding_failure_is_sanitized_in_tool_message(embedder: FakeEmbedder) 
 
     content = tools["search_chunks"].invoke({"text": "IRP 이전"})
 
-    payload = json.loads(content)
-    assert set(payload) == {"error"}
+    payload = SearchToolErrorPayload.model_validate_json(content)
+    assert payload.error
     assert "secret" not in content
     assert backend.chunk_searches == []
 
@@ -271,6 +273,16 @@ def test_unexpected_backend_error_is_sanitized_in_tool_message(error: Exception)
 
     assert json.loads(content) == {"error": "검색 Tool 실행에 실패했습니다."}
     assert "secret" not in content
+
+
+@pytest.mark.parametrize("message", ["", "   "])
+def test_empty_retrieval_error_uses_safe_fallback(message: str) -> None:
+    backend = FakeSearchBackend(search_error=RetrievalError(message))
+    tools, _embedder, _backend = _tools(backend=backend)
+
+    content = tools["search_chunks"].invoke({"text": "IRP 이전"})
+
+    assert json.loads(content) == {"error": "검색 Tool 실행에 실패했습니다."}
 
 
 def test_invalid_neighbor_request_returns_safe_tool_error() -> None:
