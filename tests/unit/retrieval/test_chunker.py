@@ -136,10 +136,15 @@ def test_faq_document_excludes_sibling_text_and_table_chunks_and_maps_only_cited
     assert "sources" not in chunks[1].metadata  # S9는 Sources 표에 없어 매핑되지 않는다
 
 
-def test_doc7_returns_empty_pending_manual_normalization() -> None:
+def test_doc7_uses_normal_chunking_after_manual_normalization() -> None:
     doc = _doc("doc7", "pdf", [NormalizedBlock(type="text", text="본문")])
 
-    assert chunk_document(doc) == []
+    chunks = chunk_document(doc)
+
+    assert len(chunks) == 1
+    assert chunks[0].doc_id == "doc7"
+    assert chunks[0].text == "본문"
+    assert chunks[0].metadata["block_type"] == "text"
 
 
 def test_heading_level_is_trusted_as_is_regardless_of_text_shape() -> None:
