@@ -403,7 +403,8 @@ def _tool_payload(operation: Callable[[], BaseModel]) -> str:
     try:
         payload = operation()
     except (QueryEmbeddingError, RetrievalError, SearchToolInputError) as exc:
-        return SearchToolErrorPayload(error=str(exc)).model_dump_json()
+        error = str(exc).strip() or "검색 Tool 실행에 실패했습니다."
+        return SearchToolErrorPayload(error=error).model_dump_json()
     # 구현이 다른 Backend의 원시 예외는 검색 Agent의 ToolMessage에 노출하지 않는다.
     except Exception:  # noqa: BLE001
         unexpected_failure = True

@@ -20,6 +20,7 @@ from pension_agent.core import (
     DocumentType,
     ElementType,
     NeighborRequest,
+    RetrievalError,
     RetrievedChunk,
     SearchFilters,
     SearchHit,
@@ -272,6 +273,16 @@ def test_unexpected_backend_error_is_sanitized_in_tool_message(error: Exception)
 
     assert json.loads(content) == {"error": "검색 Tool 실행에 실패했습니다."}
     assert "secret" not in content
+
+
+@pytest.mark.parametrize("message", ["", "   "])
+def test_empty_retrieval_error_uses_safe_fallback(message: str) -> None:
+    backend = FakeSearchBackend(search_error=RetrievalError(message))
+    tools, _embedder, _backend = _tools(backend=backend)
+
+    content = tools["search_chunks"].invoke({"text": "IRP 이전"})
+
+    assert json.loads(content) == {"error": "검색 Tool 실행에 실패했습니다."}
 
 
 def test_invalid_neighbor_request_returns_safe_tool_error() -> None:
