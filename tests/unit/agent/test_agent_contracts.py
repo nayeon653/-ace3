@@ -5,11 +5,13 @@ from pydantic import TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import (
     AgentAnswer,
+    AgentPermissions,
     DomainRequest,
     DomainResult,
     validate_domain_result,
 )
 from pension_agent.agent.orchestration import build_domain_tool_result
+from pension_agent.core import DocumentType
 
 
 def _completed_result() -> DomainResult:
@@ -33,6 +35,17 @@ def _completed_result() -> DomainResult:
         "calculations": [{"calculator_name": "example", "inputs": {"amount": 1}, "result": 1}],
         "warnings": [],
     }
+
+
+def test_agent_permissions_require_non_empty_frozen_document_types() -> None:
+    with pytest.raises(ValidationError):
+        AgentPermissions(readable_document_types=frozenset())
+
+    permissions = AgentPermissions(
+        readable_document_types=frozenset({DocumentType.PENSION_REFERENCE})
+    )
+    with pytest.raises(ValidationError):
+        permissions.readable_document_types = frozenset({DocumentType.FUND_PROSPECTUS})
 
 
 def test_domain_tool_result_excludes_evidence_and_calculations() -> None:

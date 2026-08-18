@@ -176,17 +176,26 @@ class QdrantChunkRetriever:
         query: SearchQuery,
         *,
         source_file_name: str,
+        document_types: frozenset[DocumentType] | None = None,
         limit: int = 10,
     ) -> list[SearchHit]:
         """원본 파일 하나로 검색 범위를 제한한다."""
 
         return self.search_chunks(
             query,
-            filters=SearchFilters(source_file_name=source_file_name),
+            filters=SearchFilters(
+                source_file_name=source_file_name,
+                document_types=document_types,
+            ),
             limit=limit,
         )
 
-    def get_neighbor_chunks(self, request: NeighborRequest) -> list[RetrievedChunk]:
+    def get_neighbor_chunks(
+        self,
+        request: NeighborRequest,
+        *,
+        document_types: frozenset[DocumentType] | None = None,
+    ) -> list[RetrievedChunk]:
         """같은 문서의 인접 청크를 문서 순서대로 조회한다."""
 
         limit = request.before + request.after + 1
@@ -194,7 +203,10 @@ class QdrantChunkRetriever:
         try:
             records, _next_offset = self._client.scroll(
                 collection_name=self._collection_name,
-                scroll_filter=QdrantFilterBuilder.neighbors(request),
+                scroll_filter=QdrantFilterBuilder.neighbors(
+                    request,
+                    document_types=document_types,
+                ),
                 limit=limit,
                 order_by="chunk_index",
                 with_payload=True,
@@ -206,7 +218,12 @@ class QdrantChunkRetriever:
         chunks = [_to_chunk(record) for record in records]
         return sorted(chunks, key=lambda chunk: chunk.chunk_index)
 
-    def get_chunk(self, chunk_id: str) -> RetrievedChunk | None:
+    def get_chunk(
+        self,
+        chunk_id: str,
+        *,
+        document_types: frozenset[DocumentType] | None = None,
+    ) -> RetrievedChunk | None:
         """UUID chunk ID로 근거 하나를 다시 조회한다."""
 
         try:
@@ -228,7 +245,10 @@ class QdrantChunkRetriever:
             return None
         if len(records) != 1:
             raise RetrievalDataError("단건 chunk ID 조회가 여러 point를 반환했습니다.")
-        return _to_chunk(records[0])
+        chunk = _to_chunk(records[0])
+        if document_types is not None and chunk.document_type not in document_types:
+            return None
+        return chunk
 
     def _build_query_plan(
         self,

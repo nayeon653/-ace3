@@ -2,7 +2,7 @@
 
 import pytest
 
-from pension_agent.core import NeighborRequest, SearchFilters, SearchMode, SearchQuery
+from pension_agent.core import DocumentType, NeighborRequest, SearchFilters, SearchMode, SearchQuery
 
 
 def test_hybrid_query_requires_dense_vector() -> None:
@@ -29,6 +29,15 @@ def test_query_normalizes_dense_values_and_rejects_non_finite_number() -> None:
 def test_source_file_filter_rejects_blank_value() -> None:
     with pytest.raises(ValueError, match="파일명 필터"):
         SearchFilters(source_file_name="   ")
+
+
+def test_document_type_filter_rejects_empty_set() -> None:
+    with pytest.raises(ValueError, match="최소 하나"):
+        SearchFilters(document_types=frozenset())
+
+    assert SearchFilters(
+        document_types=frozenset({DocumentType.PENSION_REFERENCE})
+    ).document_types == frozenset({DocumentType.PENSION_REFERENCE})
 
 
 def test_neighbor_request_rejects_negative_range() -> None:
