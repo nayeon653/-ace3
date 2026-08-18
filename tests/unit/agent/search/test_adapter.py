@@ -1,5 +1,6 @@
 """Domain Agent용 Search Agent 실행 Adapter를 검증한다."""
 
+from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from time import sleep
 from typing import Any
@@ -79,7 +80,53 @@ def test_adapter_timeout_is_sanitized() -> None:
     assert "0.01" not in result.error
 
 
-def test_adapter_rejects_new_work_instead_of_queueing_behind_timed_out_call() -> None:
+def test_adapter_waits_for_capacity_and_runs_within_the_same_deadline() -> None:
+    started = Event()
+    release = Event()
+    calls: list[str] = []
+
+    class BlockingGraph:
+        def invoke(self, input: dict[str, Any], /) -> dict[str, Any]:
+            calls.append(input["messages"][0]["content"])
+            if len(calls) == 1:
+                started.set()
+                release.wait(timeout=1)
+            return {"search_result": SearchResult(execution_status="completed", coverage="none")}
+
+    adapter = SearchAgentAdapter(
+        BlockingGraph(),
+        config=_config(timeout_seconds=1),
+        max_workers=1,
+    )
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first_future = executor.submit(
+                adapter.search,
+                "첫 검색",
+                permission=Permission.POLICY,
+            )
+            assert started.wait(timeout=1)
+            second_future = executor.submit(
+                adapter.search,
+                "후속 검색",
+                permission=Permission.POLICY,
+            )
+            sleep(0.01)
+            assert not second_future.done()
+
+            release.set()
+            first = first_future.result(timeout=1)
+            second = second_future.result(timeout=1)
+    finally:
+        release.set()
+        adapter.close()
+
+    assert first.execution_status == "completed"
+    assert second.execution_status == "completed"
+    assert calls == ["첫 검색", "후속 검색"]
+
+
+def test_adapter_capacity_wait_uses_the_search_deadline() -> None:
     started = Event()
     release = Event()
 
@@ -105,5 +152,5 @@ def test_adapter_rejects_new_work_instead_of_queueing_behind_timed_out_call() ->
         adapter.close()
 
     assert first.execution_status == "timeout"
-    assert second.execution_status == "failed"
-    assert "처리 가능한 요청 수" in second.error
+    assert second.execution_status == "timeout"
+    assert second.error == "Search Agent 실행 시간이 초과됐습니다."
