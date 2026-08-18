@@ -134,7 +134,7 @@ class DomainAgent:
     domain: DomainName
     graph: DomainGraph
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG
-    max_workers: int = 2
+    max_workers: int = 3
     _executor: ThreadPoolExecutor = field(init=False, repr=False)
     _capacity: BoundedSemaphore = field(init=False, repr=False)
 
