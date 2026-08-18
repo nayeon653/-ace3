@@ -5,9 +5,9 @@ from typing import Annotated
 
 from langchain.tools import ToolRuntime
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
-from pension_agent.agent.contracts import AgentPermissions
+from pension_agent.agent.contracts import Permission, document_types_for_permission
 from pension_agent.agent.search.ports import ChunkRetriever, QueryEmbedder
 from pension_agent.agent.search.schemas import (
     GetChunkPayload,
@@ -147,7 +147,7 @@ def create_search_tools(
     embedder: QueryEmbedder,
     retriever: ChunkRetriever,
     config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
-    permissions: AgentPermissions | None = None,
+    permission: Permission | None = None,
 ) -> tuple[BaseTool, ...]:
     """Search Agent가 선택해서 호출할 검색 Tool을 만든다."""
 
@@ -171,9 +171,9 @@ def create_search_tools(
         runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
         def operation() -> SearchHitsPayload:
-            resolved_permissions = _resolve_permissions(runtime, fallback=permissions)
+            resolved_permission = _resolve_permission(runtime, fallback=permission)
             document_types = _resolve_document_types(
-                resolved_permissions,
+                resolved_permission,
                 requested=document_type,
             )
             return SearchHitsPayload(
@@ -211,8 +211,8 @@ def create_search_tools(
         runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
         def operation() -> SearchHitsPayload:
-            resolved_permissions = _resolve_permissions(runtime, fallback=permissions)
-            document_types = resolved_permissions.readable_document_types
+            resolved_permission = _resolve_permission(runtime, fallback=permission)
+            document_types = document_types_for_permission(resolved_permission)
             return SearchHitsPayload(
                 hits=[
                     _search_hit_payload(hit)
@@ -256,7 +256,7 @@ def create_search_tools(
         runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
         def operation() -> NeighborChunksPayload:
-            resolved_permissions = _resolve_permissions(runtime, fallback=permissions)
+            resolved_permission = _resolve_permission(runtime, fallback=permission)
             invalid_request = False
             try:
                 request = NeighborRequest(
@@ -274,7 +274,7 @@ def create_search_tools(
                     _chunk_payload(chunk)
                     for chunk in operations.get_neighbor_chunks(
                         request,
-                        document_types=resolved_permissions.readable_document_types,
+                        document_types=document_types_for_permission(resolved_permission),
                     )
                 ]
             )
@@ -287,10 +287,10 @@ def create_search_tools(
         runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
         def operation() -> GetChunkPayload:
-            resolved_permissions = _resolve_permissions(runtime, fallback=permissions)
+            resolved_permission = _resolve_permission(runtime, fallback=permission)
             chunk = operations.get_chunk(
                 chunk_id,
-                document_types=resolved_permissions.readable_document_types,
+                document_types=document_types_for_permission(resolved_permission),
             )
             return GetChunkPayload(chunk=_chunk_payload(chunk) if chunk is not None else None)
 
@@ -351,26 +351,26 @@ def _validate_limit(limit: int) -> None:
         raise SearchToolInputError(f"검색 결과 수는 1~{_MAX_RESULT_LIMIT} 사이여야 합니다.")
 
 
-def _resolve_permissions(
+def _resolve_permission(
     runtime: ToolRuntime[None, SearchAgentState] | None,
     *,
-    fallback: AgentPermissions | None,
-) -> AgentPermissions:
-    raw_permissions = fallback if runtime is None else runtime.state.get("permissions")
-    if raw_permissions is None:
+    fallback: Permission | None,
+) -> Permission:
+    raw_permission = fallback if runtime is None else runtime.state.get("permission")
+    if raw_permission is None:
         raise SearchPermissionError("검색 문서 접근 권한이 필요합니다.")
     try:
-        return AgentPermissions.model_validate(raw_permissions)
-    except ValidationError:
+        return Permission(raw_permission)
+    except (TypeError, ValueError):
         raise SearchPermissionError("검색 문서 접근 권한이 올바르지 않습니다.") from None
 
 
 def _resolve_document_types(
-    permissions: AgentPermissions,
+    permission: Permission,
     *,
     requested: DocumentType | None,
 ) -> frozenset[DocumentType]:
-    allowed = permissions.readable_document_types
+    allowed = document_types_for_permission(permission)
     if requested is None:
         return allowed
     if requested not in allowed:

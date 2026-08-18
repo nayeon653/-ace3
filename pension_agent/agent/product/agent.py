@@ -1,19 +1,15 @@
 """상품·운용 도메인 Agent 구현."""
 
-from pension_agent.agent.contracts import AgentPermissions, DomainRequest, DomainResult
-from pension_agent.core import DocumentType
+from pension_agent.agent.contracts import DomainRequest, DomainResult, Permission
 
 PRODUCT_TOOL_NAME = "analyze_product"
 PRODUCT_TOOL_DESCRIPTION = "연금 상품의 특성, 비용, 위험과 유동성을 판단한다."
-PRODUCT_AGENT_PERMISSIONS = AgentPermissions(
-    readable_document_types=frozenset({DocumentType.FUND_PROSPECTUS})
-)
 
 
 class ProductAgent:
     """상품·운용 Agent. 현재는 구현 전 상태를 명시하는 결과를 반환한다."""
 
-    permissions = PRODUCT_AGENT_PERMISSIONS
+    permission = Permission.PRODUCT
 
     def __call__(self, request: DomainRequest) -> DomainResult:
         """도메인 구현 전에는 질문을 임의로 판단하지 않고 미확정 결과를 반환한다."""

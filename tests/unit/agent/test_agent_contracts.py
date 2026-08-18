@@ -5,9 +5,10 @@ from pydantic import TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import (
     AgentAnswer,
-    AgentPermissions,
     DomainRequest,
     DomainResult,
+    Permission,
+    document_types_for_permission,
     validate_domain_result,
 )
 from pension_agent.agent.orchestration import build_domain_tool_result
@@ -37,15 +38,19 @@ def _completed_result() -> DomainResult:
     }
 
 
-def test_agent_permissions_require_non_empty_frozen_document_types() -> None:
-    with pytest.raises(ValidationError):
-        AgentPermissions(readable_document_types=frozenset())
-
-    permissions = AgentPermissions(
-        readable_document_types=frozenset({DocumentType.PENSION_REFERENCE})
-    )
-    with pytest.raises(ValidationError):
-        permissions.readable_document_types = frozenset({DocumentType.FUND_PROSPECTUS})
+@pytest.mark.parametrize(
+    ("permission", "expected_document_type"),
+    [
+        (Permission.POLICY, DocumentType.PENSION_REFERENCE),
+        (Permission.TAX_PAYOUT, DocumentType.PENSION_REFERENCE),
+        (Permission.PRODUCT, DocumentType.FUND_PROSPECTUS),
+    ],
+)
+def test_permission_maps_domain_to_document_types(
+    permission: Permission,
+    expected_document_type: DocumentType,
+) -> None:
+    assert document_types_for_permission(permission) == frozenset({expected_document_type})
 
 
 def test_domain_tool_result_excludes_evidence_and_calculations() -> None:

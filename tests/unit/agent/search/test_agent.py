@@ -12,7 +12,7 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 
-from pension_agent.agent.contracts import AgentPermissions
+from pension_agent.agent.contracts import Permission
 from pension_agent.agent.search import (
     SearchHitsPayload,
     SearchToolErrorPayload,
@@ -34,9 +34,7 @@ from pension_agent.core import (
 )
 
 _PENSION_DOCUMENT_TYPES = frozenset({DocumentType.PENSION_REFERENCE})
-_PENSION_PERMISSIONS = AgentPermissions(
-    readable_document_types=_PENSION_DOCUMENT_TYPES,
-)
+_PENSION_PERMISSION = Permission.POLICY
 
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
@@ -152,7 +150,7 @@ def _tools(
     embedder: FakeEmbedder | None = None,
     retriever: FakeChunkRetriever | None = None,
     config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
-    permissions: AgentPermissions = _PENSION_PERMISSIONS,
+    permission: Permission = _PENSION_PERMISSION,
 ) -> tuple[dict[str, BaseTool], FakeEmbedder, FakeChunkRetriever]:
     resolved_embedder = embedder or FakeEmbedder()
     resolved_retriever = retriever or FakeChunkRetriever()
@@ -160,7 +158,7 @@ def _tools(
         embedder=resolved_embedder,
         retriever=resolved_retriever,
         config=config,
-        permissions=permissions,
+        permission=permission,
     )
     return {tool.name: tool for tool in tools}, resolved_embedder, resolved_retriever
 
@@ -479,7 +477,7 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     result = agent.invoke(
         {
             "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
-            "permissions": _PENSION_PERMISSIONS,
+            "permission": _PENSION_PERMISSION,
         }
     )
 
@@ -533,7 +531,7 @@ def test_search_agent_stops_repeated_tool_calls_at_configured_run_limit() -> Non
     result = agent.invoke(
         {
             "messages": [{"role": "user", "content": "반복 검색"}],
-            "permissions": _PENSION_PERMISSIONS,
+            "permission": _PENSION_PERMISSION,
         }
     )
 
@@ -563,7 +561,7 @@ def test_parallel_tool_limit_executes_allowed_calls_and_returns_model_answer() -
     result = agent.invoke(
         {
             "messages": [{"role": "user", "content": "병렬 검색"}],
-            "permissions": _PENSION_PERMISSIONS,
+            "permission": _PENSION_PERMISSION,
         }
     )
 
@@ -609,7 +607,7 @@ def test_search_agent_requires_another_tool_after_tool_error() -> None:
     agent.invoke(
         {
             "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
-            "permissions": _PENSION_PERMISSIONS,
+            "permission": _PENSION_PERMISSION,
         }
     )
 
