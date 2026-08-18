@@ -7,7 +7,11 @@ from langchain.tools import ToolRuntime
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 
-from pension_agent.agent.contracts import Permission, document_types_for_permission
+from pension_agent.agent.contracts import (
+    Permission,
+    document_types_for_permission,
+    validate_permission,
+)
 from pension_agent.agent.search.ports import ChunkRetriever, QueryEmbedder
 from pension_agent.agent.search.schemas import (
     GetChunkPayload,
@@ -357,12 +361,10 @@ def _resolve_permission(
     fallback: Permission | None,
 ) -> Permission:
     raw_permission = fallback if runtime is None else runtime.state.get("permission")
-    if raw_permission is None:
-        raise SearchPermissionError("검색 문서 접근 권한이 필요합니다.")
     try:
-        return Permission(raw_permission)
-    except (TypeError, ValueError):
-        raise SearchPermissionError("검색 문서 접근 권한이 올바르지 않습니다.") from None
+        return validate_permission(raw_permission)
+    except (TypeError, ValueError) as exc:
+        raise SearchPermissionError(str(exc)) from None
 
 
 def _resolve_document_types(

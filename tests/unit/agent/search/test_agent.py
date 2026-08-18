@@ -495,6 +495,33 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     assert retriever.chunk_searches[0][1] == SearchFilters(document_types=_PENSION_DOCUMENT_TYPES)
 
 
+@pytest.mark.parametrize(
+    ("state_update", "expected_error"),
+    [
+        ({}, "검색 문서 접근 권한이 필요합니다."),
+        ({"permission": "unknown"}, "검색 문서 접근 권한이 올바르지 않습니다."),
+        ({"permission": []}, "검색 문서 접근 권한이 올바르지 않습니다."),
+    ],
+)
+def test_search_agent_rejects_invalid_permission_before_model_call(
+    state_update: dict[str, object],
+    expected_error: str,
+) -> None:
+    retriever = FakeChunkRetriever()
+    model = ToolCallingFakeModel(responses=[])
+    model.bindings.clear()
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
+    state = {
+        "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
+        **state_update,
+    }
+
+    result = agent.invoke(state)
+
+    assert result["messages"][-1].text == expected_error
+    assert retriever.chunk_searches == []
+
+
 def test_search_agent_stops_repeated_tool_calls_at_configured_run_limit() -> None:
     retriever = FakeChunkRetriever()
     responses = [
