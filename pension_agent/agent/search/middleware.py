@@ -13,6 +13,8 @@ from langchain.agents.middleware import (
 )
 from langchain.messages import AIMessage, ToolMessage
 
+from pension_agent.agent.contracts import validate_permission
+
 SEARCH_LIMIT_MESSAGE = (
     "검색 호출 한도에 도달해 추가 근거를 확인하지 못했습니다. "
     "현재까지 확인된 검색 결과만 사용하거나 검색 범위를 좁혀야 합니다."
@@ -20,6 +22,26 @@ SEARCH_LIMIT_MESSAGE = (
 SEARCH_TOOL_NAMES = frozenset(
     {"search_chunks", "search_within_document", "get_neighbor_chunks", "get_chunk"}
 )
+
+
+class RequireSearchPermission(AgentMiddleware[Any, Any, Any]):
+    """첫 모델 호출 전에 요청의 검색 문서 접근 권한을 검증한다."""
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        try:
+            validate_permission(state.get("permission"))
+        except (TypeError, ValueError) as exc:
+            return {
+                "jump_to": "end",
+                "messages": [AIMessage(content=str(exc))],
+            }
+        return None
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.before_model(state, runtime)
 
 
 class RequireSearchToolResult(AgentMiddleware[Any, Any, Any]):

@@ -8,7 +8,11 @@ from langchain.agents.middleware import ToolCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 
-from pension_agent.agent.search.middleware import RequireSearchToolResult, SearchModelCallLimit
+from pension_agent.agent.search.middleware import (
+    RequireSearchPermission,
+    RequireSearchToolResult,
+    SearchModelCallLimit,
+)
 from pension_agent.agent.search.ports import ChunkRetriever, QueryEmbedder
 from pension_agent.agent.search.state import SearchAgentState
 from pension_agent.agent.search.tools import create_search_tools
@@ -40,6 +44,7 @@ def create_search_agent(
         system_prompt=load_search_agent_prompt(),
         state_schema=SearchAgentState,
         middleware=(
+            RequireSearchPermission(),
             RequireSearchToolResult(),
             SearchModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(run_limit=config.max_tool_calls, exit_behavior="continue"),
