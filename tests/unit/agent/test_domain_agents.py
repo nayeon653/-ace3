@@ -6,6 +6,7 @@ from pension_agent.agent.contracts import (
     DomainName,
     DomainRequest,
     DomainResult,
+    Permission,
     validate_domain_result,
 )
 from pension_agent.agent.orchestration import DomainRunner
@@ -43,3 +44,18 @@ def test_domain_agent_returns_undetermined_placeholder(
     assert result["decision"]["missing_conditions"] == [f"{display_name} 도메인 Agent 구현"]
     assert result["evidence"] == []
     assert result["calculations"] == []
+
+
+@pytest.mark.parametrize(
+    ("agent", "expected_permission"),
+    [
+        (PolicyAgent(), Permission.POLICY),
+        (TaxPayoutAgent(), Permission.TAX_PAYOUT),
+        (ProductAgent(), Permission.PRODUCT),
+    ],
+)
+def test_domain_agents_declare_fixed_permission(
+    agent: PolicyAgent | TaxPayoutAgent | ProductAgent,
+    expected_permission: Permission,
+) -> None:
+    assert agent.permission is expected_permission
