@@ -8,9 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
-from pension_agent.agent.answer_service import AnswerService, AnswerServiceResult
-from pension_agent.agent.schemas import AgentAnswer, DomainResult
-from pension_agent.agent.state import SupervisorState
+from pension_agent.agent.contracts import AgentAnswer, DomainResult
+from pension_agent.agent.orchestration import AnswerService, AnswerServiceResult, SupervisorState
 from pension_agent.api.app import create_app
 from pension_agent.api.dependencies import get_deployment_commit_sha
 

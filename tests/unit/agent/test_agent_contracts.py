@@ -3,13 +3,13 @@
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from pension_agent.agent.schemas import (
+from pension_agent.agent.contracts import (
     AgentAnswer,
     DomainRequest,
     DomainResult,
     validate_domain_result,
 )
-from pension_agent.agent.tools import build_domain_tool_result
+from pension_agent.agent.orchestration import build_domain_tool_result
 
 
 def _completed_result() -> DomainResult:

@@ -41,13 +41,14 @@ flowchart LR
 
 - `core`는 Qdrant를 모르는 검색 입력·결과·오류 타입을 소유한다.
 - `retrieval`은 Qdrant 요청 생성, 필터 변환, payload 검증과 결과 변환을 소유한다.
-- `agent`는 공용 검색 타입과 `QdrantSearch` Facade만 사용한다.
+- `agent.search`는 공용 검색 타입과 `ChunkRetriever` Port만 사용한다.
+- `retrieval`의 `QdrantChunkRetriever`가 이 Port를 구현하고 Qdrant SDK를 캡슐화한다.
 - Qdrant SDK 타입은 `pension_agent/retrieval/` 밖으로 노출하지 않는다.
 - `content`만 답변 근거로 사용하고 `embedding_content`는 외부 응답에 노출하지 않는다.
 
-현재 Qdrant 하나만 사용하므로 DB 교체용 Protocol이나 추상 Repository는 두지 않는다.
-검색 입력은 Query Object, payload 조건은 Filter Builder, Agent 진입점은 Facade로
-구성한다.
+범용 Repository 계층은 두지 않는다. Search Agent가 실제 저장소 구현에 의존하지 않도록
+필요한 네 검색 연산만 `ChunkRetriever` Protocol로 정의한다. 검색 입력은 Query Object,
+payload 조건은 Filter Builder, Qdrant 접근은 Retriever Adapter로 구성한다.
 
 ## 현재 범위 밖
 

@@ -1,4 +1,4 @@
-"""Main Supervisor용 ChatClovaX 모델 Factory."""
+"""Agent에서 공용으로 사용하는 ChatClovaX 모델 Factory."""
 
 from langchain_naver import ChatClovaX  # type: ignore[import-untyped]
 from openai import OpenAIError

@@ -1,17 +1,17 @@
 """Agent orchestration."""
 
-from pension_agent.agent.search_agent import (
+from pension_agent.agent.search import (
+    ChunkRetriever,
     QueryEmbedder,
     QueryEmbeddingError,
-    SearchBackend,
     create_search_agent,
     create_search_tools,
 )
 
 __all__ = [
+    "ChunkRetriever",
     "QueryEmbedder",
     "QueryEmbeddingError",
-    "SearchBackend",
     "create_search_agent",
     "create_search_tools",
 ]

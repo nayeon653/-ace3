@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from pension_agent.agent.answer_service import AnswerService
+from pension_agent.agent.orchestration import AnswerService
 from pension_agent.api.dependencies import (
     PUBLIC_INTERNAL_ERROR,
     get_answer_service,

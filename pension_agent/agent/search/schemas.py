@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from pension_agent.agent.schemas import ExecutionStatus
+from pension_agent.agent.contracts import ExecutionStatus
 from pension_agent.core import DocumentType
 
 SearchCoverage = Literal["sufficient", "partial", "none"]
