@@ -8,7 +8,7 @@ from pension_agent.agent.model_factory import (
     ChatClovaXFactoryError,
     create_chat_clovax,
 )
-from pension_agent.agent.supervisor import create_main_supervisor
+from pension_agent.agent.orchestration import create_main_supervisor
 from pension_agent.config import MAIN_SUPERVISOR_HCX_CONFIG, ClovaStudioConnection
 
 

@@ -10,8 +10,8 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
-from pension_agent.agent.schemas import AgentAnswer
-from pension_agent.agent.state import SupervisorState
+from pension_agent.agent.contracts import AgentAnswer
+from pension_agent.agent.orchestration.state import SupervisorState
 
 
 def load_main_supervisor_prompt() -> str:
@@ -19,7 +19,7 @@ def load_main_supervisor_prompt() -> str:
 
     return (
         resources.files("pension_agent.prompts")
-        .joinpath("main-supervisor.md")
+        .joinpath("orchestration", "main-supervisor.md")
         .read_text(encoding="utf-8")
     )
 

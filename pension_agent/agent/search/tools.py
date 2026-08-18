@@ -1,28 +1,13 @@
-"""검색 기능을 Tool로 사용하는 ReAct Search Agent."""
+"""Search Agent가 사용하는 결정론적 검색 Tool."""
 
-from __future__ import annotations
+from collections.abc import Callable
+from typing import Annotated
 
-import json
-from collections.abc import Awaitable, Callable
-from importlib import resources
-from typing import Annotated, Any, Protocol
-
-from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    AgentMiddleware,
-    ModelCallLimitMiddleware,
-    ModelRequest,
-    ModelResponse,
-    ToolCallLimitMiddleware,
-    hook_config,
-)
-from langchain.messages import AIMessage, ToolMessage
-from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, tool
-from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
-from pension_agent.agent.search import (
+from pension_agent.agent.search.ports import ChunkRetriever, QueryEmbedder
+from pension_agent.agent.search.schemas import (
     GetChunkPayload,
     NeighborChunksPayload,
     SearchChunkPayload,
@@ -43,48 +28,6 @@ from pension_agent.core import (
 )
 
 _MAX_RESULT_LIMIT = 100
-_SEARCH_LIMIT_MESSAGE = (
-    "검색 호출 한도에 도달해 추가 근거를 확인하지 못했습니다. "
-    "현재까지 확인된 검색 결과만 사용하거나 검색 범위를 좁혀야 합니다."
-)
-_SEARCH_TOOL_NAMES = frozenset(
-    {"search_chunks", "search_within_document", "get_neighbor_chunks", "get_chunk"}
-)
-
-
-class QueryEmbedder(Protocol):
-    """검색문 하나를 dense vector로 변환하는 제공자 경계."""
-
-    def embed_query(self, text: str) -> list[float]:
-        """검색문에 대응하는 dense vector를 반환한다."""
-
-
-class SearchBackend(Protocol):
-    """검색 Tool이 의존하는 도메인 중립 검색 기능."""
-
-    def search_chunks(
-        self,
-        query: SearchQuery,
-        *,
-        filters: SearchFilters | None = None,
-        limit: int = 10,
-    ) -> list[SearchHit]:
-        """전체 corpus를 검색한다."""
-
-    def search_within_document(
-        self,
-        query: SearchQuery,
-        *,
-        source_file_name: str,
-        limit: int = 10,
-    ) -> list[SearchHit]:
-        """원본 문서 하나에서 검색한다."""
-
-    def get_neighbor_chunks(self, request: NeighborRequest) -> list[RetrievedChunk]:
-        """기준 청크 주변의 문맥을 조회한다."""
-
-    def get_chunk(self, chunk_id: str) -> RetrievedChunk | None:
-        """청크 ID로 근거 하나를 조회한다."""
 
 
 class QueryEmbeddingError(RuntimeError):
@@ -95,67 +38,12 @@ class SearchToolInputError(ValueError):
     """모델이 만든 검색 Tool 인자가 공개 입력 계약을 위반한 경우."""
 
 
-class _RequireSearchToolResult(AgentMiddleware[Any, Any, Any]):
-    """정상 검색 결과를 얻을 때까지 Tool 사용을 강제한다."""
-
-    def wrap_model_call(
-        self,
-        request: ModelRequest[Any],
-        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
-    ) -> ModelResponse[Any]:
-        return handler(self._with_required_tool(request))
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest[Any],
-        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
-    ) -> ModelResponse[Any]:
-        return await handler(self._with_required_tool(request))
-
-    @staticmethod
-    def _with_required_tool(request: ModelRequest[Any]) -> ModelRequest[Any]:
-        for message in request.messages:
-            if not isinstance(message, ToolMessage) or message.name not in _SEARCH_TOOL_NAMES:
-                continue
-            if not isinstance(message.content, str):
-                continue
-            try:
-                payload = json.loads(message.content)
-            except (TypeError, ValueError):
-                continue
-            if isinstance(payload, dict) and "error" not in payload:
-                return request
-        return request.override(tool_choice="required")
-
-
-class _SearchModelCallLimit(ModelCallLimitMiddleware):
-    """모델 호출 상한에서 안전한 Search Agent 응답으로 종료한다."""
-
-    def __init__(self, *, max_model_calls: int) -> None:
-        super().__init__(run_limit=max_model_calls, exit_behavior="end")
-        self._max_model_calls = max_model_calls
-
-    @hook_config(can_jump_to=["end"])
-    def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        del runtime
-        if state.get("run_model_call_count", 0) < self._max_model_calls:
-            return None
-        return {
-            "jump_to": "end",
-            "messages": [AIMessage(content=_SEARCH_LIMIT_MESSAGE)],
-        }
-
-    @hook_config(can_jump_to=["end"])
-    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self.before_model(state, runtime)
-
-
 class _SearchOperations:
-    """Search Agent Tool의 결정론적 실행부."""
+    """Search Tool의 결정론적 실행부."""
 
-    def __init__(self, *, embedder: QueryEmbedder, backend: SearchBackend) -> None:
+    def __init__(self, *, embedder: QueryEmbedder, retriever: ChunkRetriever) -> None:
         self._embedder = embedder
-        self._backend = backend
+        self._retriever = retriever
 
     def search_chunks(
         self,
@@ -166,7 +54,7 @@ class _SearchOperations:
         limit: int = 10,
     ) -> list[SearchHit]:
         _validate_limit(limit)
-        return self._backend.search_chunks(
+        return self._retriever.search_chunks(
             self._build_query(text, mode=mode),
             filters=filters,
             limit=limit,
@@ -184,24 +72,22 @@ class _SearchOperations:
         source_file_name = source_file_name.strip()
         if not source_file_name:
             raise SearchToolInputError("원본 파일명 필터는 비어 있을 수 없습니다.")
-
-        return self._backend.search_within_document(
+        return self._retriever.search_within_document(
             self._build_query(text, mode=mode),
             source_file_name=source_file_name,
             limit=limit,
         )
 
     def get_neighbor_chunks(self, request: NeighborRequest) -> list[RetrievedChunk]:
-        return self._backend.get_neighbor_chunks(request)
+        return self._retriever.get_neighbor_chunks(request)
 
     def get_chunk(self, chunk_id: str) -> RetrievedChunk | None:
-        return self._backend.get_chunk(chunk_id)
+        return self._retriever.get_chunk(chunk_id)
 
     def _build_query(self, text: str, *, mode: SearchMode) -> SearchQuery:
         normalized_text = text.strip()
         if not normalized_text:
             raise SearchToolInputError("검색문은 비어 있을 수 없습니다.")
-
         if mode is SearchMode.SPARSE:
             return SearchQuery(text=normalized_text, mode=mode)
 
@@ -211,7 +97,6 @@ class _SearchOperations:
         # 외부 임베딩 구현마다 예외 계층이 달라 Provider 경계에서 한 번에 정제한다.
         except Exception:  # noqa: BLE001
             provider_failed = True
-
         if provider_failed:
             raise QueryEmbeddingError("검색문 임베딩 생성에 실패했습니다.")
 
@@ -221,36 +106,22 @@ class _SearchOperations:
         # 지연 평가되는 Provider 반환값의 순회·변환 예외도 원문을 노출하지 않는다.
         except Exception:  # noqa: BLE001
             invalid_result = True
-
         if invalid_result:
             raise QueryEmbeddingError("검색문 임베딩 결과가 올바르지 않습니다.")
         return query
 
 
-def load_search_agent_prompt() -> str:
-    """패키지 리소스에서 Search Agent 프롬프트를 읽는다."""
-
-    return (
-        resources.files("pension_agent.prompts")
-        .joinpath("search-agent.md")
-        .read_text(encoding="utf-8")
-    )
-
-
 def create_search_tools(
     *,
     embedder: QueryEmbedder,
-    backend: SearchBackend,
+    retriever: ChunkRetriever,
     config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
 ) -> tuple[BaseTool, ...]:
     """Search Agent가 선택해서 호출할 검색 Tool을 만든다."""
 
-    operations = _SearchOperations(embedder=embedder, backend=backend)
+    operations = _SearchOperations(embedder=embedder, retriever=retriever)
 
-    @tool(
-        "search_chunks",
-        description="전체 제공 문서에서 검색어와 관련된 근거 청크를 찾는다.",
-    )
+    @tool("search_chunks", description="전체 제공 문서에서 검색어와 관련된 근거 청크를 찾는다.")
     def search_chunks(
         text: Annotated[str, Field(min_length=1, description="근거를 찾을 검색어")],
         mode: Annotated[
@@ -351,7 +222,6 @@ def create_search_tools(
                 )
             except (TypeError, ValueError):
                 invalid_request = True
-
             if invalid_request:
                 raise SearchToolInputError("인접 청크 조회 범위가 올바르지 않습니다.")
             return NeighborChunksPayload(
@@ -360,10 +230,7 @@ def create_search_tools(
 
         return _tool_payload(operation)
 
-    @tool(
-        "get_chunk",
-        description="이미 알고 있는 UUID 청크 ID로 근거 하나를 다시 조회한다.",
-    )
+    @tool("get_chunk", description="이미 알고 있는 UUID 청크 ID로 근거 하나를 다시 조회한다.")
     def get_chunk(
         chunk_id: Annotated[str, Field(min_length=1, description="조회할 UUID 청크 ID")],
     ) -> str:
@@ -376,28 +243,6 @@ def create_search_tools(
     return search_chunks, search_within_document, get_neighbor_chunks, get_chunk
 
 
-def create_search_agent(
-    *,
-    model: BaseChatModel,
-    embedder: QueryEmbedder,
-    backend: SearchBackend,
-    config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
-) -> CompiledStateGraph[Any, Any, Any, Any]:
-    """HCX 모델에 검색 Tool을 바인딩한 Search Agent를 만든다."""
-
-    return create_agent(
-        model=model,
-        tools=create_search_tools(embedder=embedder, backend=backend, config=config),
-        system_prompt=load_search_agent_prompt(),
-        middleware=(
-            _RequireSearchToolResult(),
-            _SearchModelCallLimit(max_model_calls=config.max_model_calls),
-            ToolCallLimitMiddleware(run_limit=config.max_tool_calls, exit_behavior="continue"),
-        ),
-        name="search_agent",
-    )
-
-
 def _tool_payload(operation: Callable[[], BaseModel]) -> str:
     unexpected_failure = False
     try:
@@ -405,10 +250,9 @@ def _tool_payload(operation: Callable[[], BaseModel]) -> str:
     except (QueryEmbeddingError, RetrievalError, SearchToolInputError) as exc:
         error = str(exc).strip() or "검색 Tool 실행에 실패했습니다."
         return SearchToolErrorPayload(error=error).model_dump_json()
-    # 구현이 다른 Backend의 원시 예외는 검색 Agent의 ToolMessage에 노출하지 않는다.
+    # 구현이 다른 Retriever의 원시 예외는 Search Agent의 ToolMessage에 노출하지 않는다.
     except Exception:  # noqa: BLE001
         unexpected_failure = True
-
     if unexpected_failure:
         return SearchToolErrorPayload(error="검색 Tool 실행에 실패했습니다.").model_dump_json()
 
@@ -418,7 +262,6 @@ def _tool_payload(operation: Callable[[], BaseModel]) -> str:
     # Tool 경계 밖으로 직렬화 대상이나 Provider의 원시 예외를 노출하지 않는다.
     except Exception:  # noqa: BLE001
         serialization_failed = True
-
     if serialization_failed:
         return SearchToolErrorPayload(
             error="검색 Tool 결과를 처리하지 못했습니다."

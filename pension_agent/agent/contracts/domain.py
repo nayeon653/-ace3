@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any, Literal, NotRequired
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 from typing_extensions import TypedDict
 
 DomainName = Literal["policy", "tax_payout", "product"]
@@ -75,14 +75,6 @@ class DomainToolResult(TypedDict):
     decision: NotRequired[DomainDecision]
     warnings: list[str]
     error: NotRequired[str]
-
-
-class AgentAnswer(BaseModel):
-    """Main LLM이 생성하는 최종 자연어 답변."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    answer: str
 
 
 def validate_domain_result(result: DomainResult) -> None:

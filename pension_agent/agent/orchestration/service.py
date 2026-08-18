@@ -7,9 +7,9 @@ from typing import Any, Protocol, cast
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import TypeAdapter, ValidationError
 
-from pension_agent.agent.schemas import AgentAnswer, DomainResult, validate_domain_result
-from pension_agent.agent.state import SupervisorState
-from pension_agent.agent.supervisor import build_agent_answer
+from pension_agent.agent.contracts import AgentAnswer, DomainResult, validate_domain_result
+from pension_agent.agent.orchestration.state import SupervisorState
+from pension_agent.agent.orchestration.supervisor import build_agent_answer
 
 _DOMAIN_RESULT_ADAPTER = TypeAdapter(DomainResult)
 

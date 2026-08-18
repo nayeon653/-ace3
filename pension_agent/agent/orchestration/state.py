@@ -5,7 +5,7 @@ from typing import Annotated
 
 from langchain.agents import AgentState
 
-from pension_agent.agent.schemas import AgentAnswer, DomainResult
+from pension_agent.agent.contracts import AgentAnswer, DomainResult
 
 
 class SupervisorState(AgentState[AgentAnswer]):

@@ -12,9 +12,13 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 
-from pension_agent.agent import create_search_agent, create_search_tools
-from pension_agent.agent.search import SearchHitsPayload, SearchToolErrorPayload
-from pension_agent.agent.search_agent import load_search_agent_prompt
+from pension_agent.agent.search import (
+    SearchHitsPayload,
+    SearchToolErrorPayload,
+    create_search_agent,
+    create_search_tools,
+    load_search_agent_prompt,
+)
 from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG, SearchAgentConfig
 from pension_agent.core import (
     DocumentType,
@@ -60,7 +64,7 @@ class ExplodingVector(list[float]):
 
 
 @dataclass
-class FakeSearchBackend:
+class FakeChunkRetriever:
     hits: list[SearchHit] = field(default_factory=list)
     chunks: list[RetrievedChunk] = field(default_factory=list)
     chunk: RetrievedChunk | None = None
@@ -123,24 +127,24 @@ def _chunk() -> RetrievedChunk:
 def _tools(
     *,
     embedder: FakeEmbedder | None = None,
-    backend: FakeSearchBackend | None = None,
+    retriever: FakeChunkRetriever | None = None,
     config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
-) -> tuple[dict[str, BaseTool], FakeEmbedder, FakeSearchBackend]:
+) -> tuple[dict[str, BaseTool], FakeEmbedder, FakeChunkRetriever]:
     resolved_embedder = embedder or FakeEmbedder()
-    resolved_backend = backend or FakeSearchBackend()
+    resolved_retriever = retriever or FakeChunkRetriever()
     tools = create_search_tools(
         embedder=resolved_embedder,
-        backend=resolved_backend,
+        retriever=resolved_retriever,
         config=config,
     )
-    return {tool.name: tool for tool in tools}, resolved_embedder, resolved_backend
+    return {tool.name: tool for tool in tools}, resolved_embedder, resolved_retriever
 
 
 @pytest.mark.parametrize("mode", [SearchMode.DENSE, SearchMode.HYBRID])
 def test_search_chunks_tool_embeds_and_serializes_hits(mode: SearchMode) -> None:
     chunk = _chunk()
-    backend = FakeSearchBackend(hits=[SearchHit(chunk=chunk, score=0.8)])
-    tools, embedder, _backend = _tools(backend=backend)
+    retriever = FakeChunkRetriever(hits=[SearchHit(chunk=chunk, score=0.8)])
+    tools, embedder, _retriever = _tools(retriever=retriever)
 
     content = tools["search_chunks"].invoke(
         {
@@ -155,7 +159,7 @@ def test_search_chunks_tool_embeds_and_serializes_hits(mode: SearchMode) -> None
     assert payload.hits[0].chunk.chunk_id == chunk.chunk_id
     assert payload.hits[0].score == 0.8
     assert embedder.calls == ["IRP 이전 절차"]
-    query, filters, limit = backend.chunk_searches[0]
+    query, filters, limit = retriever.chunk_searches[0]
     assert query == SearchQuery(text="IRP 이전 절차", dense=(0.1, 0.2), mode=mode)
     assert filters == SearchFilters(document_type=DocumentType.PENSION_REFERENCE)
     assert limit == 7
@@ -163,7 +167,7 @@ def test_search_chunks_tool_embeds_and_serializes_hits(mode: SearchMode) -> None
 
 def test_sparse_search_tool_skips_embedding() -> None:
     embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
-    tools, _embedder, backend = _tools(embedder=embedder)
+    tools, _embedder, retriever = _tools(embedder=embedder)
 
     content = tools["search_chunks"].invoke(
         {"text": "IRP 이전 절차", "mode": SearchMode.SPARSE.value}
@@ -171,12 +175,12 @@ def test_sparse_search_tool_skips_embedding() -> None:
 
     assert json.loads(content) == {"hits": []}
     assert embedder.calls == []
-    query, _filters, _limit = backend.chunk_searches[0]
+    query, _filters, _limit = retriever.chunk_searches[0]
     assert query == SearchQuery(text="IRP 이전 절차", mode=SearchMode.SPARSE)
 
 
 def test_document_search_tool_preserves_document_scope() -> None:
-    tools, embedder, backend = _tools()
+    tools, embedder, retriever = _tools()
 
     tools["search_within_document"].invoke(
         {
@@ -187,7 +191,7 @@ def test_document_search_tool_preserves_document_scope() -> None:
         }
     )
 
-    query, source_file_name, limit = backend.document_searches[0]
+    query, source_file_name, limit = retriever.document_searches[0]
     assert query == SearchQuery(text="중도해지", dense=(0.1, 0.2), mode=SearchMode.DENSE)
     assert source_file_name == "guide.pdf"
     assert limit == 4
@@ -197,8 +201,8 @@ def test_document_search_tool_preserves_document_scope() -> None:
 def test_lookup_tools_delegate_without_embedding() -> None:
     chunk = _chunk()
     embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
-    backend = FakeSearchBackend(chunks=[chunk], chunk=chunk)
-    tools, _embedder, _backend = _tools(embedder=embedder, backend=backend)
+    retriever = FakeChunkRetriever(chunks=[chunk], chunk=chunk)
+    tools, _embedder, _retriever = _tools(embedder=embedder, retriever=retriever)
 
     neighbor_content = tools["get_neighbor_chunks"].invoke(
         {"source_file_name": "guide.pdf", "chunk_index": 2, "before": 1, "after": 1}
@@ -207,34 +211,34 @@ def test_lookup_tools_delegate_without_embedding() -> None:
 
     assert json.loads(neighbor_content)["chunks"][0]["chunk_id"] == chunk.chunk_id
     assert json.loads(chunk_content)["chunk"]["content"] == chunk.content
-    assert backend.neighbor_requests == [
+    assert retriever.neighbor_requests == [
         NeighborRequest(source_file_name="guide.pdf", chunk_index=2)
     ]
-    assert backend.chunk_ids == [chunk.chunk_id]
+    assert retriever.chunk_ids == [chunk.chunk_id]
     assert embedder.calls == []
 
 
 @pytest.mark.parametrize("limit", [0, 101, True])
 def test_tool_schema_rejects_invalid_limit_before_embedding(limit: int) -> None:
     embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
-    tools, _embedder, backend = _tools(embedder=embedder)
+    tools, _embedder, retriever = _tools(embedder=embedder)
 
     with pytest.raises(ValidationError):
         tools["search_chunks"].invoke({"text": "IRP 이전", "limit": limit})
 
     assert embedder.calls == []
-    assert backend.chunk_searches == []
+    assert retriever.chunk_searches == []
 
 
 def test_empty_document_name_returns_safe_tool_error_before_embedding() -> None:
     embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
-    tools, _embedder, backend = _tools(embedder=embedder)
+    tools, _embedder, retriever = _tools(embedder=embedder)
 
     content = tools["search_within_document"].invoke({"text": "IRP 이전", "source_file_name": "  "})
 
     assert json.loads(content) == {"error": "원본 파일명 필터는 비어 있을 수 없습니다."}
     assert embedder.calls == []
-    assert backend.document_searches == []
+    assert retriever.document_searches == []
 
 
 @pytest.mark.parametrize(
@@ -247,27 +251,27 @@ def test_empty_document_name_returns_safe_tool_error_before_embedding() -> None:
     ],
 )
 def test_embedding_failure_is_sanitized_in_tool_message(embedder: FakeEmbedder) -> None:
-    tools, _embedder, backend = _tools(embedder=embedder)
+    tools, _embedder, retriever = _tools(embedder=embedder)
 
     content = tools["search_chunks"].invoke({"text": "IRP 이전"})
 
     payload = SearchToolErrorPayload.model_validate_json(content)
     assert payload.error
     assert "secret" not in content
-    assert backend.chunk_searches == []
+    assert retriever.chunk_searches == []
 
 
 @pytest.mark.parametrize(
     "error",
     [
-        RuntimeError("backend secret=RUNTIME"),
-        ValueError("backend secret=VALUE"),
-        TypeError("backend secret=TYPE"),
+        RuntimeError("retriever secret=RUNTIME"),
+        ValueError("retriever secret=VALUE"),
+        TypeError("retriever secret=TYPE"),
     ],
 )
-def test_unexpected_backend_error_is_sanitized_in_tool_message(error: Exception) -> None:
-    backend = FakeSearchBackend(search_error=error)
-    tools, _embedder, _backend = _tools(backend=backend)
+def test_unexpected_retriever_error_is_sanitized_in_tool_message(error: Exception) -> None:
+    retriever = FakeChunkRetriever(search_error=error)
+    tools, _embedder, _retriever = _tools(retriever=retriever)
 
     content = tools["search_chunks"].invoke({"text": "IRP 이전"})
 
@@ -277,8 +281,8 @@ def test_unexpected_backend_error_is_sanitized_in_tool_message(error: Exception)
 
 @pytest.mark.parametrize("message", ["", "   "])
 def test_empty_retrieval_error_uses_safe_fallback(message: str) -> None:
-    backend = FakeSearchBackend(search_error=RetrievalError(message))
-    tools, _embedder, _backend = _tools(backend=backend)
+    retriever = FakeChunkRetriever(search_error=RetrievalError(message))
+    tools, _embedder, _retriever = _tools(retriever=retriever)
 
     content = tools["search_chunks"].invoke({"text": "IRP 이전"})
 
@@ -286,17 +290,17 @@ def test_empty_retrieval_error_uses_safe_fallback(message: str) -> None:
 
 
 def test_invalid_neighbor_request_returns_safe_tool_error() -> None:
-    tools, embedder, backend = _tools()
+    tools, embedder, retriever = _tools()
 
     content = tools["get_neighbor_chunks"].invoke({"source_file_name": "  ", "chunk_index": 2})
 
     assert json.loads(content) == {"error": "인접 청크 조회 범위가 올바르지 않습니다."}
     assert embedder.calls == []
-    assert backend.neighbor_requests == []
+    assert retriever.neighbor_requests == []
 
 
 def test_neighbor_tool_rejects_combined_range_over_limit() -> None:
-    tools, embedder, backend = _tools()
+    tools, embedder, retriever = _tools()
 
     content = tools["get_neighbor_chunks"].invoke(
         {"source_file_name": "guide.pdf", "chunk_index": 2, "before": 99, "after": 99}
@@ -304,11 +308,11 @@ def test_neighbor_tool_rejects_combined_range_over_limit() -> None:
 
     assert json.loads(content) == {"error": "인접 청크 조회 범위가 올바르지 않습니다."}
     assert embedder.calls == []
-    assert backend.neighbor_requests == []
+    assert retriever.neighbor_requests == []
 
 
 def test_search_tools_have_stable_names_and_argument_schemas() -> None:
-    tools, _embedder, _backend = _tools()
+    tools, _embedder, _retriever = _tools()
 
     assert set(tools) == {
         "search_chunks",
@@ -334,15 +338,15 @@ def test_search_tools_use_configured_defaults() -> None:
         default_neighbor_before=2,
         default_neighbor_after=3,
     )
-    tools, embedder, backend = _tools(config=config)
+    tools, embedder, retriever = _tools(config=config)
 
     tools["search_chunks"].invoke({"text": "IRP 이전"})
     tools["get_neighbor_chunks"].invoke({"source_file_name": "guide.pdf", "chunk_index": 4})
 
-    query, _filters, limit = backend.chunk_searches[0]
+    query, _filters, limit = retriever.chunk_searches[0]
     assert query.mode is SearchMode.SPARSE
     assert limit == 5
-    assert backend.neighbor_requests == [
+    assert retriever.neighbor_requests == [
         NeighborRequest(
             source_file_name="guide.pdf",
             chunk_index=4,
@@ -355,7 +359,7 @@ def test_search_tools_use_configured_defaults() -> None:
 
 def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     chunk = _chunk()
-    backend = FakeSearchBackend(hits=[SearchHit(chunk=chunk, score=0.9)])
+    retriever = FakeChunkRetriever(hits=[SearchHit(chunk=chunk, score=0.9)])
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -373,7 +377,7 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
         ]
     )
     model.bindings.clear()
-    agent = create_search_agent(model=model, embedder=FakeEmbedder(), backend=backend)
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
 
     result = agent.invoke({"messages": [{"role": "user", "content": "IRP 이전 근거 검색"}]})
 
@@ -391,7 +395,7 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
 
 
 def test_search_agent_stops_repeated_tool_calls_at_configured_run_limit() -> None:
-    backend = FakeSearchBackend()
+    retriever = FakeChunkRetriever()
     responses = [
         AIMessage(
             content="",
@@ -419,18 +423,18 @@ def test_search_agent_stops_repeated_tool_calls_at_configured_run_limit() -> Non
     agent = create_search_agent(
         model=model,
         embedder=FakeEmbedder(),
-        backend=backend,
+        retriever=retriever,
         config=config,
     )
 
     result = agent.invoke({"messages": [{"role": "user", "content": "반복 검색"}]})
 
-    assert len(backend.chunk_searches) == 2
+    assert len(retriever.chunk_searches) == 2
     assert "검색 호출 한도" in result["messages"][-1].text
 
 
 def test_parallel_tool_limit_executes_allowed_calls_and_returns_model_answer() -> None:
-    backend = FakeSearchBackend()
+    retriever = FakeChunkRetriever()
     parallel_calls = [
         {
             "name": "search_chunks",
@@ -446,11 +450,11 @@ def test_parallel_tool_limit_executes_allowed_calls_and_returns_model_answer() -
             AIMessage(content="검색 호출 한도 안에서 확인한 근거를 정리했습니다."),
         ]
     )
-    agent = create_search_agent(model=model, embedder=FakeEmbedder(), backend=backend)
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
 
     result = agent.invoke({"messages": [{"role": "user", "content": "병렬 검색"}]})
 
-    assert len(backend.chunk_searches) == 3
+    assert len(retriever.chunk_searches) == 3
     assert result["messages"][-1].text == "검색 호출 한도 안에서 확인한 근거를 정리했습니다."
 
 
@@ -486,7 +490,7 @@ def test_search_agent_requires_another_tool_after_tool_error() -> None:
     agent = create_search_agent(
         model=model,
         embedder=FakeEmbedder(),
-        backend=FakeSearchBackend(),
+        retriever=FakeChunkRetriever(),
     )
 
     agent.invoke({"messages": [{"role": "user", "content": "IRP 이전 근거 검색"}]})

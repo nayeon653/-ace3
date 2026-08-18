@@ -1,6 +1,6 @@
 """업무·제도 도메인 Agent 구현."""
 
-from pension_agent.agent.schemas import DomainRequest, DomainResult
+from pension_agent.agent.contracts import DomainRequest, DomainResult
 
 POLICY_TOOL_NAME = "analyze_policy"
 POLICY_TOOL_DESCRIPTION = "연금 가입, 이전, 해지, 수령 절차와 제도상 가능 여부를 판단한다."

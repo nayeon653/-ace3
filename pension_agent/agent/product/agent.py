@@ -1,6 +1,6 @@
 """상품·운용 도메인 Agent 구현."""
 
-from pension_agent.agent.schemas import DomainRequest, DomainResult
+from pension_agent.agent.contracts import DomainRequest, DomainResult
 
 PRODUCT_TOOL_NAME = "analyze_product"
 PRODUCT_TOOL_DESCRIPTION = "연금 상품의 특성, 비용, 위험과 유동성을 판단한다."

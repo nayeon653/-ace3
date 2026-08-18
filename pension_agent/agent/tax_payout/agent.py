@@ -1,6 +1,6 @@
 """세제·수령 도메인 Agent 구현."""
 
-from pension_agent.agent.schemas import DomainRequest, DomainResult
+from pension_agent.agent.contracts import DomainRequest, DomainResult
 
 TAX_PAYOUT_TOOL_NAME = "analyze_tax_payout"
 TAX_PAYOUT_TOOL_DESCRIPTION = "연금 세액공제, 과세와 수령 조건을 판단한다."

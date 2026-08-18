@@ -11,14 +11,14 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import Field
 
-from pension_agent.agent.schemas import (
+from pension_agent.agent.contracts import (
     DomainName,
     DomainRequest,
     DomainResult,
     DomainToolResult,
     validate_domain_result,
 )
-from pension_agent.agent.state import SupervisorState
+from pension_agent.agent.orchestration.state import SupervisorState
 
 DomainRunner = Callable[[DomainRequest], DomainResult]
 

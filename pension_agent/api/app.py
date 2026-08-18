@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from pension_agent.agent.answer_service import AnswerService
+from pension_agent.agent.orchestration import AnswerService
 from pension_agent.api.bootstrap import build_answer_service
 from pension_agent.api.routes import router
 

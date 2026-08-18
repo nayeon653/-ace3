@@ -1,22 +1,17 @@
 """도메인별 기본 Agent와 조립 경계를 검증한다."""
 
-from typing import cast
-
 import pytest
-from langchain_core.tools import BaseTool
-from pydantic import BaseModel
 
-from pension_agent.agent.domains.assembly import create_domain_agent_tools
-from pension_agent.agent.domains.policy import PolicyAgent
-from pension_agent.agent.domains.product import ProductAgent
-from pension_agent.agent.domains.tax_payout import TaxPayoutAgent
-from pension_agent.agent.schemas import (
+from pension_agent.agent.contracts import (
     DomainName,
     DomainRequest,
     DomainResult,
     validate_domain_result,
 )
-from pension_agent.agent.tools import DomainRunner
+from pension_agent.agent.orchestration import DomainRunner
+from pension_agent.agent.policy import PolicyAgent
+from pension_agent.agent.product import ProductAgent
+from pension_agent.agent.tax_payout import TaxPayoutAgent
 
 
 @pytest.mark.parametrize(
@@ -48,17 +43,3 @@ def test_domain_agent_returns_undetermined_placeholder(
     assert result["decision"]["missing_conditions"] == [f"{display_name} 도메인 Agent 구현"]
     assert result["evidence"] == []
     assert result["calculations"] == []
-
-
-def test_domain_agents_are_registered_with_stable_tool_contracts() -> None:
-    tools = create_domain_agent_tools()
-
-    assert all(isinstance(tool, BaseTool) for tool in tools)
-    assert {tool.name for tool in tools} == {
-        "analyze_policy",
-        "analyze_tax_payout",
-        "analyze_product",
-    }
-    for tool in tools:
-        schema = cast(type[BaseModel], tool.tool_call_schema)
-        assert set(schema.model_json_schema()["properties"]) == {"objective"}

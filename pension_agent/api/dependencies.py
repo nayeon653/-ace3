@@ -5,7 +5,7 @@ from typing import cast
 
 from fastapi import HTTPException, Request, status
 
-from pension_agent.agent.answer_service import AnswerService
+from pension_agent.agent.orchestration import AnswerService
 
 PUBLIC_INTERNAL_ERROR = "답변을 생성하지 못했습니다."
 

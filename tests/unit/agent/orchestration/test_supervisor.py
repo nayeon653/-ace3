@@ -8,10 +8,17 @@ from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
 
-from pension_agent.agent.assembly import create_default_main_supervisor
-from pension_agent.agent.schemas import DomainName, DomainRequest, DomainResult
-from pension_agent.agent.supervisor import build_agent_answer, create_main_supervisor
-from pension_agent.agent.tools import create_domain_agent_tool
+from pension_agent.agent.contracts import DomainName, DomainRequest, DomainResult
+from pension_agent.agent.orchestration import (
+    build_agent_answer,
+    create_domain_agent_tool,
+    create_main_supervisor,
+)
+from pension_agent.agent.policy import (
+    POLICY_TOOL_DESCRIPTION,
+    POLICY_TOOL_NAME,
+    PolicyAgent,
+)
 
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
@@ -120,7 +127,7 @@ def test_main_supervisor_runs_domain_tools_and_accumulates_results() -> None:
 def test_main_supervisor_prompt_is_packaged() -> None:
     prompt = (
         resources.files("pension_agent.prompts")
-        .joinpath("main-supervisor.md")
+        .joinpath("orchestration", "main-supervisor.md")
         .read_text(encoding="utf-8")
     )
 
@@ -128,7 +135,7 @@ def test_main_supervisor_prompt_is_packaged() -> None:
     assert "JSON이나 Tool 호출 형식을 직접 출력하지 않는다" in prompt
 
 
-def test_default_main_supervisor_uses_placeholder_result_for_final_answer() -> None:
+def test_main_supervisor_uses_placeholder_result_for_final_answer() -> None:
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -138,7 +145,13 @@ def test_default_main_supervisor_uses_placeholder_result_for_final_answer() -> N
             AIMessage(content="업무·제도 Agent가 아직 구현되지 않아 추후 판단할 수 있습니다."),
         ]
     )
-    supervisor = create_default_main_supervisor(model=model)
+    policy_tool = create_domain_agent_tool(
+        name=POLICY_TOOL_NAME,
+        description=POLICY_TOOL_DESCRIPTION,
+        domain="policy",
+        runner=PolicyAgent(),
+    )
+    supervisor = create_main_supervisor(model=model, tools=[policy_tool])
 
     result = supervisor.invoke(
         {

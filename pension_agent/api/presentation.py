@@ -1,7 +1,7 @@
 """검증된 Agent 결과를 외부 공개 응답으로 변환한다."""
 
-from pension_agent.agent.answer_service import AnswerServiceResult
-from pension_agent.agent.schemas import DecisionStatus, DomainResult, ExecutionStatus
+from pension_agent.agent.contracts import DecisionStatus, DomainResult, ExecutionStatus
+from pension_agent.agent.orchestration import AnswerServiceResult
 from pension_agent.api.schemas import AnswerResponse, EvidenceChunkResponse
 
 _EXECUTION_LABELS: dict[ExecutionStatus, str] = {

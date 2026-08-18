@@ -6,13 +6,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from pension_agent.agent.answer_service import (
+from pension_agent.agent.contracts import DomainResult
+from pension_agent.agent.orchestration import (
     AnswerService,
     FinalAnswerMissingError,
     InvalidSupervisorResultError,
     SupervisorExecutionError,
 )
-from pension_agent.agent.schemas import DomainResult
 
 
 class FakeSupervisor:
