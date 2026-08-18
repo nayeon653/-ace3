@@ -58,3 +58,10 @@ BGE_M3_EMBEDDING_CONFIG = ClovaEmbeddingConfig(
     timeout_seconds=30.0,
     max_retries=2,
 )
+
+BGE_M3_INDEXING_CONFIG = ClovaEmbeddingConfig(
+    model="bge-m3",
+    dimensions=1024,
+    timeout_seconds=90.0,
+    max_retries=5,
+)

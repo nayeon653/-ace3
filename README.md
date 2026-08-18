@@ -80,6 +80,7 @@ make build   # wheel + source distribution 빌드
 make qdrant-up     # 로컬 Qdrant 실행
 make qdrant-check  # readiness + Python 클라이언트 연결 확인
 make qdrant-down   # 로컬 Qdrant 종료 (데이터 유지)
+make qdrant-index-validate  # 적재 입력 전체 검증(외부 API 호출 없음)
 
 make setup-parser  # Docling 파서 전용 환경 설치
 make parser-test   # 파서 단위 테스트
@@ -87,6 +88,8 @@ make parser-test   # 파서 단위 테스트
 
 로컬 Qdrant의 대시보드, 연결 주소, 데이터 유지와 초기화 방법은
 [`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md)를 따른다.
+Qdrant Cloud에 CLOVA `bge-m3` 임베딩을 적재하는 검증·샘플·전체 실행 절차는
+[`docs/operations/qdrant-indexing.md`](docs/operations/qdrant-indexing.md)를 따른다.
 
 `.env`에 CLOVA Studio 연결 정보를 설정한 뒤 FastAPI 서버를 로컬에서 실행합니다.
 Uvicorn 기본값인 `127.0.0.1:8000`을 사용하므로 별도 host와 port 옵션은 필요하지
@@ -202,5 +205,6 @@ Policy와 Tax/Payout은 `pension_reference`, Product는 `fund_prospectus` 문서
 - [`docs/qdrant-retrieval-spec.md`](docs/qdrant-retrieval-spec.md) — Qdrant 저장·검색 계약 진입점
 - [`docs/operations/api-server.md`](docs/operations/api-server.md) — API 서버 로컬 실행·배포·문제 해결
 - [`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md) — 로컬 Qdrant 실행·연결·데이터 관리
+- [`docs/operations/qdrant-indexing.md`](docs/operations/qdrant-indexing.md) — 청크 검증·임베딩·Qdrant 적재·재시작
 - [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md) — Docling 실행·저장·검수 정책
 - [`SUBMISSION.md`](SUBMISSION.md) — 제출물 체크리스트 및 마감

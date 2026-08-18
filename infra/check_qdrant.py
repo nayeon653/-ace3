@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-import os
 import time
 
 import httpx
-from qdrant_client import QdrantClient
 
-DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
+from pension_agent.config import QdrantConnection
+from pension_agent.retrieval import create_qdrant_client
+
 READY_TIMEOUT_SECONDS = 30.0
 REQUEST_TIMEOUT_SECONDS = 2.0
 
 
-def wait_until_ready(url: str) -> None:
+def wait_until_ready(url: str, *, api_key: str | None = None) -> None:
     deadline = time.monotonic() + READY_TIMEOUT_SECONDS
 
     with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as client:
         while True:
             try:
-                response = client.get(f"{url}/readyz")
+                headers = {"api-key": api_key} if api_key else None
+                response = client.get(f"{url}/readyz", headers=headers)
                 response.raise_for_status()
                 return
             except httpx.HTTPError as exc:
@@ -29,19 +30,18 @@ def wait_until_ready(url: str) -> None:
 
 
 def main() -> None:
-    url = os.environ.get("QDRANT_URL", DEFAULT_QDRANT_URL).rstrip("/")
-    if not url:
-        raise ValueError("QDRANT_URL must not be empty")
+    connection = QdrantConnection()
+    api_key = connection.api_key.get_secret_value() if connection.api_key is not None else None
 
-    wait_until_ready(url)
+    wait_until_ready(connection.url, api_key=api_key)
 
-    client = QdrantClient(url=url, timeout=REQUEST_TIMEOUT_SECONDS)
+    client = create_qdrant_client(connection)
     try:
         collections = client.get_collections().collections
     finally:
         client.close()
 
-    print(f"Qdrant ready: {url} ({len(collections)} collections)")
+    print(f"Qdrant ready: {connection.url} ({len(collections)} collections)")
 
 
 if __name__ == "__main__":

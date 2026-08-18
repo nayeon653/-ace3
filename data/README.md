@@ -8,7 +8,7 @@ data/
 ├── raw/<collection>/                 # 주최측 원본, 수정 금지
 ├── processed/docling/<collection>/   # Docling artifact bundle
 ├── ocr/                              # 진단용 OCR 중간물 예약 경로
-└── indexes/                          # 검색 인덱스
+└── indexes/                          # 검색 인덱스 입력·cache·build manifest
 ```
 
 - `raw/`의 파일은 제공 문서 원본이자 답변의 최종 근거이므로 수정하거나 덮어쓰지
@@ -18,7 +18,10 @@ data/
   이동하거나 직접
   편집하지 않습니다.
 - `ocr/`은 현재 Docling 파서의 기준 결과 저장소가 아닙니다.
-- `indexes/`는 파싱 검수 후 retrieval 단계에서 생성합니다.
+- `indexes/pension_documents_v1/input/`에는 통합 `chunks.jsonl`과 source manifest를
+  둡니다. `embedding_cache.sqlite3`는 중단 후 유료 임베딩을 재사용하고,
+  `manifest.json`은 전체 적재 성공 후에만 생성됩니다. 이 경로는 모두 Git에서
+  제외합니다.
 
 운영 배포에 검색 인덱스가 필요하면 별도 artifact 저장소에서 주입하고 Docker 빌드
 컨텍스트 전체를 복사하지 않습니다. 전체 실행·저장·검수 규칙은

@@ -1,9 +1,8 @@
-.PHONY: help setup check build lock hooks qdrant-up qdrant-down qdrant-status qdrant-check setup-parser parser-test
+.PHONY: help setup check build lock hooks qdrant-up qdrant-down qdrant-status qdrant-check qdrant-index-validate setup-parser parser-test
 
 UV ?= uv
 PARSER_PROJECT ?= tools/docling_parser
 QDRANT_COMPOSE ?= docker compose -f infra/compose.yaml
-QDRANT_URL ?= http://127.0.0.1:6333
 
 help: ## 사용 가능한 타깃 목록 출력
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "%-16s %s\n", $$1, $$2}'
@@ -36,8 +35,11 @@ qdrant-down: ## 로컬 Qdrant 종료 (데이터 볼륨 유지)
 qdrant-status: ## 로컬 Qdrant 컨테이너 상태 출력
 	$(QDRANT_COMPOSE) ps qdrant
 
-qdrant-check: ## 로컬 Qdrant readiness와 클라이언트 연결 확인
-	QDRANT_URL="$(QDRANT_URL)" $(UV) run --frozen python infra/check_qdrant.py
+qdrant-check: ## Qdrant readiness와 클라이언트 연결 확인
+	$(UV) run --frozen python infra/check_qdrant.py
+
+qdrant-index-validate: ## 통합 청크와 source manifest 적재 계약 확인
+	$(UV) run --frozen python infra/index_qdrant.py validate
 
 setup-parser: ## 독립 Docling 파서 환경 설치
 	$(UV) sync --locked --project $(PARSER_PROJECT)
