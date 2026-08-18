@@ -13,9 +13,11 @@ from pension_agent.agent.contracts.domain import (
     ExecutionStatus,
     validate_domain_result,
 )
+from pension_agent.agent.contracts.permissions import AgentPermissions
 
 __all__ = [
     "AgentAnswer",
+    "AgentPermissions",
     "CalculationResult",
     "DecisionStatus",
     "DomainDecision",

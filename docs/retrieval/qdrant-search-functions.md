@@ -13,9 +13,9 @@ Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 �
 | 함수 | 목적 | Qdrant 호출 | 반환 |
 | --- | --- | --- | --- |
 | `search_chunks(query, filters=None, limit=10)` | 전체 corpus의 Dense·Sparse·Hybrid 검색 | `query_points` | `list[SearchHit]` |
-| `search_within_document(query, source_file_name, limit=10)` | 파일 하나로 범위를 제한한 검색 | `query_points` | `list[SearchHit]` |
-| `get_neighbor_chunks(request)` | 같은 파일의 앞뒤 청크 복원 | `scroll` | `list[RetrievedChunk]` |
-| `get_chunk(chunk_id)` | UUID로 청크 하나 재조회 | `retrieve` | `RetrievedChunk | None` |
+| `search_within_document(query, source_file_name, document_types=None, limit=10)` | 파일·문서군으로 제한한 검색 | `query_points` | `list[SearchHit]` |
+| `get_neighbor_chunks(request, document_types=None)` | 허용된 문서군 안에서 앞뒤 청크 복원 | `scroll` | `list[RetrievedChunk]` |
+| `get_chunk(chunk_id, document_types=None)` | UUID로 허용된 청크 하나 재조회 | `retrieve` | `RetrievedChunk | None` |
 
 생성자는 연결된 `QdrantClient`, 비어 있지 않은 collection 이름과 1~100 범위의
 `prefetch_limit`을 받는다. 기본 prefetch 후보 수는 30이다.
@@ -31,8 +31,9 @@ Tool을 바인딩한다.
 | `get_neighbor_chunks` | 선택한 청크의 앞뒤 문맥이 필요할 때 |
 | `get_chunk` | 알고 있는 UUID 청크를 다시 검증할 때 |
 
-Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, 검색 방식과 범위를
-선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
+Domain Agent는 요청마다 변경할 수 없는 `AgentPermissions`를 GraphState에 주입한다.
+Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, 검색 방식과 허용 범위
+안의 추가 필터를 선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
 임베딩하고 공용 `SearchQuery`를 만든 뒤 `ChunkRetriever`에 위임한다. Sparse 검색과
 청크 조회는 임베더를 호출하지 않는다. 첫 모델 호출은 `tool_choice=required`로 검색
 Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 4회, 검색 Tool 호출을
@@ -40,7 +41,7 @@ Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 
 
 ```mermaid
 flowchart LR
-    D["Domain Agent"] -->|"검색 목표"| S["Search Agent<br/>create_agent + HCX"]
+    D["Domain Agent"] -->|"검색 목표 + permissions"| S["Search Agent<br/>create_agent + HCX"]
     S -->|"Tool 선택·인자 생성"| T["Search Tools"]
     T -->|"Dense / Hybrid"| E["QueryEmbedder"]
     E -->|"dense vector"| T
@@ -50,6 +51,32 @@ flowchart LR
     T -->|"JSON ToolMessage"| S
     S -->|"선택 근거 요약"| D
 ```
+
+## Agent 문서 접근 권한
+
+| Domain Agent | 허용 문서 유형 |
+| --- | --- |
+| Policy | `pension_reference` |
+| Tax/Payout | `pension_reference` |
+| Product | `fund_prospectus` |
+
+`permissions`는 LLM Tool 인자가 아니라 신뢰된 호출자가 `SearchAgentState`에 주입하는
+필수 필드다. 누락되거나 형식이 잘못되면 검색을 실행하지 않는다. `search_chunks`의
+선택적 `document_type` 인자는 권한을 좁힐 수만 있고 넓힐 수 없다.
+
+```python
+result = search_agent.invoke(
+    {
+        "messages": [{"role": "user", "content": objective}],
+        "permissions": PolicyAgent.permissions,
+    }
+)
+```
+
+검색 Tool은 권한에서 허용된 문서 유형을 Qdrant payload filter에 포함해 Dense, Sparse,
+Hybrid 후보를 만들기 전에 corpus를 제한한다. Retriever가 필터를 지키지 않는 구현으로
+교체되거나 저장 데이터가 잘못된 경우를 대비해 반환 청크의 `document_type`도 다시
+검증한다. 파일명 검색, 인접 조회와 chunk ID 재조회에도 같은 권한을 적용한다.
 
 `QueryEmbedder`와 `ChunkRetriever`는 Protocol이므로 Agent 계층에 Qdrant SDK나 특정
 임베딩 SDK 타입을 노출하지 않는다. 임베딩 제공자가 예외를 반환하거나 유효하지 않은
@@ -96,7 +123,7 @@ Factory에 별도 설정을 넘기지 않으면 이 기본 프로필을 사용�
 | 필드 | Qdrant 조건 |
 | --- | --- |
 | `source_file_name` | keyword `MatchValue` |
-| `document_type` | keyword `MatchValue` |
+| `document_types` | 한 값은 keyword `MatchValue`, 여러 값은 `MatchAny` |
 
 두 값이 함께 있으면 `must`로 결합해 모두 만족하는 Point만 검색한다. 필터가 없으면
 `None`을 전달해 전체 corpus를 검색한다. `element_types`는 payload에 보존하지만
@@ -173,7 +200,7 @@ query = SearchQuery(
     mode=SearchMode.HYBRID,
 )
 filters = SearchFilters(
-    document_type=DocumentType.PENSION_REFERENCE,
+    document_types=frozenset({DocumentType.PENSION_REFERENCE}),
 )
 ```
 
@@ -192,6 +219,7 @@ hits = retriever.search_chunks(
 document_hits = retriever.search_within_document(
     query,
     source_file_name="guide.pdf",
+    document_types=frozenset({DocumentType.PENSION_REFERENCE}),
     limit=10,
 )
 
@@ -201,10 +229,14 @@ neighbors = retriever.get_neighbor_chunks(
         chunk_index=7,
         before=1,
         after=1,
-    )
+    ),
+    document_types=frozenset({DocumentType.PENSION_REFERENCE}),
 )
 
-chunk = retriever.get_chunk("550e8400-e29b-41d4-a716-446655440000")
+chunk = retriever.get_chunk(
+    "550e8400-e29b-41d4-a716-446655440000",
+    document_types=frozenset({DocumentType.PENSION_REFERENCE}),
+)
 ```
 
 `SearchMode`는 `dense`, `sparse`, `hybrid`를 지원하며 기본값은 `hybrid`다. Hybrid
@@ -270,7 +302,7 @@ Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않�
 
 ### search_chunks
 
-1. `SearchFilters`를 Qdrant filter로 변환한다.
+1. Agent permission을 포함한 `SearchFilters`를 Qdrant filter로 변환한다.
 2. 검색문을 Kiwi로 전처리해 Sparse BM25 입력을 만든다.
 3. `SearchMode`에 맞는 Query API 요청을 만든다.
 4. Qdrant payload를 검증한 뒤 `SearchHit`으로 변환한다.
@@ -279,17 +311,20 @@ Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않�
 
 ### search_within_document
 
-`source_file_name`을 `SearchFilters`로 만들고 `search_chunks`에 위임한다.
+`source_file_name`과 허용된 `document_types`를 `SearchFilters`로 만들고
+`search_chunks`에 위임한다.
 별도 검색 알고리즘이나 결과 변환을 중복 구현하지 않는다.
 
 ### get_neighbor_chunks
 
-같은 `source_file_name`과 `chunk_index` 범위를 `must`로 결합해 scroll한다.
+같은 `source_file_name`, `chunk_index` 범위와 허용된 `document_types`를 `must`로
+결합해 scroll한다.
 벡터 유사도 검색은 수행하지 않으며 기준 청크를 포함한 구조 문맥을 복원한다.
 
 ### get_chunk
 
-입력 UUID를 검증한 뒤 Point ID로 retrieve한다. Point가 없으면 `None`을 반환한다.
+입력 UUID를 검증한 뒤 Point ID로 retrieve한다. Point가 없거나 조회된 청크가 허용된
+문서 유형이 아니면 `None`을 반환한다.
 
 ## 오류 계약
 
@@ -298,6 +333,7 @@ Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않�
 | `ValueError`, `TypeError` | 빈 검색문·파일명, 잘못된 limit·vector·인접 범위 |
 | `RetrievalBackendError` | Qdrant 검색·scroll·retrieve 요청 실패 |
 | `RetrievalDataError` | 잘못된 UUID, 누락되거나 자료형이 잘못된 payload |
+| `SearchPermissionError` | permission 누락·위반 또는 허용되지 않은 검색 결과 |
 
 payload 계약 위반을 무시하거나 부분 근거로 반환하지 않는다.
 

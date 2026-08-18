@@ -12,6 +12,7 @@ from pension_agent.agent.orchestration import DomainRunner
 from pension_agent.agent.policy import PolicyAgent
 from pension_agent.agent.product import ProductAgent
 from pension_agent.agent.tax_payout import TaxPayoutAgent
+from pension_agent.core import DocumentType
 
 
 @pytest.mark.parametrize(
@@ -43,3 +44,18 @@ def test_domain_agent_returns_undetermined_placeholder(
     assert result["decision"]["missing_conditions"] == [f"{display_name} 도메인 Agent 구현"]
     assert result["evidence"] == []
     assert result["calculations"] == []
+
+
+@pytest.mark.parametrize(
+    ("agent", "expected_document_type"),
+    [
+        (PolicyAgent(), DocumentType.PENSION_REFERENCE),
+        (TaxPayoutAgent(), DocumentType.PENSION_REFERENCE),
+        (ProductAgent(), DocumentType.FUND_PROSPECTUS),
+    ],
+)
+def test_domain_agents_declare_fixed_document_permissions(
+    agent: PolicyAgent | TaxPayoutAgent | ProductAgent,
+    expected_document_type: DocumentType,
+) -> None:
+    assert agent.permissions.readable_document_types == frozenset({expected_document_type})

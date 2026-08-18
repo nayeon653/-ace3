@@ -13,8 +13,10 @@ from pension_agent.agent.search.schemas import (
     SearchSelection,
     SearchToolErrorPayload,
 )
+from pension_agent.agent.search.state import SearchAgentState
 from pension_agent.agent.search.tools import (
     QueryEmbeddingError,
+    SearchPermissionError,
     SearchToolInputError,
     create_search_tools,
 )
@@ -25,10 +27,12 @@ __all__ = [
     "NeighborChunksPayload",
     "QueryEmbedder",
     "QueryEmbeddingError",
+    "SearchAgentState",
     "SearchChunkPayload",
     "SearchCoverage",
     "SearchHitPayload",
     "SearchHitsPayload",
+    "SearchPermissionError",
     "SearchResult",
     "SearchSelection",
     "SearchToolErrorPayload",

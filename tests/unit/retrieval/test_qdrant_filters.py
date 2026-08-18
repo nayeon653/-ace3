@@ -18,7 +18,7 @@ def test_filter_builder_combines_supported_metadata_fields() -> None:
     result = QdrantFilterBuilder.build(
         SearchFilters(
             source_file_name="guide.pdf",
-            document_type=DocumentType.PENSION_REFERENCE,
+            document_types=frozenset({DocumentType.PENSION_REFERENCE}),
         )
     )
 
@@ -43,7 +43,8 @@ def test_neighbor_filter_stays_within_file_and_chunk_range() -> None:
             chunk_index=1,
             before=3,
             after=2,
-        )
+        ),
+        document_types=frozenset({DocumentType.PENSION_REFERENCE}),
     )
 
     assert result == models.Filter(
@@ -56,5 +57,24 @@ def test_neighbor_filter_stays_within_file_and_chunk_range() -> None:
                 key="chunk_index",
                 range=models.Range(gte=0, lte=3),
             ),
+            models.FieldCondition(
+                key="document_type",
+                match=models.MatchValue(value="pension_reference"),
+            ),
+        ]
+    )
+
+
+def test_filter_builder_supports_multiple_allowed_document_types() -> None:
+    result = QdrantFilterBuilder.build(SearchFilters(document_types=frozenset(DocumentType)))
+
+    assert result == models.Filter(
+        must=[
+            models.FieldCondition(
+                key="document_type",
+                match=models.MatchAny(
+                    any=["fund_prospectus", "pension_reference"],
+                ),
+            )
         ]
     )
