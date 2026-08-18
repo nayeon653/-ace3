@@ -16,6 +16,17 @@ class ChatClovaXConfig(BaseModel):
     max_retries: int = Field(ge=0)
 
 
+class ClovaEmbeddingConfig(BaseModel):
+    """Git에서 버전 관리하는 CLOVA Studio 임베딩 설정."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
+
+    model: str = Field(min_length=1)
+    dimensions: int = Field(gt=0)
+    timeout_seconds: float = Field(gt=0)
+    max_retries: int = Field(ge=0)
+
+
 class ClovaStudioConnection(BaseSettings):
     """환경에서 주입하는 CLOVA Studio 인증·연결 설정."""
 
@@ -37,6 +48,13 @@ MAIN_SUPERVISOR_HCX_CONFIG = ChatClovaXConfig(
     model="HCX-005",
     max_tokens=1024,
     temperature=0.1,
+    timeout_seconds=30.0,
+    max_retries=2,
+)
+
+BGE_M3_EMBEDDING_CONFIG = ClovaEmbeddingConfig(
+    model="bge-m3",
+    dimensions=1024,
     timeout_seconds=30.0,
     max_retries=2,
 )

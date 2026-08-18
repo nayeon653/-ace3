@@ -82,7 +82,7 @@ class SearchToolErrorPayload(_SearchSchema):
 
 
 class SearchSelection(_SearchSchema):
-    """HCX가 terminal Tool로 제출하는 검색 근거 선택."""
+    """HCX가 최종 검색 결과 제출 Tool로 제출하는 근거 선택."""
 
     coverage: SearchCoverage
     selected_chunk_ids: list[_NonEmptyString] = Field(max_length=_MAX_SELECTED_CHUNKS)

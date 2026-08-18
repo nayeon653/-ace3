@@ -106,8 +106,9 @@ LangSmith tracing은 기본적으로 꺼져 있습니다. 개발자가 개인 �
 로컬에 등록해 활성화하면 일반 `/answer` 요청을 포함한 모든 Agent 실행을 추적합니다.
 개인 계정·project 설정과 활성화 방법은
 [`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 따릅니다.
-서버 시작 과정에서 HCX 모델, Main Supervisor와 `AnswerService`를 프로세스당 한 번
-조립하고 모든 `/answer` 요청에서 재사용합니다.
+서버 시작 과정에서 HCX-005, bge-m3, Qdrant, Search Agent, Domain Agent 3종,
+Main Supervisor와 `AnswerService`를 프로세스당 한 번 조립하고 모든 `/answer`
+요청에서 재사용합니다.
 
 운영 확인용 `GET /health`는 LLM이나 검색 시스템을 호출하지 않습니다. 평가용
 `GET /answer`의 정확한 요청·응답과 오류 계약은
@@ -183,12 +184,13 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 | `tax_payout/` | 세제·수령 Domain Agent |
 | `product/` | 상품·운용 Domain Agent |
 
-구체 Domain Agent의 선택과 Tool 등록은 `pension_agent/api/bootstrap.py`에서 수행한다.
+구체 Domain Agent의 선택과 Tool 등록은 `pension_agent/agent/runtime.py`에서 수행한다.
 `orchestration`은 구체 Domain Agent를 import하지 않으며, Domain Agent끼리도 직접
 의존하지 않는다. Search Agent는 저장소 구현 대신 `ChunkRetriever` Port에 의존하고,
 `retrieval/QdrantChunkRetriever`가 Qdrant 접근을 구현한다.
 Policy와 Tax/Payout은 `pension_reference`, Product는 `fund_prospectus` 문서군만
-검색하도록 Agent별 `permissions`를 실행 상태에 주입한다.
+검색하도록 Agent별 `permissions`를 실행 상태에 주입한다. Search Agent는
+최종 검색 결과 제출 Tool로 선택 ID만 받고 Python이 Qdrant 원본을 재조회한다.
 
 ## 더 읽기
 

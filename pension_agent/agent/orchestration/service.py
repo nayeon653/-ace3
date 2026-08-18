@@ -1,6 +1,7 @@
 """HTTP와 분리된 Main Supervisor 실행 경계."""
 
-from collections.abc import Mapping
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -12,6 +13,7 @@ from pension_agent.agent.orchestration.state import SupervisorState
 from pension_agent.agent.orchestration.supervisor import build_agent_answer
 
 _DOMAIN_RESULT_ADAPTER = TypeAdapter(DomainResult)
+logger = logging.getLogger(__name__)
 
 
 class SupervisorRunner(Protocol):
@@ -48,8 +50,15 @@ class AnswerServiceResult:
 class AnswerService:
     """질문을 Main Supervisor에 전달하고 애플리케이션 결과로 변환한다."""
 
-    def __init__(self, supervisor: SupervisorRunner) -> None:
+    def __init__(
+        self,
+        supervisor: SupervisorRunner,
+        *,
+        close_callbacks: tuple[Callable[[], None], ...] = (),
+    ) -> None:
         self._supervisor = supervisor
+        self._close_callbacks = close_callbacks
+        self._closed = False
 
     def run(self, *, question_id: str, question: str) -> AnswerServiceResult:
         """Supervisor를 실행하고 검증된 답변과 상태를 반환한다."""
@@ -75,6 +84,18 @@ class AnswerService:
             ) from None
 
         return AnswerServiceResult(answer=answer, state=state)
+
+    def close(self) -> None:
+        """프로세스 공용 Agent 실행기와 외부 client를 한 번만 정리한다."""
+
+        if self._closed:
+            return
+        self._closed = True
+        for callback in self._close_callbacks:
+            try:
+                callback()
+            except Exception:  # noqa: BLE001
+                logger.warning("Answer Service 리소스 정리에 실패했습니다.")
 
 
 def _invoke_supervisor(

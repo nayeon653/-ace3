@@ -106,3 +106,10 @@ def test_domain_agents_are_independent(domain_package: str) -> None:
 @pytest.mark.parametrize("module_name", ["retrieval", "rules"])
 def test_infrastructure_and_rules_do_not_depend_on_agents(module_name: str) -> None:
     _assert_no_imports(PACKAGE_ROOT / module_name, ("pension_agent.agent",))
+
+
+def test_api_does_not_import_retrieval_or_rules_directly() -> None:
+    _assert_no_imports(
+        PACKAGE_ROOT / "api",
+        ("pension_agent.retrieval", "pension_agent.rules", "pension_agent.ingest"),
+    )

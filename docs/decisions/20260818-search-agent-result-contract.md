@@ -60,7 +60,8 @@ flowchart LR
     R --> D["Domain Agent"]
 ```
 
-`SearchSelection`은 후속 terminal Tool의 Function calling 입력 계약이다. HCX는 검색
+`SearchSelection`은 후속 **최종 검색 결과 제출 Tool**의 Function calling 입력
+계약이다. HCX는 검색
 후보의 `chunk_id`만 선택하며 원본 파일명, 위치와 본문을 다시 생성하지 않는다.
 
 `SearchResult`는 Python만 생성한다. 선택한 ID를 검색 후보와 대조하고 원본 청크를 다시
@@ -82,10 +83,12 @@ flowchart LR
 - Search Agent의 판단 범위가 근거 관련성과 충족도로 제한된다.
 - HCX-005의 Structured Outputs에 의존하지 않고 Function calling으로 최종 선택을 받을 수
   있는 계약이 생긴다.
-- 후속 구현에서 검색 후보를 State에 누적하고 terminal Tool이 `SearchResult`를 만드는
+- 후속 구현에서 검색 후보를 State에 누적하고 최종 검색 결과 제출 Tool이
+  `SearchResult`를 만드는
   실행 흐름을 추가해야 한다.
 
-이번 결정은 계약과 기존 Tool 직렬화까지만 적용한다. terminal Tool, 후보 State 누적,
+이번 결정은 계약과 기존 Tool 직렬화까지만 적용한다. 최종 검색 결과 제출 Tool,
+후보 State 누적,
 Domain Agent 연결과 timeout 실행 정책은 별도 변경으로 구현한다.
 
 ## 관련 자료

@@ -9,7 +9,7 @@ from pension_agent.core import SearchMode
 
 def test_default_search_agent_config_is_versioned_and_immutable() -> None:
     assert DEFAULT_SEARCH_AGENT_CONFIG == SearchAgentConfig(
-        max_model_calls=4,
+        max_model_calls=6,
         max_tool_calls=3,
         default_search_mode=SearchMode.HYBRID,
         default_result_limit=10,
