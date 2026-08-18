@@ -61,7 +61,8 @@ flowchart LR
 | Product | `fund_prospectus` |
 
 `permission`은 LLM Tool 인자가 아니라 신뢰된 호출자가 `SearchAgentState`에 주입하는
-필수 필드다. 누락되거나 형식이 잘못되면 검색을 실행하지 않는다. `search_chunks`의
+필수 필드다. Search Agent는 첫 모델 호출 전에 이 값을 검증하며, 누락되거나 형식이
+잘못되면 모델과 검색을 실행하지 않고 명시적인 권한 오류로 종료한다. `search_chunks`의
 선택적 `document_type` 인자는 권한을 좁힐 수만 있고 넓힐 수 없다.
 
 ```python

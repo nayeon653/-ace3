@@ -28,3 +28,16 @@ def document_types_for_permission(permission: Permission) -> frozenset[DocumentT
     """Domain permission에 허용된 문서 유형을 반환한다."""
 
     return _DOCUMENT_TYPES_BY_PERMISSION[permission]
+
+
+def validate_permission(permission: object) -> Permission:
+    """외부 상태의 permission을 검증해 도메인 enum으로 반환한다."""
+
+    if permission is None:
+        raise ValueError("검색 문서 접근 권한이 필요합니다.")
+    if not isinstance(permission, str):
+        raise TypeError("검색 문서 접근 권한이 올바르지 않습니다.")
+    try:
+        return Permission(permission)
+    except ValueError:
+        raise ValueError("검색 문서 접근 권한이 올바르지 않습니다.") from None

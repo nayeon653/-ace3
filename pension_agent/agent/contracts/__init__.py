@@ -13,7 +13,11 @@ from pension_agent.agent.contracts.domain import (
     ExecutionStatus,
     validate_domain_result,
 )
-from pension_agent.agent.contracts.permissions import Permission, document_types_for_permission
+from pension_agent.agent.contracts.permissions import (
+    Permission,
+    document_types_for_permission,
+    validate_permission,
+)
 
 __all__ = [
     "AgentAnswer",
@@ -29,4 +33,5 @@ __all__ = [
     "Permission",
     "document_types_for_permission",
     "validate_domain_result",
+    "validate_permission",
 ]
