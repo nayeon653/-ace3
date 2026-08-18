@@ -9,6 +9,7 @@ Docling 청크를 Qdrant에 저장하고 Agent가 검색하는 전체 계약의 
 | --- | --- |
 | Point·named vector·BM25·payload·index·Docling 매핑 | [Qdrant collection·payload 명세](retrieval/qdrant-index-spec.md) |
 | Agent 검색 함수·입력·필터·반환·오류 | [Agent용 Qdrant 검색 함수 명세](retrieval/qdrant-search-functions.md) |
+| 입력 검증·CLOVA 임베딩·Cloud 적재·재시작 | [Qdrant 인덱싱 실행](operations/qdrant-indexing.md) |
 | 로컬 Qdrant 실행·중지·데이터 관리 | [로컬 Qdrant 실행과 확인](operations/qdrant-local.md) |
 
 ```mermaid
@@ -25,7 +26,7 @@ flowchart LR
 
 | 구분 | 결정 |
 | --- | --- |
-| Point ID | 청크마다 생성한 UUID. payload에 중복 저장하지 않음 |
+| Point ID | source chunk ID로 만든 결정적 UUIDv5. payload에 중복 저장하지 않음 |
 | Dense vector | `dense`, CLOVA Studio `bge-m3`, 1,024차원, cosine |
 | Sparse vector | `sparse`, Kiwi 전처리 + `qdrant/bm25`, IDF modifier |
 | Hybrid 결합 | Query API의 RRF |
@@ -55,7 +56,7 @@ payload 조건은 Filter Builder, Qdrant 접근은 Retriever Adapter로 구성�
 ## 현재 범위 밖
 
 - 청크 크기·overlap과 파싱·청킹 구현
-- 실제 corpus 적재 실행과 collection migration
+- collection 삭제·schema migration 자동화
 - 평가셋으로 검증되지 않은 weighted RRF·formula
 - positive·negative point 계약이 없는 recommend·discovery
 - 정확성과 사용 목적이 확인되지 않은 `element_types` 검색 필터

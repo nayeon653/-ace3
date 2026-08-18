@@ -1,13 +1,36 @@
-"""CLOVA bge-m3 Query Embedder 팩토리를 검증한다."""
+"""CLOVA bge-m3 검색·문서 임베더 팩토리를 검증한다."""
+
+from __future__ import annotations
+
+from threading import Lock
+from time import sleep
+from typing import Any
 
 import pytest
 from pydantic import SecretStr
 
 from pension_agent.config import BGE_M3_EMBEDDING_CONFIG, ClovaStudioConnection
 from pension_agent.retrieval.clova_embedder import (
+    ClovaDocumentEmbedder,
     ClovaEmbeddingFactoryError,
     create_clova_query_embedder,
 )
+
+
+class _Client:
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+        self.lock = Lock()
+
+    def embed_query(self, text: str) -> list[float]:
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        sleep(0.01)
+        with self.lock:
+            self.active -= 1
+        return [float(text)]
 
 
 def test_embedding_profile_is_fixed_to_bge_m3() -> None:
@@ -30,3 +53,42 @@ def test_connection_secret_repr_is_safe() -> None:
     )
 
     assert "secret-token" not in repr(connection)
+
+
+def test_embed_documents_preserves_order_and_limits_concurrency() -> None:
+    client = _Client()
+    embedder = ClovaDocumentEmbedder(  # type: ignore[arg-type]
+        client=client,
+        max_workers=2,
+        requests_per_minute=60_000,
+    )
+
+    result = embedder.embed_documents(["3", "1", "2"])
+
+    assert result == [[3.0], [1.0], [2.0]]
+    assert client.max_active == 2
+
+
+def test_embed_documents_returns_empty_without_creating_work() -> None:
+    client = _Client()
+    embedder = ClovaDocumentEmbedder(  # type: ignore[arg-type]
+        client=client,
+        max_workers=2,
+        requests_per_minute=60_000,
+    )
+
+    assert embedder.embed_documents([]) == []
+    assert client.max_active == 0
+
+
+def test_embedder_rejects_invalid_worker_count() -> None:
+    with pytest.raises(ValueError, match="worker"):
+        ClovaDocumentEmbedder(client=Any, max_workers=0)  # type: ignore[arg-type]
+
+
+def test_embedder_rejects_invalid_request_rate() -> None:
+    with pytest.raises(ValueError, match="분당"):
+        ClovaDocumentEmbedder(  # type: ignore[arg-type]
+            client=Any,
+            requests_per_minute=0,
+        )

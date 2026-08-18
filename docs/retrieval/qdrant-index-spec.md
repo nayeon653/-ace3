@@ -4,7 +4,8 @@ Qdrant collection을 생성하고 Docling 청크를 Point로 적재하는 저장
 전체 결정과 문서 안내는 [Qdrant retrieval 계약](../qdrant-retrieval-spec.md)을 따른다.
 
 현재 공모전 중 원본 문서는 변경되지 않고 파일명이 서로 중복되지 않는다고 가정한다.
-청크 크기·overlap, 파싱·청킹 구현과 실제 적재 실행은 이 문서의 범위가 아니다.
+청크 크기·overlap과 파싱·청킹 구현은 이 문서의 범위가 아니다. 실제 적재 실행은
+[Qdrant 인덱싱 실행](../operations/qdrant-indexing.md)을 따른다.
 
 ## Point schema
 
@@ -35,8 +36,14 @@ Qdrant collection을 생성하고 Docling 청크를 Point로 적재하는 저장
 }
 ```
 
-같은 파일을 다시 적재할 때는 `source_file_name`으로 기존 Point를 제거한 후 새 UUID로
-적재한다.
+Point ID는 원본 통합 청크 ID에서 다음 규칙으로 결정한다.
+
+```python
+str(uuid5(NAMESPACE_URL, f"urn:ace3:chunk:{source_chunk_id}"))
+```
+
+같은 입력을 다시 실행하면 같은 Point ID를 upsert하므로 중복 Point가 생기지 않는다.
+기존 collection을 삭제하거나 무작위 UUID를 새로 발급하지 않는다.
 
 ## Vector 설정
 
@@ -126,7 +133,7 @@ Point마다 달라지는 payload가 아니라, collection 전체에 적용한 �
 파일이다. 다음 경로처럼 적재 결과 옆에 한 번만 저장한다.
 
 ```text
-data/processed/retrieval/pension_documents_v1/manifest.json
+data/indexes/pension_documents_v1/manifest.json
 ```
 
 ```json
@@ -237,6 +244,25 @@ class DocumentType(StrEnum):
 `document.docling.json`은 파싱 품질 검수용 원본으로 보관하지만 현재 검색에서는 다시
 조회하지 않는다. 따라서 `doc_item_refs`는 payload에 넣지 않는다.
 
+### 통합 canonical JSONL 입력
+
+현재 실행 파이프라인은 Drive에서 받은 통합 청크와 두 source manifest를 입력으로
+사용한다. 적재 전에 전체 행의 Pydantic schema, `content_hash`, source 참조,
+canonical 문서 집합과 문서별 연속 `chunk_index`를 검증한다.
+
+| Payload | 통합 입력 값 |
+| --- | --- |
+| `source_file_name` | `metadata.source_ids[0]`을 manifest에서 해석한 `source_path` 파일명 |
+| `source_format` | `doc_type` |
+| `document_type` | `canonical_doc_id`의 `prospectus-`/`knowledge-` prefix 고정 매핑 |
+| `chunk_index` | `chunk_id` 끝의 4자리 순번 |
+| `content` | `text` |
+| `embedding_content` | `section_path` 줄바꿈 prefix + `text` |
+| `heading_path` | `section_path` |
+| `captions` | 현재 입력에 없으므로 `[]` |
+| `element_types` | `block_type`: `text`는 `text`, `table`·`faq`는 `table` |
+| `page_numbers` | `page_start`부터 `page_end`까지의 포함 범위, 둘 다 없으면 `[]` |
+
 ## Payload index
 
 대량 적재 전에 실제 filter에 사용하는 필드만 index한다.
@@ -280,6 +306,7 @@ class DocumentType(StrEnum):
 - [Qdrant retrieval 계약](../qdrant-retrieval-spec.md)
 - [Agent용 Qdrant 검색 함수 명세](qdrant-search-functions.md)
 - [로컬 Qdrant 실행과 확인](../operations/qdrant-local.md)
+- [Qdrant 인덱싱 실행](../operations/qdrant-indexing.md)
 - [문서 파싱 운영](../operations/document-parsing.md)
 - [Qdrant payload](https://qdrant.tech/documentation/concepts/payload/)
 - [Qdrant indexing](https://qdrant.tech/documentation/manage-data/indexing/)
