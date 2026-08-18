@@ -173,8 +173,36 @@ def test_no_evidence_forces_undetermined_result() -> None:
         agent.close()
 
     assert result["decision"]["status"] == "undetermined"
+    assert result["decision"]["conclusion"] == (
+        "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
+    )
     assert result["decision"]["missing_conditions"] == ["제공 문서의 관련 근거"]
     assert result["evidence"] == []
+
+
+def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions() -> None:
+    search = FakeSearchAdapter(
+        SearchResult(execution_status="completed", coverage="none", limitations=["근거 없음"])
+    )
+    agent = create_policy_agent(
+        model=_model(
+            conclusion="모든 가입자는 언제나 이전할 수 있습니다.",
+            missing_conditions=["가입자의 임의 조건"],
+        ),
+        search_adapter=cast(SearchAgentAdapter, search),
+    )
+    try:
+        result = agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
+    finally:
+        agent.close()
+
+    assert result["decision"] == {
+        "status": "undetermined",
+        "conclusion": "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다.",
+        "missing_conditions": ["제공 문서의 관련 근거"],
+    }
+    assert "언제나 이전" not in str(result)
+    assert "가입자의 임의 조건" not in str(result)
 
 
 def test_partial_evidence_cannot_be_promoted_to_determined() -> None:
