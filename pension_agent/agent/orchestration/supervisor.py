@@ -9,6 +9,7 @@ from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
     ToolCallLimitMiddleware,
+    hook_config,
 )
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
@@ -17,6 +18,25 @@ from langgraph.graph.state import CompiledStateGraph
 
 from pension_agent.agent.contracts import AgentAnswer
 from pension_agent.agent.orchestration.state import SupervisorState
+
+
+class SupervisorModelCallLimit(ModelCallLimitMiddleware):
+    """호출 상한에서 내부 안내문을 사용자 답변으로 남기지 않는다."""
+
+    def __init__(self, *, max_model_calls: int) -> None:
+        super().__init__(run_limit=max_model_calls, exit_behavior="end")
+        self._max_model_calls = max_model_calls
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        if state.get("run_model_call_count", 0) < self._max_model_calls:
+            return None
+        return {"jump_to": "end"}
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.before_model(state, runtime)
 
 
 def load_main_supervisor_prompt() -> str:
@@ -39,11 +59,11 @@ def create_main_supervisor(
     middleware = cast(
         Sequence[AgentMiddleware[Any, Any, Any]],
         (
-            ModelCallLimitMiddleware(run_limit=8, exit_behavior="end"),
+            SupervisorModelCallLimit(max_model_calls=12),
             *(
                 ToolCallLimitMiddleware(
                     tool_name=tool.name,
-                    run_limit=1,
+                    run_limit=3,
                     exit_behavior="continue",
                 )
                 for tool in tools

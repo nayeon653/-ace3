@@ -56,8 +56,21 @@ class SearchAgentAdapter:
             return _failed_result("검색 목표는 비어 있을 수 없습니다.")
 
         started_at = monotonic()
-        if not self._capacity.acquire(blocking=False):
-            result = _failed_result("Search Agent가 현재 처리 가능한 요청 수를 초과했습니다.")
+        deadline = started_at + self.config.timeout_seconds
+        if not self._capacity.acquire(timeout=self.config.timeout_seconds):
+            result = _timeout_result()
+            _log_search_run(
+                permission=permission,
+                state=None,
+                result=result,
+                elapsed_seconds=monotonic() - started_at,
+            )
+            return result
+
+        remaining_seconds = deadline - monotonic()
+        if remaining_seconds <= 0:
+            self._capacity.release()
+            result = _timeout_result()
             _log_search_run(
                 permission=permission,
                 state=None,
@@ -81,13 +94,10 @@ class SearchAgentAdapter:
             return _failed_result("Search Agent 실행기를 사용할 수 없습니다.")
         future.add_done_callback(lambda completed: self._capacity.release())
         try:
-            state = future.result(timeout=self.config.timeout_seconds)
+            state = future.result(timeout=remaining_seconds)
         except TimeoutError:
             future.cancel()
-            result = SearchResult(
-                execution_status="timeout",
-                error="Search Agent 실행 시간이 초과됐습니다.",
-            )
+            result = _timeout_result()
             _log_search_run(
                 permission=permission,
                 state=None,
@@ -125,6 +135,13 @@ class SearchAgentAdapter:
 
 def _failed_result(message: str) -> SearchResult:
     return SearchResult(execution_status="failed", error=message)
+
+
+def _timeout_result() -> SearchResult:
+    return SearchResult(
+        execution_status="timeout",
+        error="Search Agent 실행 시간이 초과됐습니다.",
+    )
 
 
 def _log_search_run(

@@ -45,6 +45,7 @@ _CALCULATOR_REQUIRED_CONCLUSION = "확정 수치 판단에는 결정론적 계�
 _CALCULATOR_REQUIRED_CONDITION = "결정론적 계산 Tool 결과"
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
+_NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
 
 
 class DomainAgentState(AgentState):
@@ -133,7 +134,7 @@ class DomainAgent:
     domain: DomainName
     graph: DomainGraph
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG
-    max_workers: int = 2
+    max_workers: int = 3
     _executor: ThreadPoolExecutor = field(init=False, repr=False)
     _capacity: BoundedSemaphore = field(init=False, repr=False)
 
@@ -378,7 +379,8 @@ def _build_domain_result(
         normalized_warnings.append(_NUMERIC_CLAIM_WARNING)
     if search_result.coverage == "none":
         status = "undetermined"
-        normalized_missing = normalized_missing or ["제공 문서의 관련 근거"]
+        normalized_conclusion = _NO_EVIDENCE_CONCLUSION
+        normalized_missing = ["제공 문서의 관련 근거"]
         normalized_warnings.append("제공 문서에서 관련 근거를 확인하지 못했습니다.")
     elif search_result.coverage == "partial" and status in {"determined", "not_applicable"}:
         status = "conditional"
