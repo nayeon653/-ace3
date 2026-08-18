@@ -168,6 +168,9 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 | `infra/` | Docker·배포·모니터링 |
 | `data/` | 원본·중간 산출물·검색 인덱스 (Git 제외) |
 | `evals/questions/` | 평가 질의셋 |
+| `evals/harness/` | 평가 실행기 |
+| `docs/` | 컨벤션, 결정 기록, 실험 로그, API 명세, 제안서 |
+| `tests/` | 테스트 |
 
 `pension_agent/agent/`는 실행 책임별 모듈로 나눈다.
 
@@ -184,9 +187,6 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 `orchestration`은 구체 Domain Agent를 import하지 않으며, Domain Agent끼리도 직접
 의존하지 않는다. Search Agent는 저장소 구현 대신 `ChunkRetriever` Port에 의존하고,
 `retrieval/QdrantChunkRetriever`가 Qdrant 접근을 구현한다.
-| `evals/harness/` | 평가 실행기 |
-| `docs/` | 컨벤션, 결정 기록, 실험 로그, API 명세, 제안서 |
-| `tests/` | 테스트 |
 
 ## 더 읽기
 

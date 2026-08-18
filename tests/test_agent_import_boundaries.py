@@ -15,14 +15,29 @@ def _python_files(directory: Path) -> Iterable[Path]:
     return directory.rglob("*.py")
 
 
+def _from_import_modules(
+    node: ast.ImportFrom,
+    *,
+    package_parts: tuple[str, ...],
+) -> set[str]:
+    if node.level == 0:
+        return {node.module} if node.module is not None else set()
+
+    relative_root = package_parts[: len(package_parts) - node.level + 1]
+    if node.module is not None:
+        return {".".join((*relative_root, node.module))}
+    return {".".join((*relative_root, alias.name)) for alias in node.names}
+
+
 def _absolute_imports(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    package_parts = path.relative_to(PACKAGE_ROOT.parent).parent.parts
     imports: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module is not None:
-            imports.add(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            imports.update(_from_import_modules(node, package_parts=package_parts))
     return imports
 
 
@@ -33,6 +48,26 @@ def _assert_no_imports(directory: Path, forbidden_prefixes: tuple[str, ...]) -> 
             if imported.startswith(forbidden_prefixes):
                 violations.append(f"{path.relative_to(PACKAGE_ROOT)} -> {imported}")
     assert violations == []
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        ("from ..policy import PolicyAgent", "pension_agent.agent.policy"),
+        ("from .. import policy", "pension_agent.agent.policy"),
+    ],
+)
+def test_relative_imports_are_resolved_to_absolute_modules(
+    statement: str,
+    expected: str,
+) -> None:
+    node = ast.parse(statement).body[0]
+
+    assert isinstance(node, ast.ImportFrom)
+    assert _from_import_modules(
+        node,
+        package_parts=("pension_agent", "agent", "orchestration"),
+    ) == {expected}
 
 
 def test_contracts_do_not_depend_on_agent_implementations() -> None:
