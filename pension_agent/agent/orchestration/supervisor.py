@@ -39,11 +39,11 @@ def create_main_supervisor(
     middleware = cast(
         Sequence[AgentMiddleware[Any, Any, Any]],
         (
-            ModelCallLimitMiddleware(run_limit=8, exit_behavior="end"),
+            ModelCallLimitMiddleware(run_limit=12, exit_behavior="end"),
             *(
                 ToolCallLimitMiddleware(
                     tool_name=tool.name,
-                    run_limit=1,
+                    run_limit=3,
                     exit_behavior="continue",
                 )
                 for tool in tools

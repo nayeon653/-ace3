@@ -132,6 +132,7 @@ def test_domain_agents_use_search_result_and_submit_verified_result(
     model = _model()
     model.bindings.clear()
     agent = factory(model=model, search_adapter=cast(SearchAgentAdapter, search))
+    assert agent.max_workers == 3
     try:
         result = agent(
             {"question": "연금계좌를 이전할 수 있나요?", "objective": "이전 가능 여부 판단"}

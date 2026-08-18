@@ -127,10 +127,11 @@ def test_main_supervisor_prompt_is_packaged() -> None:
     )
 
     assert "decision.status=conditional" in prompt
+    assert "Tool을 함께 호출해 병렬로 실행한다" in prompt
     assert "JSON이나 Tool 호출 형식을 직접 출력하지 않는다" in prompt
 
 
-def test_main_supervisor_blocks_duplicate_domain_tool_calls() -> None:
+def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth() -> None:
     requests: list[DomainRequest] = []
     policy_tool = create_domain_agent_tool(
         name="analyze_policy",
@@ -142,31 +143,36 @@ def test_main_supervisor_blocks_duplicate_domain_tool_calls() -> None:
         responses=[
             AIMessage(
                 content="",
-                tool_calls=[_tool_call("analyze_policy", "policy-1", "이전 가능 여부 판단")],
+                tool_calls=[
+                    _tool_call("analyze_policy", "policy-1", "가입 가능 여부 판단"),
+                    _tool_call("analyze_policy", "policy-2", "이전 가능 여부 판단"),
+                    _tool_call("analyze_policy", "policy-3", "이전 절차 판단"),
+                    _tool_call("analyze_policy", "policy-4", "해지 절차 판단"),
+                ],
             ),
-            AIMessage(
-                content="",
-                tool_calls=[_tool_call("analyze_policy", "policy-2", "이전 가능 여부 재확인")],
-            ),
-            AIMessage(content="이전 가능 여부를 확인했습니다."),
+            AIMessage(content="가입, 이전 가능 여부와 이전 절차를 확인했습니다."),
         ]
     )
     supervisor = create_main_supervisor(model=model, tools=[policy_tool])
 
     result = supervisor.invoke(
         {
-            "messages": [{"role": "user", "content": "이전할 수 있나요?"}],
-            "question_id": "Q-DUPLICATE",
-            "question": "이전할 수 있나요?",
+            "messages": [{"role": "user", "content": "가입과 이전 절차를 알려주세요."}],
+            "question_id": "Q-MULTI-POLICY",
+            "question": "가입과 이전 절차를 알려주세요.",
             "domain_results": [],
         }
     )
 
-    assert len(requests) == 1
-    assert len(result["domain_results"]) == 1
+    assert {request["objective"] for request in requests} == {
+        "가입 가능 여부 판단",
+        "이전 가능 여부 판단",
+        "이전 절차 판단",
+    }
+    assert len(result["domain_results"]) == 3
     blocked = [
         message
         for message in result["messages"]
-        if isinstance(message, ToolMessage) and message.tool_call_id == "policy-2"
+        if isinstance(message, ToolMessage) and message.tool_call_id == "policy-4"
     ]
     assert len(blocked) == 1
