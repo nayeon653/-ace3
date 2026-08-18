@@ -1,4 +1,4 @@
-"""Agent에 Qdrant 검색 기능을 제공하는 Facade."""
+"""Search Agent의 ChunkRetriever Port를 구현하는 Qdrant Adapter."""
 
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def make_locator(
     return f"문서 내 청크 {chunk_index + 1}"
 
 
-class QdrantSearch:
+class QdrantChunkRetriever:
     """검색 방식과 조회 기능을 하나의 안정된 Agent 접근점으로 제공한다."""
 
     def __init__(

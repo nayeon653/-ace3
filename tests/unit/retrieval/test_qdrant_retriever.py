@@ -1,4 +1,4 @@
-"""QdrantSearch가 만드는 SDK 요청과 반환 경계를 검증한다."""
+"""QdrantChunkRetriever가 만드는 SDK 요청과 반환 경계를 검증한다."""
 
 from types import SimpleNamespace
 from unittest.mock import create_autospec, patch
@@ -16,7 +16,11 @@ from pension_agent.core import (
     SearchMode,
     SearchQuery,
 )
-from pension_agent.retrieval.qdrant_search import QdrantSearch, make_locator, to_bm25_text
+from pension_agent.retrieval.qdrant_retriever import (
+    QdrantChunkRetriever,
+    make_locator,
+    to_bm25_text,
+)
 
 _CHUNK_ID = "550e8400-e29b-41d4-a716-446655440000"
 
@@ -47,9 +51,9 @@ def _scored_point(**payload_overrides: object) -> models.ScoredPoint:
     )
 
 
-def _search() -> tuple[QdrantSearch, QdrantClient]:
+def _search() -> tuple[QdrantChunkRetriever, QdrantClient]:
     client = create_autospec(QdrantClient, instance=True)
-    return QdrantSearch(client, collection_name="pension_documents"), client
+    return QdrantChunkRetriever(client, collection_name="pension_documents"), client
 
 
 def test_kiwi_query_preprocessor_keeps_content_tokens() -> None:
@@ -67,7 +71,7 @@ def test_hybrid_search_uses_same_filter_for_dense_and_sparse_prefetch() -> None:
     )
 
     with patch(
-        "pension_agent.retrieval.qdrant_search.to_bm25_text",
+        "pension_agent.retrieval.qdrant_retriever.to_bm25_text",
         return_value="퇴직 연금 가입 절차",
     ):
         hits = search.search_chunks(query, filters=filters, limit=5)
