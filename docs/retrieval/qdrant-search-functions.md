@@ -21,7 +21,7 @@ Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 �
 `prefetch_limit`을 받는다. 기본 prefetch 후보 수는 30이다.
 
 Domain Agent는 `create_search_agent(model, embedder, retriever)`로 만든 Search Agent에
-근거 검색 목표를 전달한다. Factory는 `create_agent`에 주입된 HCX 모델과 다음 네 검색
+근거 검색 목표를 전달한다. Factory는 `create_agent`에 주입된 HCX 모델과 다음
 Tool을 바인딩한다.
 
 | Tool | Agent가 사용하는 시점 |
@@ -30,6 +30,14 @@ Tool을 바인딩한다.
 | `search_within_document` | 이미 확인한 원본 문서 안에서 추가 후보를 찾을 때 |
 | `get_neighbor_chunks` | 선택한 청크의 앞뒤 문맥이 필요할 때 |
 | `get_chunk` | 알고 있는 UUID 청크를 다시 검증할 때 |
+| `submit_search_result` | 최종 검색 결과로 충족도, 선택 ID와 한계를 제출할 때 |
+
+`submit_search_result`는 **최종 검색 결과 제출 Tool**이며 셸 터미널이나
+명령행 터미널을 뜻하지 않는다. HCX는 이 Tool에 `SearchSelection`을 Function
+calling으로 제출한다. Python은 선택 ID가 이번 실행의 검색 Tool 후보에
+있는지 확인하고, 같은 permission으로 `get_chunk`를 수행해 Qdrant 원본을 다시
+읽은 뒤에만 `SearchResult`를 만든다. Domain Agent는 Search Agent의 자유 형식
+메시지를 파싱하지 않는다.
 
 Domain Agent는 요청마다 자신의 도메인 이름인 `Permission`을 GraphState에 주입한다.
 Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, 검색 방식과 허용 범위
@@ -48,8 +56,9 @@ flowchart LR
     T -->|"SearchQuery"| B["ChunkRetriever"]
     B -. "구현" .-> Q["QdrantChunkRetriever"]
     Q -->|"SearchHit[]"| T
-    T -->|"JSON ToolMessage"| S
-    S -->|"선택 근거 요약"| D
+    T -->|"관찰 후보 누적"| S
+    S -->|"SearchSelection"| V["Python ID 검증·원본 재조회"]
+    V -->|"SearchResult"| D
 ```
 
 ## Agent 문서 접근 권한
@@ -66,12 +75,7 @@ flowchart LR
 선택적 `document_type` 인자는 권한을 좁힐 수만 있고 넓힐 수 없다.
 
 ```python
-result = search_agent.invoke(
-    {
-        "messages": [{"role": "user", "content": objective}],
-        "permission": PolicyAgent.permission,
-    }
-)
+result = search_adapter.search(objective, permission=Permission.POLICY)
 ```
 
 검색 Tool은 권한에서 허용된 문서 유형을 Qdrant payload filter에 포함해 Dense, Sparse,
@@ -94,8 +98,9 @@ vector를 반환하면 Tool 결과의 정제된 `error`로 전달한다. Qdrant 
 
 | 설정 | 기본값 | 목적 |
 | --- | --- | --- |
-| `max_model_calls` | `4` | 한 요청의 모델 호출 상한 |
-| `max_tool_calls` | `3` | 한 요청의 검색 Tool 호출 상한 |
+| `max_model_calls` | `6` | 검색 3회, 최종 제출과 HCX 형식 교정을 포함한 모델 호출 상한 |
+| `max_tool_calls` | `3` | 한 요청의 검색 Tool 호출 상한. 최종 결과 제출은 제외 |
+| `timeout_seconds` | `45` | Domain Adapter가 Search Agent 전체 실행을 기다리는 상한 |
 | `default_search_mode` | `hybrid` | 검색 Tool의 기본 검색 방식 |
 | `default_result_limit` | `10` | 검색 Tool의 기본 결과 수 |
 | `default_neighbor_before` | `1` | 인접 조회의 기본 앞쪽 청크 수 |

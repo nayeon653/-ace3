@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, cast
 
 import pytest
@@ -454,7 +454,7 @@ def test_search_tools_use_configured_defaults() -> None:
 
 def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     chunk = _chunk()
-    retriever = FakeChunkRetriever(hits=[SearchHit(chunk=chunk, score=0.9)])
+    retriever = FakeChunkRetriever(hits=[SearchHit(chunk=chunk, score=0.9)], chunk=chunk)
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -468,7 +468,21 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
                     }
                 ],
             ),
-            AIMessage(content="guide.pdf 3페이지에서 이전 절차 근거를 찾았습니다."),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "sufficient",
+                            "selected_chunk_ids": [chunk.chunk_id],
+                            "limitations": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
         ]
     )
     model.bindings.clear()
@@ -482,17 +496,264 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     )
 
     tool_messages = [message for message in result["messages"] if isinstance(message, ToolMessage)]
-    assert len(tool_messages) == 1
+    assert len(tool_messages) == 2
     assert chunk.chunk_id in str(tool_messages[0].content)
-    assert result["messages"][-1].text == "guide.pdf 3페이지에서 이전 절차 근거를 찾았습니다."
+    assert result["search_result"].selected_chunks[0].content == chunk.content
     assert all(
         set(names)
-        == {"search_chunks", "search_within_document", "get_neighbor_chunks", "get_chunk"}
+        == {
+            "search_chunks",
+            "search_within_document",
+            "get_neighbor_chunks",
+            "get_chunk",
+            "submit_search_result",
+        }
         for names, _kwargs in model.bindings
     )
-    assert model.bindings[0][1]["tool_choice"] == "required"
+    assert model.bindings[0][1]["tool_choice"] is None
     assert model.bindings[-1][1]["tool_choice"] is None
     assert retriever.chunk_searches[0][1] == SearchFilters(document_types=_PENSION_DOCUMENT_TYPES)
+
+
+def test_final_submission_reloads_original_chunk_instead_of_trusting_candidate() -> None:
+    candidate = _chunk()
+    original = replace(
+        candidate,
+        content="Qdrant에서 다시 읽은 원본 본문",
+        title="원본 제목",
+        locator="9페이지",
+    )
+    retriever = FakeChunkRetriever(
+        hits=[SearchHit(chunk=candidate, score=0.9)],
+        chunk=original,
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_chunks",
+                        "args": {"text": "IRP 이전", "mode": "sparse"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "sufficient",
+                            "selected_chunk_ids": [candidate.chunk_id],
+                            "limitations": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
+
+    result = agent.invoke(
+        {
+            "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
+            "permission": _PENSION_PERMISSION,
+        }
+    )
+
+    selected = result["search_result"].selected_chunks[0]
+    assert selected.content == "Qdrant에서 다시 읽은 원본 본문"
+    assert selected.title == "원본 제목"
+    assert selected.locator == "9페이지"
+    assert retriever.chunk_ids == [(candidate.chunk_id, _PENSION_DOCUMENT_TYPES)]
+
+
+def test_unobserved_chunk_id_is_rejected_before_none_submission() -> None:
+    unknown_id = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_chunks",
+                        "args": {"text": "없는 근거", "mode": "sparse"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "sufficient",
+                            "selected_chunk_ids": [unknown_id],
+                            "limitations": [],
+                        },
+                        "id": "invalid-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "none",
+                            "selected_chunk_ids": [],
+                            "limitations": ["관련 근거 없음"],
+                        },
+                        "id": "valid-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_search_agent(
+        model=model,
+        embedder=FakeEmbedder(),
+        retriever=FakeChunkRetriever(),
+    )
+
+    result = agent.invoke(
+        {
+            "messages": [{"role": "user", "content": "근거 검색"}],
+            "permission": _PENSION_PERMISSION,
+        }
+    )
+
+    assert result["search_result"].coverage == "none"
+    invalid_message = next(
+        message
+        for message in result["messages"]
+        if isinstance(message, ToolMessage) and message.tool_call_id == "invalid-submit"
+    )
+    assert "관찰하지 않은" in invalid_message.text
+
+
+def test_final_submission_requires_a_successful_search_tool_call() -> None:
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "none",
+                            "selected_chunk_ids": [],
+                            "limitations": [],
+                        },
+                        "id": "early-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_chunks",
+                        "args": {"text": "제공 문서 근거", "mode": "sparse"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "none",
+                            "selected_chunk_ids": [],
+                            "limitations": ["관련 근거 없음"],
+                        },
+                        "id": "valid-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    retriever = FakeChunkRetriever()
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
+
+    result = agent.invoke(
+        {
+            "messages": [{"role": "user", "content": "근거 검색"}],
+            "permission": _PENSION_PERMISSION,
+        }
+    )
+
+    early_message = next(
+        message
+        for message in result["messages"]
+        if isinstance(message, ToolMessage) and message.tool_call_id == "early-submit"
+    )
+    assert "검색 Tool을 성공적으로 호출" in early_message.text
+    assert result["search_result"].coverage == "none"
+    assert len(retriever.chunk_searches) == 1
+
+
+def test_reload_failure_returns_sanitized_failed_search_result() -> None:
+    chunk = _chunk()
+    retriever = FakeChunkRetriever(hits=[SearchHit(chunk=chunk, score=0.9)], chunk=None)
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_chunks",
+                        "args": {"text": "IRP 이전", "mode": "sparse"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "sufficient",
+                            "selected_chunk_ids": [chunk.chunk_id],
+                            "limitations": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
+
+    result = agent.invoke(
+        {
+            "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
+            "permission": _PENSION_PERMISSION,
+        }
+    )
+
+    search_result = result["search_result"]
+    assert search_result.execution_status == "failed"
+    assert search_result.selected_chunks == []
+    assert "secret" not in search_result.error.lower()
 
 
 @pytest.mark.parametrize(
@@ -580,7 +841,21 @@ def test_parallel_tool_limit_executes_allowed_calls_and_returns_model_answer() -
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(content="", tool_calls=parallel_calls),
-            AIMessage(content="검색 호출 한도 안에서 확인한 근거를 정리했습니다."),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "none",
+                            "selected_chunk_ids": [],
+                            "limitations": ["관련 근거 없음"],
+                        },
+                        "id": "submit-none",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
         ]
     )
     agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
@@ -593,7 +868,7 @@ def test_parallel_tool_limit_executes_allowed_calls_and_returns_model_answer() -
     )
 
     assert len(retriever.chunk_searches) == 3
-    assert result["messages"][-1].text == "검색 호출 한도 안에서 확인한 근거를 정리했습니다."
+    assert result["search_result"].coverage == "none"
 
 
 def test_search_agent_requires_another_tool_after_tool_error() -> None:
@@ -621,7 +896,21 @@ def test_search_agent_requires_another_tool_after_tool_error() -> None:
                     }
                 ],
             ),
-            AIMessage(content="검색 결과가 없어 근거를 확인하지 못했습니다."),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_search_result",
+                        "args": {
+                            "coverage": "none",
+                            "selected_chunk_ids": [],
+                            "limitations": ["관련 근거 없음"],
+                        },
+                        "id": "submit-none",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
         ]
     )
     model.bindings.clear()
@@ -639,8 +928,8 @@ def test_search_agent_requires_another_tool_after_tool_error() -> None:
     )
 
     assert [kwargs["tool_choice"] for _names, kwargs in model.bindings] == [
-        "required",
-        "required",
+        None,
+        None,
         None,
     ]
 
@@ -650,3 +939,4 @@ def test_search_agent_prompt_is_packaged() -> None:
 
     assert "필요한 최소 Tool만 호출" in prompt
     assert "검색 결과에 없는 사실" in prompt
+    assert "최종 검색 결과 제출 Tool" in prompt
