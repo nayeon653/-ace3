@@ -141,7 +141,7 @@ Supervisor에 주입합니다.
 
 ```python
 from pension_agent.agent.model_factory import create_chat_clovax
-from pension_agent.agent.supervisor import create_main_supervisor
+from pension_agent.agent.orchestration import create_main_supervisor
 from pension_agent.config import MAIN_SUPERVISOR_HCX_CONFIG, ClovaStudioConnection
 
 connection = ClovaStudioConnection()
@@ -158,8 +158,8 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 |---|---|
 | `pension_agent/ingest/` | 파싱 artifact 검증·정규화·retrieval 연계 |
 | `pension_agent/retrieval/` | 청킹·임베딩·검색 |
-| `pension_agent/agent/` | 라우터·도구·오케스트레이션 |
-| `pension_agent/prompts/` | 프롬프트 파일 |
+| `pension_agent/agent/` | 에이전트별 모듈, 공용 계약, 오케스트레이션 |
+| `pension_agent/prompts/` | 실행 주체별 프롬프트 리소스 |
 | `pension_agent/rules/` | 세제 계산기 (결정론적) |
 | `pension_agent/api/` | FastAPI 라우트·스키마·HTTP 예외 변환 |
 | `pension_agent/core/` | 공용 타입·프로토콜·예외 |
@@ -168,6 +168,22 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 | `infra/` | Docker·배포·모니터링 |
 | `data/` | 원본·중간 산출물·검색 인덱스 (Git 제외) |
 | `evals/questions/` | 평가 질의셋 |
+
+`pension_agent/agent/`는 실행 책임별 모듈로 나눈다.
+
+| 경로 | 책임 |
+|---|---|
+| `contracts/` | Main·Domain·API가 공유하는 입출력 계약 |
+| `orchestration/` | Main Supervisor, 상태, Domain Tool Adapter, 실행 서비스 |
+| `search/` | Search Agent, 검색 Port, Tool, 미들웨어, 검색 스키마 |
+| `policy/` | 업무·제도 Domain Agent |
+| `tax_payout/` | 세제·수령 Domain Agent |
+| `product/` | 상품·운용 Domain Agent |
+
+구체 Domain Agent의 선택과 Tool 등록은 `pension_agent/api/bootstrap.py`에서 수행한다.
+`orchestration`은 구체 Domain Agent를 import하지 않으며, Domain Agent끼리도 직접
+의존하지 않는다. Search Agent는 저장소 구현 대신 `ChunkRetriever` Port에 의존하고,
+`retrieval/QdrantChunkRetriever`가 Qdrant 접근을 구현한다.
 | `evals/harness/` | 평가 실행기 |
 | `docs/` | 컨벤션, 결정 기록, 실험 로그, API 명세, 제안서 |
 | `tests/` | 테스트 |
