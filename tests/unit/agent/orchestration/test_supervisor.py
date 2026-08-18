@@ -4,12 +4,15 @@ from collections.abc import Sequence
 from importlib import resources
 from typing import Any, ClassVar
 
+import pytest
 from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
 
 from pension_agent.agent.contracts import DomainName, DomainRequest, DomainResult
 from pension_agent.agent.orchestration import (
+    AnswerService,
+    FinalAnswerMissingError,
     build_agent_answer,
     create_domain_agent_tool,
     create_main_supervisor,
@@ -176,3 +179,33 @@ def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth() 
         if isinstance(message, ToolMessage) and message.tool_call_id == "policy-4"
     ]
     assert len(blocked) == 1
+
+
+def test_main_supervisor_model_limit_is_not_returned_as_a_user_answer() -> None:
+    requests: list[DomainRequest] = []
+    policy_tool = create_domain_agent_tool(
+        name="analyze_policy",
+        description="업무 판단",
+        domain="policy",
+        runner=_runner("policy", "이전할 수 있습니다.", requests),
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call(
+                        "analyze_policy",
+                        f"policy-{index}",
+                        f"이전 가능 여부 판단 {index}",
+                    )
+                ],
+            )
+            for index in range(12)
+        ]
+    )
+    supervisor = create_main_supervisor(model=model, tools=[policy_tool])
+    service = AnswerService(supervisor)
+
+    with pytest.raises(FinalAnswerMissingError, match="최종 자연어 답변"):
+        service.run(question_id="Q-LIMIT", question="이전할 수 있나요?")
