@@ -35,8 +35,8 @@ qdrant-down: ## 로컬 Qdrant 종료 (데이터 볼륨 유지)
 qdrant-status: ## 로컬 Qdrant 컨테이너 상태 출력
 	$(QDRANT_COMPOSE) ps qdrant
 
-qdrant-check: ## .env의 Qdrant readiness와 클라이언트 연결 확인
-	$(UV) run --frozen --env-file .env python infra/check_qdrant.py
+qdrant-check: ## Qdrant readiness와 클라이언트 연결 확인
+	$(UV) run --frozen python infra/check_qdrant.py
 
 qdrant-index-validate: ## 통합 청크와 source manifest 적재 계약 확인
 	$(UV) run --frozen python infra/index_qdrant.py validate
