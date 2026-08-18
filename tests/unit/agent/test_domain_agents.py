@@ -6,13 +6,13 @@ from pension_agent.agent.contracts import (
     DomainName,
     DomainRequest,
     DomainResult,
+    Permission,
     validate_domain_result,
 )
 from pension_agent.agent.orchestration import DomainRunner
 from pension_agent.agent.policy import PolicyAgent
 from pension_agent.agent.product import ProductAgent
 from pension_agent.agent.tax_payout import TaxPayoutAgent
-from pension_agent.core import DocumentType
 
 
 @pytest.mark.parametrize(
@@ -47,15 +47,15 @@ def test_domain_agent_returns_undetermined_placeholder(
 
 
 @pytest.mark.parametrize(
-    ("agent", "expected_document_type"),
+    ("agent", "expected_permission"),
     [
-        (PolicyAgent(), DocumentType.PENSION_REFERENCE),
-        (TaxPayoutAgent(), DocumentType.PENSION_REFERENCE),
-        (ProductAgent(), DocumentType.FUND_PROSPECTUS),
+        (PolicyAgent(), Permission.POLICY),
+        (TaxPayoutAgent(), Permission.TAX_PAYOUT),
+        (ProductAgent(), Permission.PRODUCT),
     ],
 )
-def test_domain_agents_declare_fixed_document_permissions(
+def test_domain_agents_declare_fixed_permission(
     agent: PolicyAgent | TaxPayoutAgent | ProductAgent,
-    expected_document_type: DocumentType,
+    expected_permission: Permission,
 ) -> None:
-    assert agent.permissions.readable_document_types == frozenset({expected_document_type})
+    assert agent.permission is expected_permission

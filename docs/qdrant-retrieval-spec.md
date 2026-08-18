@@ -43,7 +43,7 @@ flowchart LR
 - `core`는 Qdrant를 모르는 검색 입력·결과·오류 타입을 소유한다.
 - `retrieval`은 Qdrant 요청 생성, 필터 변환, payload 검증과 결과 변환을 소유한다.
 - `agent.search`는 공용 검색 타입과 `ChunkRetriever` Port만 사용한다.
-- 각 Domain Agent는 변경 불가능한 `AgentPermissions`로 검색 문서군을 제한한다.
+- 각 Domain Agent는 도메인 이름인 `Permission`을 상태에 넣고, 중앙 매핑으로 검색 문서군을 제한한다.
 - `retrieval`의 `QdrantChunkRetriever`가 이 Port를 구현하고 Qdrant SDK를 캡슐화한다.
 - Qdrant SDK 타입은 `pension_agent/retrieval/` 밖으로 노출하지 않는다.
 - `content`만 답변 근거로 사용하고 `embedding_content`는 외부 응답에 노출하지 않는다.

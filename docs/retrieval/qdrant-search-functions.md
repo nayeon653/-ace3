@@ -31,7 +31,7 @@ Tool을 바인딩한다.
 | `get_neighbor_chunks` | 선택한 청크의 앞뒤 문맥이 필요할 때 |
 | `get_chunk` | 알고 있는 UUID 청크를 다시 검증할 때 |
 
-Domain Agent는 요청마다 변경할 수 없는 `AgentPermissions`를 GraphState에 주입한다.
+Domain Agent는 요청마다 자신의 도메인 이름인 `Permission`을 GraphState에 주입한다.
 Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, 검색 방식과 허용 범위
 안의 추가 필터를 선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
 임베딩하고 공용 `SearchQuery`를 만든 뒤 `ChunkRetriever`에 위임한다. Sparse 검색과
@@ -41,7 +41,7 @@ Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 
 
 ```mermaid
 flowchart LR
-    D["Domain Agent"] -->|"검색 목표 + permissions"| S["Search Agent<br/>create_agent + HCX"]
+    D["Domain Agent"] -->|"검색 목표 + permission"| S["Search Agent<br/>create_agent + HCX"]
     S -->|"Tool 선택·인자 생성"| T["Search Tools"]
     T -->|"Dense / Hybrid"| E["QueryEmbedder"]
     E -->|"dense vector"| T
@@ -60,7 +60,7 @@ flowchart LR
 | Tax/Payout | `pension_reference` |
 | Product | `fund_prospectus` |
 
-`permissions`는 LLM Tool 인자가 아니라 신뢰된 호출자가 `SearchAgentState`에 주입하는
+`permission`은 LLM Tool 인자가 아니라 신뢰된 호출자가 `SearchAgentState`에 주입하는
 필수 필드다. 누락되거나 형식이 잘못되면 검색을 실행하지 않는다. `search_chunks`의
 선택적 `document_type` 인자는 권한을 좁힐 수만 있고 넓힐 수 없다.
 
@@ -68,7 +68,7 @@ flowchart LR
 result = search_agent.invoke(
     {
         "messages": [{"role": "user", "content": objective}],
-        "permissions": PolicyAgent.permissions,
+        "permission": PolicyAgent.permission,
     }
 )
 ```
