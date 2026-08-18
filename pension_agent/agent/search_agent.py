@@ -20,8 +20,16 @@ from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, tool
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import Field
+from pydantic import BaseModel, Field
 
+from pension_agent.agent.search import (
+    GetChunkPayload,
+    NeighborChunksPayload,
+    SearchChunkPayload,
+    SearchHitPayload,
+    SearchHitsPayload,
+    SearchToolErrorPayload,
+)
 from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG, SearchAgentConfig
 from pension_agent.core import (
     DocumentType,
@@ -260,8 +268,8 @@ def create_search_tools(
     ) -> str:
         filters = SearchFilters(document_type=document_type) if document_type is not None else None
         return _tool_payload(
-            lambda: {
-                "hits": [
+            lambda: SearchHitsPayload(
+                hits=[
                     _search_hit_payload(hit)
                     for hit in operations.search_chunks(
                         text,
@@ -270,7 +278,7 @@ def create_search_tools(
                         limit=limit,
                     )
                 ]
-            }
+            )
         )
 
     @tool(
@@ -293,8 +301,8 @@ def create_search_tools(
         ] = config.default_result_limit,
     ) -> str:
         return _tool_payload(
-            lambda: {
-                "hits": [
+            lambda: SearchHitsPayload(
+                hits=[
                     _search_hit_payload(hit)
                     for hit in operations.search_within_document(
                         text,
@@ -303,7 +311,7 @@ def create_search_tools(
                         limit=limit,
                     )
                 ]
-            }
+            )
         )
 
     @tool(
@@ -332,7 +340,7 @@ def create_search_tools(
             ),
         ] = config.default_neighbor_after,
     ) -> str:
-        def operation() -> dict[str, object]:
+        def operation() -> NeighborChunksPayload:
             invalid_request = False
             try:
                 request = NeighborRequest(
@@ -346,11 +354,9 @@ def create_search_tools(
 
             if invalid_request:
                 raise SearchToolInputError("인접 청크 조회 범위가 올바르지 않습니다.")
-            return {
-                "chunks": [
-                    _chunk_payload(chunk) for chunk in operations.get_neighbor_chunks(request)
-                ]
-            }
+            return NeighborChunksPayload(
+                chunks=[_chunk_payload(chunk) for chunk in operations.get_neighbor_chunks(request)]
+            )
 
         return _tool_payload(operation)
 
@@ -361,9 +367,9 @@ def create_search_tools(
     def get_chunk(
         chunk_id: Annotated[str, Field(min_length=1, description="조회할 UUID 청크 ID")],
     ) -> str:
-        def operation() -> dict[str, object]:
+        def operation() -> GetChunkPayload:
             chunk = operations.get_chunk(chunk_id)
-            return {"chunk": _chunk_payload(chunk) if chunk is not None else None}
+            return GetChunkPayload(chunk=_chunk_payload(chunk) if chunk is not None else None)
 
         return _tool_payload(operation)
 
@@ -392,45 +398,47 @@ def create_search_agent(
     )
 
 
-def _tool_payload(operation: Callable[[], object]) -> str:
+def _tool_payload(operation: Callable[[], BaseModel]) -> str:
     unexpected_failure = False
     try:
         payload = operation()
     except (QueryEmbeddingError, RetrievalError, SearchToolInputError) as exc:
-        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        return SearchToolErrorPayload(error=str(exc)).model_dump_json()
     # 구현이 다른 Backend의 원시 예외는 검색 Agent의 ToolMessage에 노출하지 않는다.
     except Exception:  # noqa: BLE001
         unexpected_failure = True
 
     if unexpected_failure:
-        return json.dumps({"error": "검색 Tool 실행에 실패했습니다."}, ensure_ascii=False)
+        return SearchToolErrorPayload(error="검색 Tool 실행에 실패했습니다.").model_dump_json()
 
     serialization_failed = False
     try:
-        return json.dumps(payload, ensure_ascii=False)
+        return payload.model_dump_json()
     # Tool 경계 밖으로 직렬화 대상이나 Provider의 원시 예외를 노출하지 않는다.
     except Exception:  # noqa: BLE001
         serialization_failed = True
 
     if serialization_failed:
-        return json.dumps({"error": "검색 Tool 결과를 처리하지 못했습니다."}, ensure_ascii=False)
+        return SearchToolErrorPayload(
+            error="검색 Tool 결과를 처리하지 못했습니다."
+        ).model_dump_json()
     raise AssertionError("도달할 수 없는 검색 Tool 상태입니다.")
 
 
-def _search_hit_payload(hit: SearchHit) -> dict[str, object]:
-    return {"score": hit.score, "chunk": _chunk_payload(hit.chunk)}
+def _search_hit_payload(hit: SearchHit) -> SearchHitPayload:
+    return SearchHitPayload(score=hit.score, chunk=_chunk_payload(hit.chunk))
 
 
-def _chunk_payload(chunk: RetrievedChunk) -> dict[str, object]:
-    return {
-        "chunk_id": chunk.chunk_id,
-        "source_file_name": chunk.source_file_name,
-        "document_type": chunk.document_type.value,
-        "chunk_index": chunk.chunk_index,
-        "title": chunk.title,
-        "locator": chunk.locator,
-        "content": chunk.content,
-    }
+def _chunk_payload(chunk: RetrievedChunk) -> SearchChunkPayload:
+    return SearchChunkPayload(
+        chunk_id=chunk.chunk_id,
+        source_file_name=chunk.source_file_name,
+        document_type=chunk.document_type,
+        chunk_index=chunk.chunk_index,
+        title=chunk.title,
+        locator=chunk.locator,
+        content=chunk.content,
+    )
 
 
 def _validate_limit(limit: int) -> None:

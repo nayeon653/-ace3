@@ -15,6 +15,7 @@ import pytest
         "pension_agent.agent.domains.policy",
         "pension_agent.agent.domains.product",
         "pension_agent.agent.domains.tax_payout",
+        "pension_agent.agent.search",
         "pension_agent.api",
         "pension_agent.config",
         "pension_agent.core",
