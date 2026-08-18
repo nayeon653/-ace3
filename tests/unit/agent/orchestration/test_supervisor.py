@@ -14,11 +14,6 @@ from pension_agent.agent.orchestration import (
     create_domain_agent_tool,
     create_main_supervisor,
 )
-from pension_agent.agent.policy import (
-    POLICY_TOOL_DESCRIPTION,
-    POLICY_TOOL_NAME,
-    PolicyAgent,
-)
 
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
@@ -135,35 +130,43 @@ def test_main_supervisor_prompt_is_packaged() -> None:
     assert "JSON이나 Tool 호출 형식을 직접 출력하지 않는다" in prompt
 
 
-def test_main_supervisor_uses_placeholder_result_for_final_answer() -> None:
+def test_main_supervisor_blocks_duplicate_domain_tool_calls() -> None:
+    requests: list[DomainRequest] = []
+    policy_tool = create_domain_agent_tool(
+        name="analyze_policy",
+        description="업무 판단",
+        domain="policy",
+        runner=_runner("policy", "이전할 수 있습니다.", requests),
+    )
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(
                 content="",
-                tool_calls=[_tool_call("analyze_policy", "policy-call", "이전 가능 여부 판단")],
+                tool_calls=[_tool_call("analyze_policy", "policy-1", "이전 가능 여부 판단")],
             ),
-            AIMessage(content="업무·제도 Agent가 아직 구현되지 않아 추후 판단할 수 있습니다."),
+            AIMessage(
+                content="",
+                tool_calls=[_tool_call("analyze_policy", "policy-2", "이전 가능 여부 재확인")],
+            ),
+            AIMessage(content="이전 가능 여부를 확인했습니다."),
         ]
-    )
-    policy_tool = create_domain_agent_tool(
-        name=POLICY_TOOL_NAME,
-        description=POLICY_TOOL_DESCRIPTION,
-        domain="policy",
-        runner=PolicyAgent(),
     )
     supervisor = create_main_supervisor(model=model, tools=[policy_tool])
 
     result = supervisor.invoke(
         {
-            "messages": [{"role": "user", "content": "연금계좌를 이전할 수 있나요?"}],
-            "question_id": "Q-PLACEHOLDER",
-            "question": "연금계좌를 이전할 수 있나요?",
+            "messages": [{"role": "user", "content": "이전할 수 있나요?"}],
+            "question_id": "Q-DUPLICATE",
+            "question": "이전할 수 있나요?",
             "domain_results": [],
         }
     )
 
-    assert result["domain_results"][0]["decision"]["status"] == "undetermined"
-    assert "구현 전" in result["domain_results"][0]["decision"]["conclusion"]
-    assert build_agent_answer(result["messages"]).answer == (
-        "업무·제도 Agent가 아직 구현되지 않아 추후 판단할 수 있습니다."
-    )
+    assert len(requests) == 1
+    assert len(result["domain_results"]) == 1
+    blocked = [
+        message
+        for message in result["messages"]
+        if isinstance(message, ToolMessage) and message.tool_call_id == "policy-2"
+    ]
+    assert len(blocked) == 1

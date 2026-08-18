@@ -29,6 +29,9 @@ def create_app(
         try:
             yield
         finally:
+            close = getattr(application.state.answer_service, "close", None)
+            if callable(close):
+                close()
             del application.state.answer_service
 
     application = FastAPI(

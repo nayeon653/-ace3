@@ -2,9 +2,14 @@
 
 from collections.abc import Sequence
 from importlib import resources
-from typing import Any
+from typing import Any, cast
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.tools import BaseTool
@@ -31,11 +36,26 @@ def create_main_supervisor(
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """모델과 Domain Agent Tool을 주입받아 Main Supervisor를 만든다."""
 
+    middleware = cast(
+        Sequence[AgentMiddleware[Any, Any, Any]],
+        (
+            ModelCallLimitMiddleware(run_limit=8, exit_behavior="end"),
+            *(
+                ToolCallLimitMiddleware(
+                    tool_name=tool.name,
+                    run_limit=1,
+                    exit_behavior="continue",
+                )
+                for tool in tools
+            ),
+        ),
+    )
     return create_agent(
         model=model,
         tools=tools,
         system_prompt=load_main_supervisor_prompt(),
         state_schema=SupervisorState,
+        middleware=middleware,
         name="main_supervisor",
     )
 
