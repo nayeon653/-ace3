@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from pension_agent.core import (
+    DocumentType,
     NeighborRequest,
     RetrievedChunk,
     SearchFilters,
@@ -35,12 +36,23 @@ class ChunkRetriever(Protocol):
         query: SearchQuery,
         *,
         source_file_name: str,
+        document_types: frozenset[DocumentType] | None = None,
         limit: int = 10,
     ) -> list[SearchHit]:
         """원본 문서 하나에서 검색한다."""
 
-    def get_neighbor_chunks(self, request: NeighborRequest) -> list[RetrievedChunk]:
+    def get_neighbor_chunks(
+        self,
+        request: NeighborRequest,
+        *,
+        document_types: frozenset[DocumentType] | None = None,
+    ) -> list[RetrievedChunk]:
         """기준 청크 주변의 문맥을 조회한다."""
 
-    def get_chunk(self, chunk_id: str) -> RetrievedChunk | None:
+    def get_chunk(
+        self,
+        chunk_id: str,
+        *,
+        document_types: frozenset[DocumentType] | None = None,
+    ) -> RetrievedChunk | None:
         """청크 ID로 근거 하나를 조회한다."""

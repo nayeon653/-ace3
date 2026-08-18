@@ -7,9 +7,12 @@ from pension_agent.agent.contracts import (
     AgentAnswer,
     DomainRequest,
     DomainResult,
+    Permission,
+    document_types_for_permission,
     validate_domain_result,
 )
 from pension_agent.agent.orchestration import build_domain_tool_result
+from pension_agent.core import DocumentType
 
 
 def _completed_result() -> DomainResult:
@@ -33,6 +36,21 @@ def _completed_result() -> DomainResult:
         "calculations": [{"calculator_name": "example", "inputs": {"amount": 1}, "result": 1}],
         "warnings": [],
     }
+
+
+@pytest.mark.parametrize(
+    ("permission", "expected_document_type"),
+    [
+        (Permission.POLICY, DocumentType.PENSION_REFERENCE),
+        (Permission.TAX_PAYOUT, DocumentType.PENSION_REFERENCE),
+        (Permission.PRODUCT, DocumentType.FUND_PROSPECTUS),
+    ],
+)
+def test_permission_maps_domain_to_document_types(
+    permission: Permission,
+    expected_document_type: DocumentType,
+) -> None:
+    assert document_types_for_permission(permission) == frozenset({expected_document_type})
 
 
 def test_domain_tool_result_excludes_evidence_and_calculations() -> None:

@@ -68,9 +68,11 @@ class SearchFilters:
     """현재 payload index로 지원하는 메타데이터 필터."""
 
     source_file_name: str | None = None
-    document_type: DocumentType | None = None
+    document_types: frozenset[DocumentType] | None = None
 
     def __post_init__(self) -> None:
+        if self.document_types is not None and not self.document_types:
+            raise ValueError("문서 유형 필터는 최소 하나가 필요합니다.")
         if self.source_file_name is None:
             return
         source_file_name = self.source_file_name.strip()

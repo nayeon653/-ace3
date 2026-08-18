@@ -187,6 +187,8 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 `orchestration`은 구체 Domain Agent를 import하지 않으며, Domain Agent끼리도 직접
 의존하지 않는다. Search Agent는 저장소 구현 대신 `ChunkRetriever` Port에 의존하고,
 `retrieval/QdrantChunkRetriever`가 Qdrant 접근을 구현한다.
+Policy와 Tax/Payout은 `pension_reference`, Product는 `fund_prospectus` 문서군만
+검색하도록 Agent별 `permissions`를 실행 상태에 주입한다.
 
 ## 더 읽기
 

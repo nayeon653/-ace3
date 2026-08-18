@@ -67,7 +67,7 @@ def test_hybrid_search_uses_same_filter_for_dense_and_sparse_prefetch() -> None:
     client.query_points.return_value = SimpleNamespace(points=[_scored_point()])
     query = SearchQuery(text="퇴직연금 가입 절차", dense=(0.1, 0.2))
     filters = SearchFilters(
-        document_type=DocumentType.PENSION_REFERENCE,
+        document_types=frozenset({DocumentType.PENSION_REFERENCE}),
     )
 
     with patch(
@@ -118,6 +118,31 @@ def test_dense_search_applies_filter_to_query() -> None:
     )
 
 
+def test_sparse_search_applies_document_permission_filter() -> None:
+    search, client = _search()
+    client.query_points.return_value = SimpleNamespace(points=[])
+
+    with patch(
+        "pension_agent.retrieval.qdrant_retriever.to_bm25_text",
+        return_value="퇴직 연금",
+    ):
+        search.search_chunks(
+            SearchQuery(text="퇴직연금", mode=SearchMode.SPARSE),
+            filters=SearchFilters(document_types=frozenset({DocumentType.PENSION_REFERENCE})),
+        )
+
+    kwargs = client.query_points.call_args.kwargs
+    assert kwargs["using"] == "sparse"
+    assert kwargs["query_filter"] == models.Filter(
+        must=[
+            models.FieldCondition(
+                key="document_type",
+                match=models.MatchValue(value="pension_reference"),
+            )
+        ]
+    )
+
+
 def test_hybrid_search_falls_back_to_dense_when_sparse_text_is_empty() -> None:
     search, client = _search()
     client.query_points.return_value = SimpleNamespace(points=[])
@@ -145,6 +170,7 @@ def test_search_within_document_adds_file_filter() -> None:
     search.search_within_document(
         SearchQuery(text="수수료", dense=(0.3,), mode=SearchMode.DENSE),
         source_file_name="fund.pdf",
+        document_types=frozenset({DocumentType.FUND_PROSPECTUS}),
     )
 
     query_filter = client.query_points.call_args.kwargs["query_filter"]
@@ -152,6 +178,10 @@ def test_search_within_document_adds_file_filter() -> None:
         models.FieldCondition(
             key="source_file_name",
             match=models.MatchValue(value="fund.pdf"),
+        ),
+        models.FieldCondition(
+            key="document_type",
+            match=models.MatchValue(value="fund_prospectus"),
         ),
     ]
 
@@ -167,7 +197,8 @@ def test_neighbor_chunks_are_returned_in_chunk_order() -> None:
     )
 
     chunks = search.get_neighbor_chunks(
-        NeighborRequest(source_file_name="guide.pdf", chunk_index=7)
+        NeighborRequest(source_file_name="guide.pdf", chunk_index=7),
+        document_types=frozenset({DocumentType.PENSION_REFERENCE}),
     )
 
     assert [chunk.chunk_index for chunk in chunks] == [6, 8]
@@ -175,6 +206,10 @@ def test_neighbor_chunks_are_returned_in_chunk_order() -> None:
     assert kwargs["limit"] == 3
     assert kwargs["order_by"] == "chunk_index"
     assert kwargs["with_vectors"] is False
+    assert kwargs["scroll_filter"].must[-1] == models.FieldCondition(
+        key="document_type",
+        match=models.MatchValue(value="pension_reference"),
+    )
 
 
 def test_get_chunk_returns_none_when_point_is_missing() -> None:
@@ -182,6 +217,24 @@ def test_get_chunk_returns_none_when_point_is_missing() -> None:
     client.retrieve.return_value = []
 
     assert search.get_chunk(_CHUNK_ID) is None
+
+
+def test_get_chunk_hides_document_outside_allowed_types() -> None:
+    search, client = _search()
+    client.retrieve.return_value = [
+        models.Record(
+            id=UUID(_CHUNK_ID),
+            payload=_payload(document_type="fund_prospectus"),
+        )
+    ]
+
+    assert (
+        search.get_chunk(
+            _CHUNK_ID,
+            document_types=frozenset({DocumentType.PENSION_REFERENCE}),
+        )
+        is None
+    )
 
 
 def test_get_chunk_rejects_invalid_uuid_before_request() -> None:
