@@ -97,3 +97,66 @@ async def test_health_responds_while_forty_answer_requests_are_capacity_blocked(
     assert all(response.status_code == 200 for response in answers)
     assert supervisor.calls == 40
     assert supervisor.max_active == 4
+
+
+@pytest.mark.anyio
+async def test_asgi_disconnect_cancels_running_answer() -> None:
+    cancelled = asyncio.Event()
+    started = asyncio.Event()
+
+    class DisconnectSupervisor:
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: ExecutionContext,
+        ) -> Mapping[str, Any]:
+            del input, context
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    service = AnswerService(DisconnectSupervisor())
+
+    async def factory() -> AnswerService:
+        return service
+
+    application = create_app(answer_service_factory=factory)
+    received: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return await received.get()
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    scope: dict[str, Any] = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/answer",
+        "raw_path": b"/answer",
+        "query_string": b"question_id=Q-1&question=test",
+        "root_path": "",
+        "headers": [(b"host", b"test")],
+        "client": ("127.0.0.1", 1234),
+        "server": ("test", 80),
+    }
+    await received.put({"type": "http.request", "body": b"", "more_body": False})
+
+    async with application.router.lifespan_context(application):
+        request_task = asyncio.create_task(application(scope, receive, send))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await received.put({"type": "http.disconnect"})
+        await asyncio.wait_for(request_task, timeout=1)
+        await asyncio.wait_for(cancelled.wait(), timeout=1)
+
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 499
