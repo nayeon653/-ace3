@@ -1,4 +1,4 @@
-.PHONY: help setup check build lock hooks qdrant-up qdrant-down qdrant-status qdrant-check qdrant-index-validate setup-parser parser-test
+.PHONY: help setup check build lock hooks qdrant-up qdrant-down qdrant-status qdrant-check qdrant-hybrid-test qdrant-index-validate setup-parser parser-test
 
 UV ?= uv
 PARSER_PROJECT ?= tools/docling_parser
@@ -37,6 +37,9 @@ qdrant-status: ## 로컬 Qdrant 컨테이너 상태 출력
 
 qdrant-check: ## Qdrant readiness와 클라이언트 연결 확인
 	$(UV) run --frozen python infra/check_qdrant.py
+
+qdrant-hybrid-test: ## 로컬 Qdrant에서 실제 적재와 기본 Hybrid 검색 검증
+	QDRANT_DOCKER_INTEGRATION=1 $(UV) run --frozen pytest -q --capture=sys tests/integration/test_qdrant_docker_hybrid.py
 
 qdrant-index-validate: ## 통합 청크와 source manifest 적재 계약 확인
 	$(UV) run --frozen python infra/index_qdrant.py validate

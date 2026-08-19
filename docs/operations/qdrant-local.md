@@ -40,12 +40,19 @@ make setup
 make qdrant-up
 make qdrant-status
 make qdrant-check
+make qdrant-hybrid-test
 ```
 
 `make qdrant-check`는 최대 30초 동안 `/readyz`를 확인한 다음 설치된 `QdrantClient`로
 컬렉션 목록을 조회한다. 두 단계가 모두 성공하면 연결 주소와 컬렉션 수를 출력한다.
 공식 Qdrant 이미지 내부에 `curl`이 있다고 가정하지 않으며 readiness 검사는 호스트의
 Python 환경에서 실행한다.
+
+`make qdrant-hybrid-test`는 임시 collection에 실제 인덱싱 코드로 dense와
+`qdrant/bm25` sparse vector를 적재한 뒤 Search Agent의 기본값과 같은 Hybrid 검색을
+실행한다. CLOVA API를 호출하지 않으며 테스트가 끝나면 성공 여부와 관계없이 임시
+collection을 삭제한다. Python embedded `QdrantClient(":memory:")`가 아니라 위 Docker
+HTTP endpoint를 검증하므로 로컬 제품 경로와 같은 Qdrant Core BM25를 사용한다.
 
 대시보드는 <http://127.0.0.1:6333/dashboard>에서 확인한다. 호스트에서 실행하는 Python
 코드는 다음 주소를 사용한다.
@@ -84,4 +91,5 @@ docker compose -f infra/compose.yaml down --volumes
 | 6333 또는 6334 포트를 사용할 수 없음 | 해당 포트를 사용 중인 다른 프로세스나 컨테이너를 확인한다. |
 | `make qdrant-check`가 30초 후 실패 | `docker compose -f infra/compose.yaml logs qdrant`로 시작 로그를 확인한다. |
 | 대시보드에 접근할 수 없음 | `make qdrant-status`로 컨테이너 상태와 port binding을 확인한다. |
+| Hybrid 테스트가 실패 | `make qdrant-check`를 먼저 실행하고 `docker compose -f infra/compose.yaml logs qdrant`로 서버 오류를 확인한다. |
 | 재실행 후 데이터가 없음 | `down --volumes` 실행 여부와 `ace3-local_qdrant_storage` volume 존재 여부를 확인한다. |
