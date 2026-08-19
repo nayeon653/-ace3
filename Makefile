@@ -1,4 +1,4 @@
-.PHONY: help setup check build lock hooks qdrant-up qdrant-down qdrant-status qdrant-check qdrant-hybrid-test qdrant-index-validate setup-parser parser-test
+.PHONY: help setup check build lock hooks serve qdrant-up qdrant-down qdrant-status qdrant-check qdrant-hybrid-test qdrant-index-validate setup-parser parser-test
 
 UV ?= uv
 PARSER_PROJECT ?= tools/docling_parser
@@ -25,6 +25,9 @@ lock: ## 의존성 잠금 파일 갱신
 hooks: ## 훅 경로를 .githooks로 설정 (팀원 각자 최초 1회 실행)
 	git config core.hooksPath .githooks
 	chmod +x .githooks/* 2>/dev/null || true
+
+serve: ## 로컬 API 서버 기동
+	$(UV) run uvicorn pension_agent.api.app:app --env-file .env
 
 qdrant-up: ## 로컬 Qdrant 실행
 	$(QDRANT_COMPOSE) up --detach qdrant
