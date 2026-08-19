@@ -135,6 +135,7 @@ uv run uvicorn pension_agent.api.app:app \
 | 서버 시작 실패 | `.env`의 CLOVA·Qdrant 연결 설정 확인 |
 | `/answer`의 검색 실패 | Qdrant collection 이름, 적재 여부와 payload 계약 확인 |
 | LangSmith에 trace가 생성되지 않음 | `.env`의 `LANGSMITH_*` 설정을 확인하고 서버를 `--env-file .env` 옵션으로 완전히 재시작 |
+| `/answer` 한 번에 LangSmith root trace가 여러 개 생성됨 | Domain·Search worker의 tracing context 전파 회귀 여부를 확인하고 [`LangSmith 추적 운영 정책`](langsmith-tracing.md)의 정상 trace tree와 비교 |
 | `Address already in use` | 8000번 포트를 쓰는 프로세스를 종료하거나 `--port 8001` 사용 |
 | `/health`의 SHA가 `unknown` | 로컬에서는 정상이다. 배포 환경이면 SHA 주입 설정 확인 |
 | 다른 기기에서 로컬 서버에 접속할 수 없음 | `127.0.0.1`은 로컬 전용이다. 외부 공개가 필요할 때만 보안 설정 후 바인딩 범위를 변경 |

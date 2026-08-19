@@ -79,6 +79,29 @@ trace tree에 기록한다.
 - 최종 모델 호출과 답변
 - 실행 순서, 지연시간과 제공되는 token 사용량
 
+정상적인 `/answer` 요청 하나에는 `main_supervisor` root trace가 정확히 하나 생성된다.
+Supervisor가 호출한 Domain Agent와 각 Domain Agent가 호출한 Search Agent는 별도 root가
+아니라 해당 `main_supervisor` 아래의 하위 run으로 연결된다. Domain·Search Agent는 timeout과
+동시 실행 제한을 위해 worker thread에서 실행되므로, 실행기는 요청별 tracing context를
+worker에 복사해야 한다. 이 전파가 끊기면 다음처럼 하나의 API 요청이 여러 root trace로
+잘못 분리된다.
+
+```text
+main_supervisor   (root)
+product_agent     (잘못 분리된 root)
+search_agent      (잘못 분리된 root)
+```
+
+정상 상태에서는 같은 실행이 다음 계층으로 보인다.
+
+```text
+main_supervisor
+└── analyze_product
+    └── product_agent
+        └── search_documents
+            └── search_agent
+```
+
 현재 구조에서는 고객정보나 개인정보가 들어오지 않으므로 고정 smoke와 개발자가 직접
 작성한 질문을 구분하지 않는다. tracing이 켜진 로컬 프로세스의 모든 Agent 실행이 같은
 개인 project에 기록된다.
@@ -87,10 +110,12 @@ trace tree에 기록한다.
 
 개인 LangSmith project에서 다음을 확인한다.
 
-1. Main Supervisor 아래에 모델과 선택된 `analyze_*` Tool 실행이 연결되는지 확인한다.
-2. 단일·복수 도메인 질문에서 Tool 선택이 의도와 일치하는지 확인한다.
-3. Tool 결과가 최종 답변에 반영되는지 확인한다.
-4. 질문별 지연시간과 token 정보가 제공되는지 확인한다.
+1. 요청 하나당 `main_supervisor` root trace가 하나만 생성되는지 확인한다.
+2. Main Supervisor 아래에 모델과 선택된 `analyze_*` Tool 실행이 연결되는지 확인한다.
+3. 선택된 Domain Agent와 그 하위 Search Agent가 같은 trace tree에 연결되는지 확인한다.
+4. 단일·복수 도메인 질문에서 Tool 선택이 의도와 일치하는지 확인한다.
+5. Tool 결과가 최종 답변에 반영되는지 확인한다.
+6. 질문별 지연시간과 token 정보가 제공되는지 확인한다.
 
 팀에 공유할 필요가 있는 결론은 API key, 질문 원문이나 trace 링크를 공유하지 않고
 `docs/experiments.md`에 재현 방법과 관찰 결과만 요약한다.

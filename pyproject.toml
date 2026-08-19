@@ -12,6 +12,7 @@ dependencies = [
     "langchain-naver>=0.1,<1",
     "langchain-qdrant>=1,<2",
     "langgraph>=1,<2",
+    "langsmith>=0.10,<1",
     "numpy",
     "pydantic",
     "pydantic-settings>=2,<3",
