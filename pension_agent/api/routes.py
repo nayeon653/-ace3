@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from pension_agent.agent.orchestration import AnswerService
+from pension_agent.agent.orchestration import AnswerService, AnswerServiceOverloadedError
 from pension_agent.api.dependencies import (
     PUBLIC_INTERNAL_ERROR,
     get_answer_service,
@@ -16,6 +16,7 @@ from pension_agent.api.schemas import AnswerResponse, ErrorResponse, HealthRespo
 router = APIRouter()
 
 _INVALID_REQUEST_ERROR = "요청 파라미터가 올바르지 않습니다."
+_SERVICE_OVERLOADED_ERROR = "현재 처리 가능한 요청 수를 초과했습니다."
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status.HTTP_400_BAD_REQUEST: {
         "model": ErrorResponse,
@@ -24,6 +25,10 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status.HTTP_500_INTERNAL_SERVER_ERROR: {
         "model": ErrorResponse,
         "description": "Agent 초기화·실행 또는 응답 조립 오류",
+    },
+    status.HTTP_503_SERVICE_UNAVAILABLE: {
+        "model": ErrorResponse,
+        "description": "프로세스의 bounded 요청 대기열 포화",
     },
 }
 
@@ -57,6 +62,11 @@ async def answer(
     try:
         result = await service.run(question_id=question_id, question=question)
         return build_answer_response(result)
+    except AnswerServiceOverloadedError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_SERVICE_OVERLOADED_ERROR,
+        ) from None
     except Exception:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -44,6 +44,10 @@ class AnswerServiceTimeoutError(AnswerServiceError):
     """capacity 대기부터 응답 조립까지의 요청 전체 예산을 초과한 경우."""
 
 
+class AnswerServiceOverloadedError(AnswerServiceError):
+    """프로세스의 bounded answer 대기열까지 모두 사용 중인 경우."""
+
+
 class InvalidSupervisorResultError(AnswerServiceError):
     """Supervisor가 공통 계약에 맞지 않는 최종 상태를 반환한 경우."""
 
@@ -74,44 +78,58 @@ class AnswerService:
         self._config = config
         self._close_callbacks = close_callbacks
         self._capacity = asyncio.Semaphore(config.max_concurrent_answers)
+        admission_limit = config.max_concurrent_answers + config.max_pending_answers
+        self._admission = asyncio.Queue[None](maxsize=admission_limit)
+        for _ in range(admission_limit):
+            self._admission.put_nowait(None)
         self._resource_close_lock = asyncio.Lock()
         self._resources_closed = False
 
     async def run(self, *, question_id: str, question: str) -> AnswerServiceResult:
         """Supervisor를 실행하고 검증된 답변과 상태를 반환한다."""
 
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._config.answer_timeout_seconds
-        context = ExecutionContext(deadline=deadline)
-        initial_state: dict[str, Any] = {
-            "messages": [HumanMessage(content=question)],
-            "question_id": question_id,
-            "question": question,
-            "domain_results": [],
-        }
         try:
-            async with asyncio.timeout_at(deadline):
-                async with self._capacity:
-                    raw_state = await _invoke_supervisor(
-                        self._supervisor,
-                        initial_state,
-                        context=context,
-                    )
-                    state = _validate_supervisor_state(
-                        raw_state,
-                        question_id=question_id,
-                        question=question,
-                    )
-                    try:
-                        answer = build_agent_answer(state["messages"])
-                    except ValueError:
-                        raise FinalAnswerMissingError(
-                            "Main Supervisor의 최종 자연어 답변이 없습니다."
-                        ) from None
-        except TimeoutError:
-            raise AnswerServiceTimeoutError(
-                "Answer Service 요청 전체 실행 시간이 초과됐습니다."
+            self._admission.get_nowait()
+        except asyncio.QueueEmpty:
+            raise AnswerServiceOverloadedError(
+                "Answer Service 요청 대기열이 가득 찼습니다."
             ) from None
+
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + self._config.answer_timeout_seconds
+            context = ExecutionContext(deadline=deadline)
+            initial_state: dict[str, Any] = {
+                "messages": [HumanMessage(content=question)],
+                "question_id": question_id,
+                "question": question,
+                "domain_results": [],
+            }
+            try:
+                async with asyncio.timeout_at(deadline):
+                    async with self._capacity:
+                        raw_state = await _invoke_supervisor(
+                            self._supervisor,
+                            initial_state,
+                            context=context,
+                        )
+                        state = _validate_supervisor_state(
+                            raw_state,
+                            question_id=question_id,
+                            question=question,
+                        )
+                        try:
+                            answer = build_agent_answer(state["messages"])
+                        except ValueError:
+                            raise FinalAnswerMissingError(
+                                "Main Supervisor의 최종 자연어 답변이 없습니다."
+                            ) from None
+            except TimeoutError:
+                raise AnswerServiceTimeoutError(
+                    "Answer Service 요청 전체 실행 시간이 초과됐습니다."
+                ) from None
+        finally:
+            self._admission.put_nowait(None)
 
         return AnswerServiceResult(answer=answer, state=state)
 

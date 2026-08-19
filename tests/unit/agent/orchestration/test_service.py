@@ -11,6 +11,7 @@ from pension_agent.agent.contracts import DomainResult
 from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.orchestration import (
     AnswerService,
+    AnswerServiceOverloadedError,
     AnswerServiceTimeoutError,
     FinalAnswerMissingError,
     InvalidSupervisorResultError,
@@ -238,6 +239,33 @@ async def test_answer_service_limits_concurrent_requests_and_waits_for_capacity(
     assert [result.state["question_id"] for result in results] == ["Q-0", "Q-1", "Q-2"]
     assert supervisor.calls == 3
     assert supervisor.max_active == 2
+
+
+async def test_answer_service_rejects_above_bounded_admission_limit() -> None:
+    supervisor = BlockingSupervisor()
+    service = AnswerService(
+        supervisor,
+        config=AgentRuntimeConfig(
+            max_concurrent_answers=1,
+            max_pending_answers=0,
+            answer_timeout_seconds=1,
+        ),
+    )
+    active = asyncio.create_task(service.run(question_id="Q-active", question="질문"))
+    await supervisor.started.wait()
+
+    rejected = await asyncio.gather(
+        *(service.run(question_id=f"Q-overflow-{index}", question="질문") for index in range(100)),
+        return_exceptions=True,
+    )
+
+    assert all(isinstance(result, AnswerServiceOverloadedError) for result in rejected)
+    assert supervisor.calls == 1
+    assert supervisor.max_active == 1
+
+    supervisor.release.set()
+    result = await active
+    assert result.state["question_id"] == "Q-active"
 
 
 async def test_answer_service_deadline_includes_capacity_wait_and_graph_execution() -> None:

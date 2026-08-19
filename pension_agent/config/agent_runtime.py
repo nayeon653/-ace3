@@ -9,6 +9,7 @@ class AgentRuntimeConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     max_concurrent_answers: int = Field(default=4, ge=1, le=32)
+    max_pending_answers: int = Field(default=64, ge=0, le=512)
     max_concurrent_hcx_calls: int = Field(default=4, ge=1, le=32)
     max_concurrent_embedding_calls: int = Field(default=4, ge=1, le=32)
     max_concurrent_qdrant_calls: int = Field(default=4, ge=1, le=32)

@@ -8,6 +8,7 @@ from pension_agent.agent.orchestration.domain_tool import (
 from pension_agent.agent.orchestration.service import (
     AnswerService,
     AnswerServiceError,
+    AnswerServiceOverloadedError,
     AnswerServiceResult,
     AnswerServiceTimeoutError,
     FinalAnswerMissingError,
@@ -23,6 +24,7 @@ from pension_agent.agent.orchestration.supervisor import (
 __all__ = [
     "AnswerService",
     "AnswerServiceError",
+    "AnswerServiceOverloadedError",
     "AnswerServiceResult",
     "AnswerServiceTimeoutError",
     "DomainRunner",

@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage
 from pension_agent.agent.contracts import AgentAnswer, DomainResult
 from pension_agent.agent.orchestration import (
     AnswerService,
+    AnswerServiceOverloadedError,
     AnswerServiceResult,
     SupervisorState,
 )
@@ -242,6 +243,22 @@ def test_answer_failure_returns_sanitized_internal_error(
     assert str(error) not in response.text
 
 
+def test_answer_overload_returns_sanitized_service_unavailable(
+    client: TestClient,
+    service: FakeAnswerService,
+) -> None:
+    service.error = AnswerServiceOverloadedError("내부 대기열 상태")
+
+    response = client.get(
+        "/answer",
+        params={"question_id": "Q-001", "question": "질문"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "현재 처리 가능한 요청 수를 초과했습니다."}
+    assert "내부 대기열 상태" not in response.text
+
+
 def test_health_returns_commit_without_running_answer_service(
     client: TestClient,
     application: FastAPI,
@@ -300,3 +317,4 @@ def test_openapi_describes_public_contract(client: TestClient) -> None:
     assert all(answer_properties[field]["description"] for field in REQUIRED_KEYS)
     assert answer_operation["responses"]["400"]["description"]
     assert answer_operation["responses"]["500"]["description"]
+    assert answer_operation["responses"]["503"]["description"]
