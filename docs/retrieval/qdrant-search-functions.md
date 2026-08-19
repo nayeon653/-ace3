@@ -46,7 +46,7 @@ Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, �
 안의 추가 필터를 선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
 임베딩하고 공용 `SearchQuery`를 만든 뒤 `ChunkRetriever`에 위임한다. Sparse 검색과
 청크 조회는 임베더를 호출하지 않는다. 첫 모델 호출은 `tool_choice=required`로 검색
-Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 4회, 검색 Tool 호출을
+Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 6회, 검색 Tool 호출을
 3회로 제한한다.
 
 ```mermaid
