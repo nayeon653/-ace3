@@ -14,6 +14,7 @@ class SearchAgentConfig(BaseModel):
 
     max_model_calls: int = Field(ge=2, le=10)
     max_tool_calls: int = Field(ge=1, le=9)
+    max_concurrency: int = Field(default=4, ge=1, le=32)
     timeout_seconds: float = Field(default=45.0, gt=0, le=300)
     default_search_mode: SearchMode
     default_result_limit: int = Field(ge=1, le=100)

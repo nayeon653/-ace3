@@ -6,6 +6,7 @@ from pension_agent.core import SearchMode
 DEFAULT_SEARCH_AGENT_CONFIG = SearchAgentConfig(
     max_model_calls=6,
     max_tool_calls=3,
+    max_concurrency=4,
     timeout_seconds=45.0,
     default_search_mode=SearchMode.HYBRID,
     default_result_limit=10,

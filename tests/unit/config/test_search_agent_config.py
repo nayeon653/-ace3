@@ -11,6 +11,8 @@ def test_default_search_agent_config_is_versioned_and_immutable() -> None:
     assert DEFAULT_SEARCH_AGENT_CONFIG == SearchAgentConfig(
         max_model_calls=6,
         max_tool_calls=3,
+        max_concurrency=4,
+        timeout_seconds=45.0,
         default_search_mode=SearchMode.HYBRID,
         default_result_limit=10,
         default_neighbor_before=1,
