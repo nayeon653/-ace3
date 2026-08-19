@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
+from concurrent.futures import Future, TimeoutError
 from dataclasses import dataclass, field
 from threading import BoundedSemaphore
 from typing import Annotated, Any, NotRequired, Protocol, cast
@@ -21,6 +21,7 @@ from langchain.messages import AIMessage, HumanMessage, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langgraph.types import Command
+from langsmith.utils import ContextThreadPoolExecutor
 from pydantic import Field, TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import (
@@ -135,13 +136,13 @@ class DomainAgent:
     graph: DomainGraph
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG
     max_workers: int = 3
-    _executor: ThreadPoolExecutor = field(init=False, repr=False)
+    _executor: ContextThreadPoolExecutor = field(init=False, repr=False)
     _capacity: BoundedSemaphore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.max_workers < 1:
             raise ValueError("Domain Agent worker 수는 1 이상이어야 합니다.")
-        self._executor = ThreadPoolExecutor(
+        self._executor = ContextThreadPoolExecutor(
             max_workers=self.max_workers,
             thread_name_prefix=f"{self.domain}-agent",
         )

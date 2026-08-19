@@ -4,11 +4,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from threading import Event
 from typing import Any, ClassVar, cast
+from uuid import UUID
 
 import pytest
 from langchain.messages import AIMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
+from langsmith import RunTree, get_current_run_tree, tracing_context
 
 from pension_agent.agent.contracts import DomainName, Permission, validate_domain_result
 from pension_agent.agent.domain_agent import DomainAgent
@@ -393,6 +395,52 @@ def test_domain_agent_rejects_new_work_instead_of_queueing_behind_timeout() -> N
     assert first["execution_status"] == "timeout"
     assert second["execution_status"] == "failed"
     assert "처리 가능한 요청 수" in second["error"]
+
+
+def test_domain_agent_propagates_tracing_context_to_worker() -> None:
+    observed_parent_ids: list[UUID | None] = []
+
+    class ContextRecordingGraph:
+        def invoke(self, input: dict[str, Any], /) -> dict[str, Any]:
+            del input
+            current_run = get_current_run_tree()
+            observed_parent_ids.append(current_run.id if current_run is not None else None)
+            return {
+                "domain_result": {
+                    "domain": "policy",
+                    "execution_status": "completed",
+                    "decision": {
+                        "status": "determined",
+                        "conclusion": "이전할 수 있습니다.",
+                        "missing_conditions": [],
+                    },
+                    "evidence": [],
+                    "calculations": [],
+                    "warnings": [],
+                }
+            }
+
+    agent = DomainAgent(domain="policy", graph=ContextRecordingGraph(), max_workers=1)
+    parents = [
+        RunTree(
+            name=f"request-{index}",
+            inputs={},
+            project_name="unit-test",
+            ls_client=object(),
+        )
+        for index in range(2)
+    ]
+    try:
+        for parent in parents:
+            with tracing_context(parent=parent, enabled=False):
+                result = agent(
+                    {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
+                )
+    finally:
+        agent.close()
+
+    assert result["execution_status"] == "completed"
+    assert observed_parent_ids == [parent.id for parent in parents]
 
 
 def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() -> None:

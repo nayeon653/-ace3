@@ -2,13 +2,14 @@
 
 import logging
 from collections.abc import Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
+from concurrent.futures import Future, TimeoutError
 from dataclasses import dataclass, field
 from threading import BoundedSemaphore
 from time import monotonic
 from typing import Any, Protocol
 
 from langchain.messages import AIMessage, ToolMessage
+from langsmith.utils import ContextThreadPoolExecutor
 from pydantic import TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import Permission
@@ -36,13 +37,13 @@ class SearchAgentAdapter:
     graph: SearchGraph
     config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG
     max_workers: int = 4
-    _executor: ThreadPoolExecutor = field(init=False, repr=False)
+    _executor: ContextThreadPoolExecutor = field(init=False, repr=False)
     _capacity: BoundedSemaphore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.max_workers < 1:
             raise ValueError("Search Agent worker 수는 1 이상이어야 합니다.")
-        self._executor = ThreadPoolExecutor(
+        self._executor = ContextThreadPoolExecutor(
             max_workers=self.max_workers,
             thread_name_prefix="search-agent",
         )

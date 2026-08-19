@@ -4,6 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from time import sleep
 from typing import Any
+from uuid import UUID
+
+from langsmith import RunTree, get_current_run_tree, tracing_context
 
 from pension_agent.agent.contracts import Permission
 from pension_agent.agent.search import SearchAgentAdapter, SearchResult
@@ -154,3 +157,34 @@ def test_adapter_capacity_wait_uses_the_search_deadline() -> None:
     assert first.execution_status == "timeout"
     assert second.execution_status == "timeout"
     assert second.error == "Search Agent 실행 시간이 초과됐습니다."
+
+
+def test_adapter_propagates_tracing_context_to_worker() -> None:
+    observed_parent_ids: list[UUID | None] = []
+
+    class ContextRecordingGraph:
+        def invoke(self, input: dict[str, Any], /) -> dict[str, Any]:
+            del input
+            current_run = get_current_run_tree()
+            observed_parent_ids.append(current_run.id if current_run is not None else None)
+            return {"search_result": SearchResult(execution_status="completed", coverage="none")}
+
+    adapter = SearchAgentAdapter(ContextRecordingGraph(), config=_config(), max_workers=1)
+    parents = [
+        RunTree(
+            name=f"request-{index}",
+            inputs={},
+            project_name="unit-test",
+            ls_client=object(),
+        )
+        for index in range(2)
+    ]
+    try:
+        for parent in parents:
+            with tracing_context(parent=parent, enabled=False):
+                result = adapter.search("근거 검색", permission=Permission.POLICY)
+    finally:
+        adapter.close()
+
+    assert result.execution_status == "completed"
+    assert observed_parent_ids == [parent.id for parent in parents]
