@@ -190,7 +190,7 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 구체 Domain Agent의 선택과 Tool 등록은 `pension_agent/agent/runtime.py`에서 수행한다.
 `orchestration`은 구체 Domain Agent를 import하지 않으며, Domain Agent끼리도 직접
 의존하지 않는다. Search Agent는 저장소 구현 대신 `ChunkRetriever` Port에 의존하고,
-`retrieval/QdrantChunkRetriever`가 Qdrant 접근을 구현한다.
+온라인에서는 `retrieval/AsyncQdrantChunkRetriever`가 Qdrant 접근을 구현한다.
 Policy와 Tax/Payout은 `pension_reference`, Product는 `fund_prospectus` 문서군만
 검색하도록 Agent별 `permissions`를 실행 상태에 주입한다. Search Agent는
 최종 검색 결과 제출 Tool로 선택 ID만 받고 Python이 Qdrant 원본을 재조회한다.
