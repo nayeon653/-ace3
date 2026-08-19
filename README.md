@@ -111,7 +111,8 @@ LangSmith tracing은 기본적으로 꺼져 있습니다. 개발자가 개인 �
 [`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 따릅니다.
 서버 시작 과정에서 HCX-005, bge-m3, Qdrant, Search Agent, Domain Agent 3종,
 Main Supervisor와 `AnswerService`를 프로세스당 한 번 조립하고 모든 `/answer`
-요청에서 재사용합니다.
+요청에서 재사용합니다. 온라인 경로는 HCX, query embedding과 Qdrant까지 native async로
+실행하며 프로세스 단위 동시성 상한과 요청 전체 deadline을 적용합니다.
 
 운영 확인용 `GET /health`는 LLM이나 검색 시스템을 호출하지 않습니다. 평가용
 `GET /answer`의 정확한 요청·응답과 오류 계약은

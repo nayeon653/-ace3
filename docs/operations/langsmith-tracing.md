@@ -81,10 +81,16 @@ trace tree에 기록한다.
 
 정상적인 `/answer` 요청 하나에는 `main_supervisor` root trace가 정확히 하나 생성된다.
 Supervisor가 호출한 Domain Agent와 각 Domain Agent가 호출한 Search Agent는 별도 root가
-아니라 해당 `main_supervisor` 아래의 하위 run으로 연결된다. Domain·Search Agent는 timeout과
-동시 실행 제한을 위해 worker thread에서 실행되므로, 실행기는 요청별 tracing context를
-worker에 복사해야 한다. 이 전파가 끊기면 다음처럼 하나의 API 요청이 여러 root trace로
-잘못 분리된다.
+아니라 해당 `main_supervisor` 아래의 하위 run으로 연결된다. 온라인 Agent 경로는
+`ainvoke()`와 native async Tool을 사용한다. Python은 `asyncio.Task`를 만들 때 현재
+`contextvars` context를 복사하므로, 동시에 실행되는 Domain·Search task도 각 요청의
+LangSmith parent를 자연스럽게 유지한다. 요청의 absolute deadline도 같은
+`ExecutionContext`로 Supervisor에서 Domain과 Search까지 전달한다.
+
+Kiwi 형태소 분석만 CPU 작업이라 process-wide 단일 thread로 offload한다. 이 작은
+executor는 submit 시 호출 task의 context를 복사하며, 전체 Domain/Search graph를 별도
+worker에서 실행하지 않는다. async task context가 누락되거나 서로 섞이면 다음처럼
+하나의 API 요청이 여러 root trace로 잘못 분리될 수 있다.
 
 ```text
 main_supervisor   (root)
@@ -101,6 +107,10 @@ main_supervisor
         └── search_documents
             └── search_agent
 ```
+
+회귀 테스트는 서로 다른 parent를 가진 두 async task를 실제로 겹쳐 실행해 parent ID가
+섞이지 않는지 확인한다. timeout이나 외부 취소가 발생해도 해당 run은 원래 trace tree
+안에서 종료되어야 한다.
 
 현재 구조에서는 고객정보나 개인정보가 들어오지 않으므로 고정 smoke와 개발자가 직접
 작성한 질문을 구분하지 않는다. tracing이 켜진 로컬 프로세스의 모든 Agent 실행이 같은
