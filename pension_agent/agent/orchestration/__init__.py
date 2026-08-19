@@ -7,6 +7,7 @@ from pension_agent.agent.orchestration.domain_tool import (
 )
 from pension_agent.agent.orchestration.service import (
     AnswerService,
+    AnswerServiceClosedError,
     AnswerServiceError,
     AnswerServiceOverloadedError,
     AnswerServiceResult,
@@ -23,6 +24,7 @@ from pension_agent.agent.orchestration.supervisor import (
 
 __all__ = [
     "AnswerService",
+    "AnswerServiceClosedError",
     "AnswerServiceError",
     "AnswerServiceOverloadedError",
     "AnswerServiceResult",

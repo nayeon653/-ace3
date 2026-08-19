@@ -48,6 +48,10 @@ class AnswerServiceOverloadedError(AnswerServiceError):
     """프로세스의 bounded answer 대기열까지 모두 사용 중인 경우."""
 
 
+class AnswerServiceClosedError(AnswerServiceError):
+    """종료가 시작된 프로세스 공용 Service에 새 요청이 들어온 경우."""
+
+
 class InvalidSupervisorResultError(AnswerServiceError):
     """Supervisor가 공통 계약에 맞지 않는 최종 상태를 반환한 경우."""
 
@@ -82,12 +86,17 @@ class AnswerService:
         self._admission = asyncio.Queue[None](maxsize=admission_limit)
         for _ in range(admission_limit):
             self._admission.put_nowait(None)
+        self._active_tasks: set[asyncio.Task[Any]] = set()
+        self._shutdown_lock = asyncio.Lock()
         self._resource_close_lock = asyncio.Lock()
         self._resources_closed = False
+        self._closed = False
 
     async def run(self, *, question_id: str, question: str) -> AnswerServiceResult:
         """Supervisor를 실행하고 검증된 답변과 상태를 반환한다."""
 
+        if self._closed:
+            raise AnswerServiceClosedError("Answer Service가 이미 종료됐습니다.")
         try:
             self._admission.get_nowait()
         except asyncio.QueueEmpty:
@@ -99,6 +108,10 @@ class AnswerService:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self._config.answer_timeout_seconds
             context = ExecutionContext(deadline=deadline)
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                self._active_tasks.add(current_task)
+
             initial_state: dict[str, Any] = {
                 "messages": [HumanMessage(content=question)],
                 "question_id": question_id,
@@ -106,37 +119,72 @@ class AnswerService:
                 "domain_results": [],
             }
             try:
-                async with asyncio.timeout_at(deadline):
-                    async with self._capacity:
-                        raw_state = await _invoke_supervisor(
-                            self._supervisor,
-                            initial_state,
-                            context=context,
-                        )
-                        state = _validate_supervisor_state(
-                            raw_state,
-                            question_id=question_id,
-                            question=question,
-                        )
-                        try:
-                            answer = build_agent_answer(state["messages"])
-                        except ValueError:
-                            raise FinalAnswerMissingError(
-                                "Main Supervisor의 최종 자연어 답변이 없습니다."
-                            ) from None
-            except TimeoutError:
-                raise AnswerServiceTimeoutError(
-                    "Answer Service 요청 전체 실행 시간이 초과됐습니다."
-                ) from None
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        async with self._capacity:
+                            if self._closed:
+                                raise AnswerServiceClosedError(
+                                    "Answer Service가 이미 종료됐습니다."
+                                )
+                            raw_state = await _invoke_supervisor(
+                                self._supervisor,
+                                initial_state,
+                                context=context,
+                            )
+                            state = _validate_supervisor_state(
+                                raw_state,
+                                question_id=question_id,
+                                question=question,
+                            )
+                            try:
+                                answer = build_agent_answer(state["messages"])
+                            except ValueError:
+                                raise FinalAnswerMissingError(
+                                    "Main Supervisor의 최종 자연어 답변이 없습니다."
+                                ) from None
+                except TimeoutError:
+                    raise AnswerServiceTimeoutError(
+                        "Answer Service 요청 전체 실행 시간이 초과됐습니다."
+                    ) from None
+            finally:
+                if current_task is not None:
+                    self._active_tasks.discard(current_task)
         finally:
             self._admission.put_nowait(None)
 
         return AnswerServiceResult(answer=answer, state=state)
 
     async def aclose(self) -> None:
-        """runtime이 소유한 외부 client를 한 번만 정리한다."""
+        """요청을 먼저 회수하고 외부 client를 한 번만 정리한다."""
 
-        await self._close_resources()
+        async with self._shutdown_lock:
+            if self._resources_closed:
+                return
+
+            self._closed = True
+            current_task = asyncio.current_task()
+            active_tasks = {
+                task for task in self._active_tasks if task is not current_task and not task.done()
+            }
+            for task in active_tasks:
+                task.cancel()
+            if active_tasks:
+                done, pending = await asyncio.wait(
+                    active_tasks,
+                    timeout=self._config.shutdown_timeout_seconds,
+                )
+                for task in done:
+                    if not task.cancelled():
+                        task.exception()
+                if pending:
+                    logger.warning(
+                        "Answer Service 종료 제한 시간 안에 %d개 요청이 끝나지 않아 "
+                        "실행 중 client를 닫지 않고 정리를 건너뜁니다.",
+                        len(pending),
+                    )
+                    return
+
+            await self._close_resources()
 
     async def _close_resources(self) -> None:
         """runtime 소유 리소스를 등록된 의존성 역순으로 한 번만 닫는다."""

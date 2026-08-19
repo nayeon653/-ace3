@@ -11,6 +11,7 @@ from pension_agent.agent.contracts import DomainResult
 from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.orchestration import (
     AnswerService,
+    AnswerServiceClosedError,
     AnswerServiceOverloadedError,
     AnswerServiceTimeoutError,
     FinalAnswerMissingError,
@@ -304,3 +305,97 @@ async def test_answer_service_cancellation_releases_capacity() -> None:
 
     assert result.state["question_id"] == "Q-2"
     assert supervisor.max_active == 1
+
+
+async def test_answer_service_shutdown_cancels_requests_before_closing_clients() -> None:
+    events: list[str] = []
+
+    class CancellationRecordingSupervisor(BlockingSupervisor):
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: ExecutionContext,
+        ) -> Mapping[str, Any]:
+            try:
+                return await super().ainvoke(input, context=context)
+            except asyncio.CancelledError:
+                events.append("request-cancelled")
+                raise
+
+    async def close_client() -> None:
+        events.append("client-closed")
+
+    supervisor = CancellationRecordingSupervisor()
+    service = AnswerService(supervisor, close_callbacks=(close_client,))
+    request = asyncio.create_task(service.run(question_id="Q-1", question="질문"))
+    await supervisor.started.wait()
+
+    await service.aclose()
+
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    assert events == ["request-cancelled", "client-closed"]
+    with pytest.raises(AnswerServiceClosedError):
+        await service.run(question_id="Q-2", question="질문")
+
+    await service.aclose()
+    assert events == ["request-cancelled", "client-closed"]
+
+
+async def test_shutdown_never_closes_client_before_noncooperative_request_finishes() -> None:
+    events: list[str] = []
+    started = asyncio.Event()
+    release = asyncio.Event()
+    client_closed = asyncio.Event()
+
+    class SlowCancellationSupervisor:
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: ExecutionContext,
+        ) -> Mapping[str, Any]:
+            del context
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                events.append("request-cancelled")
+                await release.wait()
+            events.append("request-finished")
+            return {
+                "messages": [AIMessage(content="완료했습니다.")],
+                "question_id": input["question_id"],
+                "question": input["question"],
+                "domain_results": [],
+            }
+
+    async def close_client() -> None:
+        events.append("client-closed")
+        client_closed.set()
+
+    service = AnswerService(
+        SlowCancellationSupervisor(),
+        config=AgentRuntimeConfig(shutdown_timeout_seconds=0.01),
+        close_callbacks=(close_client,),
+    )
+    request = asyncio.create_task(service.run(question_id="Q-1", question="질문"))
+    await started.wait()
+
+    await service.aclose()
+
+    assert events == ["request-cancelled"]
+    assert not client_closed.is_set()
+
+    release.set()
+    result = await request
+    assert not client_closed.is_set()
+    await service.aclose()
+
+    assert result.state["question_id"] == "Q-1"
+    assert events == ["request-cancelled", "request-finished", "client-closed"]
+    await service.aclose()
+    assert events == ["request-cancelled", "request-finished", "client-closed"]
