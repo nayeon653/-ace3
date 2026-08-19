@@ -9,6 +9,7 @@ from langgraph.types import Command
 from pydantic import Field
 
 from pension_agent.agent.contracts import document_types_for_permission, validate_permission
+from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.search.ports import ChunkRetriever
 from pension_agent.agent.search.schemas import (
     SearchChunkPayload,
@@ -33,7 +34,7 @@ def create_search_result_tool(*, retriever: ChunkRetriever) -> BaseTool:
             "검색 한계만 제출하며 본문과 메타데이터는 제출하지 않는다."
         ),
     )
-    def submit_search_result(
+    async def submit_search_result(
         coverage: Annotated[
             SearchCoverage,
             Field(description="근거 충족도: sufficient, partial, none 중 하나"),
@@ -46,7 +47,7 @@ def create_search_result_tool(*, retriever: ChunkRetriever) -> BaseTool:
             list[str],
             Field(description="확인하지 못한 범위와 검색 한계"),
         ],
-        runtime: ToolRuntime[None, SearchAgentState],
+        runtime: ToolRuntime[ExecutionContext, SearchAgentState],
     ) -> Command | str:
         try:
             selection = SearchSelection(
@@ -68,7 +69,7 @@ def create_search_result_tool(*, retriever: ChunkRetriever) -> BaseTool:
         try:
             permission = validate_permission(state.get("permission"))
             selected_chunks = [
-                _reload_chunk(
+                await _reload_chunk(
                     retriever,
                     chunk_id,
                     document_types=document_types_for_permission(permission),
@@ -103,13 +104,13 @@ def create_search_result_tool(*, retriever: ChunkRetriever) -> BaseTool:
     return submit_search_result
 
 
-def _reload_chunk(
+async def _reload_chunk(
     retriever: ChunkRetriever,
     chunk_id: str,
     *,
     document_types: frozenset[DocumentType],
 ) -> SearchChunkPayload:
-    chunk = retriever.get_chunk(chunk_id, document_types=document_types)
+    chunk = await retriever.get_chunk(chunk_id, document_types=document_types)
     if chunk is None or chunk.chunk_id != chunk_id:
         raise RetrievalError("선택한 청크를 원본에서 확인할 수 없습니다.")
     return _chunk_payload(chunk)
@@ -128,7 +129,7 @@ def _chunk_payload(chunk: RetrievedChunk) -> SearchChunkPayload:
 
 
 def _completed_command(
-    runtime: ToolRuntime[None, SearchAgentState],
+    runtime: ToolRuntime[ExecutionContext, SearchAgentState],
     result: SearchResult,
 ) -> Command:
     if runtime.tool_call_id is None:

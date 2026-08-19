@@ -3,10 +3,11 @@
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
+import pytest
 from langchain.messages import AIMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
-from qdrant_client import QdrantClient, models
+from qdrant_client import AsyncQdrantClient, models
 
 from pension_agent.agent.orchestration import (
     AnswerService,
@@ -20,7 +21,7 @@ from pension_agent.agent.policy import (
 )
 from pension_agent.agent.search import SearchAgentAdapter, create_search_agent
 from pension_agent.api.presentation import build_answer_response
-from pension_agent.retrieval import QdrantChunkRetriever
+from pension_agent.retrieval import AsyncQdrantChunkRetriever
 
 CHUNK_ID = "550e8400-e29b-41d4-a716-446655440000"
 
@@ -38,18 +39,18 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
 
 
 class FakeEmbedder:
-    def embed_query(self, text: str) -> list[float]:
+    async def aembed_query(self, text: str) -> list[float]:
         assert text == "IRP 이전 절차"
         return [1.0, 0.0]
 
 
-def _qdrant() -> QdrantClient:
-    client = QdrantClient(":memory:")
-    client.create_collection(
+async def _qdrant() -> AsyncQdrantClient:
+    client = AsyncQdrantClient(":memory:")
+    await client.create_collection(
         collection_name="pension_documents_v1",
         vectors_config={"dense": models.VectorParams(size=2, distance=models.Distance.COSINE)},
     )
-    client.upsert(
+    await client.upsert(
         collection_name="pension_documents_v1",
         points=[
             models.PointStruct(
@@ -73,9 +74,15 @@ def _qdrant() -> QdrantClient:
     return client
 
 
-def test_main_domain_search_qdrant_to_five_field_response() -> None:
-    client = _qdrant()
-    retriever = QdrantChunkRetriever(client, collection_name="pension_documents_v1")
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_main_domain_search_qdrant_to_five_field_response() -> None:
+    client = await _qdrant()
+    retriever = AsyncQdrantChunkRetriever(client, collection_name="pension_documents_v1")
     search_model = ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -174,15 +181,14 @@ def test_main_domain_search_qdrant_to_five_field_response() -> None:
     service = AnswerService(create_main_supervisor(model=supervisor_model, tools=[policy_tool]))
 
     try:
-        result = service.run(
+        result = await service.run(
             question_id="Q-E2E-001",
             question="IRP 계좌를 이전하려면 어떻게 해야 하나요?",
         )
         response = build_answer_response(result).model_dump()
     finally:
-        policy_agent.close()
-        search_adapter.close()
-        client.close()
+        await service.aclose()
+        await client.close()
 
     assert set(response) == {
         "question_id",

@@ -2,7 +2,12 @@
 
 from pension_agent.agent.search.adapter import SearchAgentAdapter, SearchGraph
 from pension_agent.agent.search.agent import create_search_agent, load_search_agent_prompt
-from pension_agent.agent.search.ports import ChunkRetriever, QueryEmbedder
+from pension_agent.agent.search.ports import (
+    ChunkRetriever,
+    LimitedChunkRetriever,
+    LimitedQueryEmbedder,
+    QueryEmbedder,
+)
 from pension_agent.agent.search.result_tool import (
     SUBMIT_SEARCH_RESULT_TOOL_NAME,
     create_search_result_tool,
@@ -30,6 +35,8 @@ __all__ = [
     "SUBMIT_SEARCH_RESULT_TOOL_NAME",
     "ChunkRetriever",
     "GetChunkPayload",
+    "LimitedChunkRetriever",
+    "LimitedQueryEmbedder",
     "NeighborChunksPayload",
     "QueryEmbedder",
     "QueryEmbeddingError",

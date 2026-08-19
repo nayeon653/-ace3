@@ -1,5 +1,6 @@
 """Tool 기반 Search Agent 계약을 검증한다."""
 
+import asyncio
 import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
@@ -13,6 +14,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 
 from pension_agent.agent.contracts import Permission
+from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.search import (
     SearchHitsPayload,
     SearchToolErrorPayload,
@@ -55,7 +57,7 @@ class FakeEmbedder:
     error: Exception | None = None
     calls: list[str] = field(default_factory=list)
 
-    def embed_query(self, text: str) -> list[float]:
+    async def aembed_query(self, text: str) -> list[float]:
         self.calls.append(text)
         if self.error is not None:
             raise self.error
@@ -84,7 +86,7 @@ class FakeChunkRetriever:
     chunk_ids: list[tuple[str, frozenset[DocumentType] | None]] = field(default_factory=list)
     search_error: Exception | None = None
 
-    def search_chunks(
+    async def search_chunks(
         self,
         query: SearchQuery,
         *,
@@ -96,7 +98,7 @@ class FakeChunkRetriever:
         self.chunk_searches.append((query, filters, limit))
         return self.hits
 
-    def search_within_document(
+    async def search_within_document(
         self,
         query: SearchQuery,
         *,
@@ -107,7 +109,7 @@ class FakeChunkRetriever:
         self.document_searches.append((query, source_file_name, document_types, limit))
         return self.hits
 
-    def get_neighbor_chunks(
+    async def get_neighbor_chunks(
         self,
         request: NeighborRequest,
         *,
@@ -116,7 +118,7 @@ class FakeChunkRetriever:
         self.neighbor_requests.append((request, document_types))
         return self.chunks
 
-    def get_chunk(
+    async def get_chunk(
         self,
         chunk_id: str,
         *,
@@ -163,19 +165,33 @@ def _tools(
     return {tool.name: tool for tool in tools}, resolved_embedder, resolved_retriever
 
 
+def _ainvoke_tool(tool: BaseTool, arguments: dict[str, object]) -> Any:
+    return asyncio.run(tool.ainvoke(arguments))
+
+
+def _ainvoke_agent(agent: Any, state: dict[str, Any]) -> dict[str, Any]:
+    return asyncio.run(
+        agent.ainvoke(
+            state,
+            context=ExecutionContext(deadline=float("inf")),
+        )
+    )
+
+
 @pytest.mark.parametrize("mode", [SearchMode.DENSE, SearchMode.HYBRID])
 def test_search_chunks_tool_embeds_and_serializes_hits(mode: SearchMode) -> None:
     chunk = _chunk()
     retriever = FakeChunkRetriever(hits=[SearchHit(chunk=chunk, score=0.8)])
     tools, embedder, _retriever = _tools(retriever=retriever)
 
-    content = tools["search_chunks"].invoke(
+    content = _ainvoke_tool(
+        tools["search_chunks"],
         {
             "text": "  IRP 이전 절차  ",
             "mode": mode.value,
             "document_type": DocumentType.PENSION_REFERENCE.value,
             "limit": 7,
-        }
+        },
     )
 
     payload = SearchHitsPayload.model_validate_json(content)
@@ -192,8 +208,9 @@ def test_sparse_search_tool_skips_embedding() -> None:
     embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
     tools, _embedder, retriever = _tools(embedder=embedder)
 
-    content = tools["search_chunks"].invoke(
-        {"text": "IRP 이전 절차", "mode": SearchMode.SPARSE.value}
+    content = _ainvoke_tool(
+        tools["search_chunks"],
+        {"text": "IRP 이전 절차", "mode": SearchMode.SPARSE.value},
     )
 
     assert json.loads(content) == {"hits": []}
@@ -206,11 +223,12 @@ def test_sparse_search_tool_skips_embedding() -> None:
 def test_search_tool_rejects_document_type_outside_permissions_before_embedding() -> None:
     tools, embedder, retriever = _tools()
 
-    content = tools["search_chunks"].invoke(
+    content = _ainvoke_tool(
+        tools["search_chunks"],
         {
             "text": "연금 상품 수수료",
             "document_type": DocumentType.FUND_PROSPECTUS.value,
-        }
+        },
     )
 
     assert json.loads(content) == {"error": "허용되지 않은 문서 유형입니다."}
@@ -228,7 +246,7 @@ def test_search_tool_fails_closed_without_permissions() -> None:
         )
     }
 
-    content = tools["search_chunks"].invoke({"text": "IRP 이전", "mode": "sparse"})
+    content = _ainvoke_tool(tools["search_chunks"], {"text": "IRP 이전", "mode": "sparse"})
 
     assert json.loads(content) == {"error": "검색 문서 접근 권한이 필요합니다."}
     assert retriever.chunk_searches == []
@@ -237,13 +255,14 @@ def test_search_tool_fails_closed_without_permissions() -> None:
 def test_document_search_tool_preserves_document_scope() -> None:
     tools, embedder, retriever = _tools()
 
-    tools["search_within_document"].invoke(
+    _ainvoke_tool(
+        tools["search_within_document"],
         {
             "text": "중도해지",
             "source_file_name": " guide.pdf ",
             "mode": SearchMode.DENSE.value,
             "limit": 4,
-        }
+        },
     )
 
     query, source_file_name, document_types, limit = retriever.document_searches[0]
@@ -260,10 +279,11 @@ def test_lookup_tools_delegate_without_embedding() -> None:
     retriever = FakeChunkRetriever(chunks=[chunk], chunk=chunk)
     tools, _embedder, _retriever = _tools(embedder=embedder, retriever=retriever)
 
-    neighbor_content = tools["get_neighbor_chunks"].invoke(
-        {"source_file_name": "guide.pdf", "chunk_index": 2, "before": 1, "after": 1}
+    neighbor_content = _ainvoke_tool(
+        tools["get_neighbor_chunks"],
+        {"source_file_name": "guide.pdf", "chunk_index": 2, "before": 1, "after": 1},
     )
-    chunk_content = tools["get_chunk"].invoke({"chunk_id": chunk.chunk_id})
+    chunk_content = _ainvoke_tool(tools["get_chunk"], {"chunk_id": chunk.chunk_id})
 
     assert json.loads(neighbor_content)["chunks"][0]["chunk_id"] == chunk.chunk_id
     assert json.loads(chunk_content)["chunk"]["content"] == chunk.content
@@ -304,7 +324,7 @@ def test_search_tools_reject_retriever_results_outside_permissions(
     )
     tools, _embedder, _retriever = _tools(retriever=retriever)
 
-    content = tools[tool_name].invoke(arguments)
+    content = _ainvoke_tool(tools[tool_name], arguments)
 
     assert json.loads(content) == {"error": "검색 결과가 문서 접근 권한을 위반했습니다."}
     assert forbidden_chunk.content not in content
@@ -316,7 +336,7 @@ def test_tool_schema_rejects_invalid_limit_before_embedding(limit: int) -> None:
     tools, _embedder, retriever = _tools(embedder=embedder)
 
     with pytest.raises(ValidationError):
-        tools["search_chunks"].invoke({"text": "IRP 이전", "limit": limit})
+        _ainvoke_tool(tools["search_chunks"], {"text": "IRP 이전", "limit": limit})
 
     assert embedder.calls == []
     assert retriever.chunk_searches == []
@@ -326,7 +346,10 @@ def test_empty_document_name_returns_safe_tool_error_before_embedding() -> None:
     embedder = FakeEmbedder(error=RuntimeError("호출되면 안 됩니다."))
     tools, _embedder, retriever = _tools(embedder=embedder)
 
-    content = tools["search_within_document"].invoke({"text": "IRP 이전", "source_file_name": "  "})
+    content = _ainvoke_tool(
+        tools["search_within_document"],
+        {"text": "IRP 이전", "source_file_name": "  "},
+    )
 
     assert json.loads(content) == {"error": "원본 파일명 필터는 비어 있을 수 없습니다."}
     assert embedder.calls == []
@@ -345,7 +368,7 @@ def test_empty_document_name_returns_safe_tool_error_before_embedding() -> None:
 def test_embedding_failure_is_sanitized_in_tool_message(embedder: FakeEmbedder) -> None:
     tools, _embedder, retriever = _tools(embedder=embedder)
 
-    content = tools["search_chunks"].invoke({"text": "IRP 이전"})
+    content = _ainvoke_tool(tools["search_chunks"], {"text": "IRP 이전"})
 
     payload = SearchToolErrorPayload.model_validate_json(content)
     assert payload.error
@@ -365,7 +388,7 @@ def test_unexpected_retriever_error_is_sanitized_in_tool_message(error: Exceptio
     retriever = FakeChunkRetriever(search_error=error)
     tools, _embedder, _retriever = _tools(retriever=retriever)
 
-    content = tools["search_chunks"].invoke({"text": "IRP 이전"})
+    content = _ainvoke_tool(tools["search_chunks"], {"text": "IRP 이전"})
 
     assert json.loads(content) == {"error": "검색 Tool 실행에 실패했습니다."}
     assert "secret" not in content
@@ -376,7 +399,7 @@ def test_empty_retrieval_error_uses_safe_fallback(message: str) -> None:
     retriever = FakeChunkRetriever(search_error=RetrievalError(message))
     tools, _embedder, _retriever = _tools(retriever=retriever)
 
-    content = tools["search_chunks"].invoke({"text": "IRP 이전"})
+    content = _ainvoke_tool(tools["search_chunks"], {"text": "IRP 이전"})
 
     assert json.loads(content) == {"error": "검색 Tool 실행에 실패했습니다."}
 
@@ -384,7 +407,10 @@ def test_empty_retrieval_error_uses_safe_fallback(message: str) -> None:
 def test_invalid_neighbor_request_returns_safe_tool_error() -> None:
     tools, embedder, retriever = _tools()
 
-    content = tools["get_neighbor_chunks"].invoke({"source_file_name": "  ", "chunk_index": 2})
+    content = _ainvoke_tool(
+        tools["get_neighbor_chunks"],
+        {"source_file_name": "  ", "chunk_index": 2},
+    )
 
     assert json.loads(content) == {"error": "인접 청크 조회 범위가 올바르지 않습니다."}
     assert embedder.calls == []
@@ -394,8 +420,9 @@ def test_invalid_neighbor_request_returns_safe_tool_error() -> None:
 def test_neighbor_tool_rejects_combined_range_over_limit() -> None:
     tools, embedder, retriever = _tools()
 
-    content = tools["get_neighbor_chunks"].invoke(
-        {"source_file_name": "guide.pdf", "chunk_index": 2, "before": 99, "after": 99}
+    content = _ainvoke_tool(
+        tools["get_neighbor_chunks"],
+        {"source_file_name": "guide.pdf", "chunk_index": 2, "before": 99, "after": 99},
     )
 
     assert json.loads(content) == {"error": "인접 청크 조회 범위가 올바르지 않습니다."}
@@ -432,8 +459,11 @@ def test_search_tools_use_configured_defaults() -> None:
     )
     tools, embedder, retriever = _tools(config=config)
 
-    tools["search_chunks"].invoke({"text": "IRP 이전"})
-    tools["get_neighbor_chunks"].invoke({"source_file_name": "guide.pdf", "chunk_index": 4})
+    _ainvoke_tool(tools["search_chunks"], {"text": "IRP 이전"})
+    _ainvoke_tool(
+        tools["get_neighbor_chunks"],
+        {"source_file_name": "guide.pdf", "chunk_index": 4},
+    )
 
     query, _filters, limit = retriever.chunk_searches[0]
     assert query.mode is SearchMode.SPARSE
@@ -488,11 +518,12 @@ def test_create_search_agent_binds_tools_and_runs_react_loop() -> None:
     model.bindings.clear()
     agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
 
-    result = agent.invoke(
+    result = _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     tool_messages = [message for message in result["messages"] if isinstance(message, ToolMessage)]
@@ -559,11 +590,12 @@ def test_final_submission_reloads_original_chunk_instead_of_trusting_candidate()
     )
     agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
 
-    result = agent.invoke(
+    result = _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     selected = result["search_result"].selected_chunks[0]
@@ -626,11 +658,12 @@ def test_unobserved_chunk_id_is_rejected_before_none_submission() -> None:
         retriever=FakeChunkRetriever(),
     )
 
-    result = agent.invoke(
+    result = _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "근거 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     assert result["search_result"].coverage == "none"
@@ -691,11 +724,12 @@ def test_final_submission_requires_a_successful_search_tool_call() -> None:
     retriever = FakeChunkRetriever()
     agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
 
-    result = agent.invoke(
+    result = _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "근거 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     early_message = next(
@@ -743,11 +777,12 @@ def test_reload_failure_returns_sanitized_failed_search_result() -> None:
     )
     agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
 
-    result = agent.invoke(
+    result = _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     search_result = result["search_result"]
@@ -777,7 +812,7 @@ def test_search_agent_rejects_invalid_permission_before_model_call(
         **state_update,
     }
 
-    result = agent.invoke(state)
+    result = _ainvoke_agent(agent, state)
 
     assert result["messages"][-1].text == expected_error
     assert retriever.chunk_searches == []
@@ -816,11 +851,12 @@ def test_search_agent_stops_repeated_tool_calls_at_configured_run_limit() -> Non
         config=config,
     )
 
-    result = agent.invoke(
+    result = _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "반복 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     assert len(retriever.chunk_searches) == 2
@@ -860,11 +896,12 @@ def test_parallel_tool_limit_executes_allowed_calls_and_returns_model_answer() -
     )
     agent = create_search_agent(model=model, embedder=FakeEmbedder(), retriever=retriever)
 
-    result = agent.invoke(
+    result = _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "병렬 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     assert len(retriever.chunk_searches) == 3
@@ -920,11 +957,12 @@ def test_search_agent_requires_another_tool_after_tool_error() -> None:
         retriever=FakeChunkRetriever(),
     )
 
-    agent.invoke(
+    _ainvoke_agent(
+        agent,
         {
             "messages": [{"role": "user", "content": "IRP 이전 근거 검색"}],
             "permission": _PENSION_PERMISSION,
-        }
+        },
     )
 
     assert [kwargs["tool_choice"] for _names, kwargs in model.bindings] == [

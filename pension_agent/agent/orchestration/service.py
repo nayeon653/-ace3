@@ -1,7 +1,8 @@
 """HTTP와 분리된 Main Supervisor 실행 경계."""
 
+import asyncio
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -9,8 +10,10 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import AgentAnswer, DomainResult, validate_domain_result
+from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.orchestration.state import SupervisorState
 from pension_agent.agent.orchestration.supervisor import build_agent_answer
+from pension_agent.config import DEFAULT_AGENT_RUNTIME_CONFIG, AgentRuntimeConfig
 
 _DOMAIN_RESULT_ADAPTER = TypeAdapter(DomainResult)
 logger = logging.getLogger(__name__)
@@ -19,7 +22,13 @@ logger = logging.getLogger(__name__)
 class SupervisorRunner(Protocol):
     """Answer Service가 사용하는 최소 Supervisor 실행 계약."""
 
-    def invoke(self, input: dict[str, Any], /) -> Mapping[str, Any]:
+    async def ainvoke(
+        self,
+        input: dict[str, Any],
+        /,
+        *,
+        context: ExecutionContext,
+    ) -> Mapping[str, Any]:
         """초기 상태로 Supervisor를 실행하고 최종 상태를 반환한다."""
 
 
@@ -29,6 +38,10 @@ class AnswerServiceError(RuntimeError):
 
 class SupervisorExecutionError(AnswerServiceError):
     """Supervisor 실행 자체를 완료하지 못한 경우."""
+
+
+class AnswerServiceTimeoutError(AnswerServiceError):
+    """capacity 대기부터 응답 조립까지의 요청 전체 예산을 초과한 경우."""
 
 
 class InvalidSupervisorResultError(AnswerServiceError):
@@ -54,58 +67,83 @@ class AnswerService:
         self,
         supervisor: SupervisorRunner,
         *,
-        close_callbacks: tuple[Callable[[], None], ...] = (),
+        config: AgentRuntimeConfig = DEFAULT_AGENT_RUNTIME_CONFIG,
+        close_callbacks: tuple[Callable[[], Awaitable[None]], ...] = (),
     ) -> None:
         self._supervisor = supervisor
+        self._config = config
         self._close_callbacks = close_callbacks
-        self._closed = False
+        self._capacity = asyncio.Semaphore(config.max_concurrent_answers)
+        self._resource_close_lock = asyncio.Lock()
+        self._resources_closed = False
 
-    def run(self, *, question_id: str, question: str) -> AnswerServiceResult:
+    async def run(self, *, question_id: str, question: str) -> AnswerServiceResult:
         """Supervisor를 실행하고 검증된 답변과 상태를 반환한다."""
 
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._config.answer_timeout_seconds
+        context = ExecutionContext(deadline=deadline)
         initial_state: dict[str, Any] = {
             "messages": [HumanMessage(content=question)],
             "question_id": question_id,
             "question": question,
             "domain_results": [],
         }
-        raw_state = _invoke_supervisor(self._supervisor, initial_state)
-
-        state = _validate_supervisor_state(
-            raw_state,
-            question_id=question_id,
-            question=question,
-        )
         try:
-            answer = build_agent_answer(state["messages"])
-        except ValueError:
-            raise FinalAnswerMissingError(
-                "Main Supervisor의 최종 자연어 답변이 없습니다."
+            async with asyncio.timeout_at(deadline):
+                async with self._capacity:
+                    raw_state = await _invoke_supervisor(
+                        self._supervisor,
+                        initial_state,
+                        context=context,
+                    )
+                    state = _validate_supervisor_state(
+                        raw_state,
+                        question_id=question_id,
+                        question=question,
+                    )
+                    try:
+                        answer = build_agent_answer(state["messages"])
+                    except ValueError:
+                        raise FinalAnswerMissingError(
+                            "Main Supervisor의 최종 자연어 답변이 없습니다."
+                        ) from None
+        except TimeoutError:
+            raise AnswerServiceTimeoutError(
+                "Answer Service 요청 전체 실행 시간이 초과됐습니다."
             ) from None
 
         return AnswerServiceResult(answer=answer, state=state)
 
-    def close(self) -> None:
-        """프로세스 공용 Agent 실행기와 외부 client를 한 번만 정리한다."""
+    async def aclose(self) -> None:
+        """runtime이 소유한 외부 client를 한 번만 정리한다."""
 
-        if self._closed:
-            return
-        self._closed = True
-        for callback in self._close_callbacks:
-            try:
-                callback()
-            except Exception:  # noqa: BLE001
-                logger.warning("Answer Service 리소스 정리에 실패했습니다.")
+        await self._close_resources()
+
+    async def _close_resources(self) -> None:
+        """runtime 소유 리소스를 등록된 의존성 역순으로 한 번만 닫는다."""
+
+        async with self._resource_close_lock:
+            if self._resources_closed:
+                return
+            for callback in self._close_callbacks:
+                try:
+                    await callback()
+                except Exception:  # noqa: BLE001
+                    logger.warning("Answer Service 리소스 정리에 실패했습니다.")
+            self._resources_closed = True
 
 
-def _invoke_supervisor(
+async def _invoke_supervisor(
     supervisor: SupervisorRunner,
     initial_state: dict[str, Any],
+    *,
+    context: ExecutionContext,
 ) -> Mapping[str, Any]:
     """원본 예외 연결을 남기지 않고 Supervisor 실행 오류를 정규화한다."""
 
     try:
-        return supervisor.invoke(initial_state)
+        return await supervisor.ainvoke(initial_state, context=context)
     # Supervisor 경계에서 모든 실행 오류를 애플리케이션 오류로 정규화한다.
     except Exception:  # noqa: BLE001
         error = SupervisorExecutionError("Main Supervisor 실행에 실패했습니다.")

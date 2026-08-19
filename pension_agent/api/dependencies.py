@@ -10,7 +10,7 @@ from pension_agent.agent.orchestration import AnswerService
 PUBLIC_INTERNAL_ERROR = "답변을 생성하지 못했습니다."
 
 
-def get_answer_service(request: Request) -> AnswerService:
+async def get_answer_service(request: Request) -> AnswerService:
     """lifespan에서 조립한 프로세스 공용 Answer Service를 반환한다."""
 
     try:
@@ -22,7 +22,7 @@ def get_answer_service(request: Request) -> AnswerService:
         ) from None
 
 
-def get_deployment_commit_sha() -> str:
+async def get_deployment_commit_sha() -> str:
     """배포 환경이 주입한 Git 커밋 SHA를 반환한다."""
 
     return os.getenv("DEPLOY_COMMIT_SHA", "unknown").strip() or "unknown"

@@ -7,6 +7,7 @@ from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 
+from pension_agent.agent.execution import ExecutionContext, ModelConcurrencyMiddleware
 from pension_agent.agent.search.middleware import (
     CompleteSearchResult,
     RecordSearchCandidates,
@@ -38,6 +39,7 @@ def create_search_agent(
     embedder: QueryEmbedder,
     retriever: ChunkRetriever,
     config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG,
+    model_concurrency: ModelConcurrencyMiddleware | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """HCX 모델에 검색 Tool을 바인딩한 Search Agent를 만든다."""
 
@@ -49,8 +51,10 @@ def create_search_agent(
         ),
         system_prompt=load_search_agent_prompt(),
         state_schema=SearchAgentState,
+        context_schema=ExecutionContext,
         middleware=(
             RequireSearchPermission(),
+            *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteSearchResult(),
             RequireSearchToolResult(),
             RecordSearchCandidates(),

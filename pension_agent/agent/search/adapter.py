@@ -1,18 +1,17 @@
 """Domain Agent와 Search Agent LangGraph를 분리하는 실행 Adapter."""
 
+import asyncio
 import logging
 from collections.abc import Mapping
-from concurrent.futures import Future, TimeoutError
 from dataclasses import dataclass, field
-from threading import BoundedSemaphore
 from time import monotonic
 from typing import Any, Protocol
 
 from langchain.messages import AIMessage, ToolMessage
-from langsmith.utils import ContextThreadPoolExecutor
 from pydantic import TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import Permission
+from pension_agent.agent.execution import ExecutionContext, effective_deadline
 from pension_agent.agent.search.schemas import SearchResult
 from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG, SearchAgentConfig
 
@@ -26,7 +25,13 @@ _SEARCH_TOOL_NAMES = frozenset(
 class SearchGraph(Protocol):
     """Adapter가 사용하는 최소 Search Agent 실행 계약."""
 
-    def invoke(self, input: dict[str, Any], /) -> Mapping[str, Any]:
+    async def ainvoke(
+        self,
+        input: dict[str, Any],
+        /,
+        *,
+        context: ExecutionContext,
+    ) -> Mapping[str, Any]:
         """초기 상태로 Search Agent를 실행한다."""
 
 
@@ -36,20 +41,25 @@ class SearchAgentAdapter:
 
     graph: SearchGraph
     config: SearchAgentConfig = DEFAULT_SEARCH_AGENT_CONFIG
-    max_workers: int = 4
-    _executor: ContextThreadPoolExecutor = field(init=False, repr=False)
-    _capacity: BoundedSemaphore = field(init=False, repr=False)
+    max_concurrency: int | None = None
+    _capacity: asyncio.Semaphore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.max_workers < 1:
-            raise ValueError("Search Agent worker 수는 1 이상이어야 합니다.")
-        self._executor = ContextThreadPoolExecutor(
-            max_workers=self.max_workers,
-            thread_name_prefix="search-agent",
+        concurrency = (
+            self.config.max_concurrency if self.max_concurrency is None else self.max_concurrency
         )
-        self._capacity = BoundedSemaphore(self.max_workers)
+        if concurrency < 1:
+            raise ValueError("Search Agent 동시 실행 상한은 1 이상이어야 합니다.")
+        self.max_concurrency = concurrency
+        self._capacity = asyncio.Semaphore(concurrency)
 
-    def search(self, objective: str, *, permission: Permission) -> SearchResult:
+    async def search(
+        self,
+        objective: str,
+        *,
+        permission: Permission,
+        deadline: float | None = None,
+    ) -> SearchResult:
         """검색 목표만 Agent에 전달하고 자유 형식 답변은 사용하지 않는다."""
 
         normalized_objective = objective.strip()
@@ -57,20 +67,11 @@ class SearchAgentAdapter:
             return _failed_result("검색 목표는 비어 있을 수 없습니다.")
 
         started_at = monotonic()
-        deadline = started_at + self.config.timeout_seconds
-        if not self._capacity.acquire(timeout=self.config.timeout_seconds):
-            result = _timeout_result()
-            _log_search_run(
-                permission=permission,
-                state=None,
-                result=result,
-                elapsed_seconds=monotonic() - started_at,
-            )
-            return result
-
-        remaining_seconds = deadline - monotonic()
-        if remaining_seconds <= 0:
-            self._capacity.release()
+        search_deadline = effective_deadline(
+            timeout_seconds=self.config.timeout_seconds,
+            parent_deadline=deadline,
+        )
+        if search_deadline <= asyncio.get_running_loop().time():
             result = _timeout_result()
             _log_search_run(
                 permission=permission,
@@ -81,23 +82,21 @@ class SearchAgentAdapter:
             return result
 
         try:
-            future: Future[Mapping[str, Any]] = self._executor.submit(
-                self.graph.invoke,
-                {
-                    "messages": [{"role": "user", "content": normalized_objective}],
-                    "permission": permission,
-                    "observed_chunks": [],
-                    "search_attempted": False,
-                },
-            )
-        except RuntimeError:
-            self._capacity.release()
-            return _failed_result("Search Agent 실행기를 사용할 수 없습니다.")
-        future.add_done_callback(lambda completed: self._capacity.release())
-        try:
-            state = future.result(timeout=remaining_seconds)
+            async with asyncio.timeout_at(search_deadline):
+                await self._capacity.acquire()
+                try:
+                    state = await self.graph.ainvoke(
+                        {
+                            "messages": [{"role": "user", "content": normalized_objective}],
+                            "permission": permission,
+                            "observed_chunks": [],
+                            "search_attempted": False,
+                        },
+                        context=ExecutionContext(deadline=search_deadline),
+                    )
+                finally:
+                    self._capacity.release()
         except TimeoutError:
-            future.cancel()
             result = _timeout_result()
             _log_search_run(
                 permission=permission,
@@ -127,11 +126,6 @@ class SearchAgentAdapter:
             elapsed_seconds=monotonic() - started_at,
         )
         return result
-
-    def close(self) -> None:
-        """프로세스 종료 시 실행 worker를 정리한다."""
-
-        self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _failed_result(message: str) -> SearchResult:

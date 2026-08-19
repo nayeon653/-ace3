@@ -1,6 +1,6 @@
 """FastAPI 애플리케이션 진입점."""
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -14,7 +14,7 @@ from pension_agent.api.routes import router
 _INVALID_REQUEST_ERROR = "요청 파라미터가 올바르지 않습니다."
 _INTERNAL_SERVER_ERROR = "서버 내부 오류가 발생했습니다."
 
-AnswerServiceFactory = Callable[[], AnswerService]
+AnswerServiceFactory = Callable[[], Awaitable[AnswerService]]
 
 
 def create_app(
@@ -25,13 +25,13 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        application.state.answer_service = answer_service_factory()
+        application.state.answer_service = await answer_service_factory()
         try:
             yield
         finally:
-            close = getattr(application.state.answer_service, "close", None)
+            close = getattr(application.state.answer_service, "aclose", None)
             if callable(close):
-                close()
+                await close()
             del application.state.answer_service
 
     application = FastAPI(
