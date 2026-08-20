@@ -29,7 +29,7 @@ hooks: ## 훅 경로를 .githooks로 설정 (팀원 각자 최초 1회 실행)
 serve: ## 로컬 API 서버 기동
 	$(UV) run uvicorn pension_agent.api.app:app --env-file .env
 
-agent-graph: ## 전체 Agent 그래프 문서 생성
+agent-graph: ## 전체 Agent 그래프 문서와 PNG 생성
 	$(UV) run --frozen python tools/render_agent_graphs.py
 
 agent-graph-check: ## Agent 그래프 문서 최신 상태 확인

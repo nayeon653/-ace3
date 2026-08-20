@@ -76,7 +76,7 @@ ingest → retrieval
 make setup   # 런타임 + 개발 의존성 설치
 make check   # Ruff 린트·포맷 + mypy 타입 검사 + pytest
 make build   # wheel + source distribution 빌드
-make agent-graph  # 전체 Agent 그래프 문서 생성
+make agent-graph  # 전체 Agent 그래프 문서와 PNG 생성
 
 make qdrant-up     # 로컬 Qdrant 실행
 make qdrant-check  # readiness + Python 클라이언트 연결 확인

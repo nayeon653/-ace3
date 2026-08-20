@@ -158,6 +158,11 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     assert created["tax_payout"]["model_concurrency"] is shared_model_limit
     assert created["product"]["model_concurrency"] is shared_model_limit
     assert created["supervisor"]["model_concurrency"] is shared_model_limit
+    assert [tool.name for tool in created["supervisor"]["tools"]] == [
+        "analyze_policy",
+        "analyze_tax_payout",
+        "analyze_product",
+    ]
     assert service._config is config
     assert closed == ["qdrant", "embedding-http", "model-http"]
 

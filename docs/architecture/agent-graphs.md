@@ -2,11 +2,14 @@
 
 <!-- 이 파일은 tools/render_agent_graphs.py로 생성됩니다. 직접 수정하지 마세요. -->
 
-`make agent-graph`로 현재 코드에서 다시 생성합니다. 그래프 생성에는 HCX, Qdrant 또는 외부 네트워크 연결이 필요하지 않습니다.
+`make agent-graph`로 현재 코드에서 PNG와 함께 다시 생성합니다. 컴파일 그래프는 LangGraph의 `get_graph(xray=True)` 결과를 사용합니다.
 
 ## 전체 호출 구조
 
-Supervisor가 Domain Agent를 LangChain Tool로 호출하므로, 이 그림은 독립적으로 컴파일된 그래프 사이의 런타임 호출 경계를 함께 표시합니다.
+![전체 호출 구조](generated/agent-system.png)
+
+<details>
+<summary>Mermaid 원본 보기</summary>
 
 ```mermaid
 flowchart TB
@@ -16,23 +19,22 @@ flowchart TB
         supervisor["HCX-005 model"] <--> domain_tools["Domain Agent tools"]
     end
 
-    domain_tools -->|analyze_policy| policy
-    domain_tools -->|analyze_tax_payout| tax_payout
-    domain_tools -->|analyze_product| product
+    domain_tools -->|analyze_policy| domain_policy
+    domain_tools -->|analyze_tax_payout| domain_tax_payout
+    domain_tools -->|analyze_product| domain_product
 
     subgraph domains["Domain Agents · 각각 CompiledStateGraph"]
-        policy["Policy Agent"]
-        tax_payout["Tax/Payout Agent"]
-        product["Product Agent"]
+        domain_policy["Policy Agent"]
+        domain_tax_payout["Tax/Payout Agent"]
+        domain_product["Product Agent"]
     end
 
-    policy --> domain_tools
-    tax_payout --> domain_tools
-    product --> domain_tools
-
-    policy --> search_tools
-    tax_payout --> search_tools
-    product --> search_tools
+    domain_policy --> domain_tools
+    domain_policy --> search_tools
+    domain_tax_payout --> domain_tools
+    domain_tax_payout --> search_tools
+    domain_product --> domain_tools
+    domain_product --> search_tools
 
     subgraph search["공용 검색 경로"]
         search_tools["search_documents"] --> search_service["SearchService"]
@@ -43,7 +45,14 @@ flowchart TB
     supervisor --> answer["최종 답변"]
 ```
 
+</details>
+
 ## Main Supervisor 컴파일 그래프
+
+![Main Supervisor 컴파일 그래프](generated/main-supervisor.png)
+
+<details>
+<summary>Mermaid 원본 보기</summary>
 
 ```mermaid
 ---
@@ -53,13 +62,13 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	model(model)
-	tools(tools)
-	SupervisorModelCallLimit\2ebefore_model(SupervisorModelCallLimit.before_model)
-	SupervisorModelCallLimit\2eafter_model(SupervisorModelCallLimit.after_model)
-	ToolCallLimitMiddleware\5banalyze_policy\5d\2eafter_model(ToolCallLimitMiddleware[analyze_policy].after_model)
-	ToolCallLimitMiddleware\5banalyze_tax_payout\5d\2eafter_model(ToolCallLimitMiddleware[analyze_tax_payout].after_model)
-	ToolCallLimitMiddleware\5banalyze_product\5d\2eafter_model(ToolCallLimitMiddleware[analyze_product].after_model)
+	model("model")
+	tools("tools")
+	SupervisorModelCallLimit\2ebefore_model("SupervisorModelCallLimit.before_model")
+	SupervisorModelCallLimit\2eafter_model("SupervisorModelCallLimit.after_model")
+	ToolCallLimitMiddleware\5banalyze_policy\5d\2eafter_model("ToolCallLimitMiddleware[analyze_policy].after_model")
+	ToolCallLimitMiddleware\5banalyze_tax_payout\5d\2eafter_model("ToolCallLimitMiddleware[analyze_tax_payout].after_model")
+	ToolCallLimitMiddleware\5banalyze_product\5d\2eafter_model("ToolCallLimitMiddleware[analyze_product].after_model")
 	__end__([<p>__end__</p>]):::last
 	SupervisorModelCallLimit\2eafter_model -.-> SupervisorModelCallLimit\2ebefore_model;
 	SupervisorModelCallLimit\2eafter_model -.-> __end__;
@@ -80,7 +89,14 @@ graph TD;
 	classDef last fill:#bfb6fc
 ```
 
+</details>
+
 ## Policy Domain Agent 컴파일 그래프
+
+![Policy Domain Agent 컴파일 그래프](generated/policy.png)
+
+<details>
+<summary>Mermaid 원본 보기</summary>
 
 ```mermaid
 ---
@@ -90,15 +106,15 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	model(model)
-	tools(tools)
-	CompleteDomainResult\2ebefore_model(CompleteDomainResult.before_model)
-	RequireDomainTool\2eafter_model(RequireDomainTool.after_model)
-	SingleDomainSubmitPerModelCall\2eafter_model(SingleDomainSubmitPerModelCall.after_model)
-	DomainModelCallLimit\2ebefore_model(DomainModelCallLimit.before_model)
-	DomainModelCallLimit\2eafter_model(DomainModelCallLimit.after_model)
-	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model(ToolCallLimitMiddleware[search_documents].after_model)
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model(ToolCallLimitMiddleware[submit_domain_result].after_model)
+	model("model")
+	tools("tools")
+	CompleteDomainResult\2ebefore_model("CompleteDomainResult.before_model")
+	RequireDomainTool\2eafter_model("RequireDomainTool.after_model")
+	SingleDomainSubmitPerModelCall\2eafter_model("SingleDomainSubmitPerModelCall.after_model")
+	DomainModelCallLimit\2ebefore_model("DomainModelCallLimit.before_model")
+	DomainModelCallLimit\2eafter_model("DomainModelCallLimit.after_model")
+	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	__end__([<p>__end__</p>]):::last
 	CompleteDomainResult\2ebefore_model -.-> DomainModelCallLimit\2ebefore_model;
 	CompleteDomainResult\2ebefore_model -.-> __end__;
@@ -120,9 +136,16 @@ graph TD;
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
 ```
+
+</details>
 
 ## Tax/Payout Domain Agent 컴파일 그래프
 
+![Tax/Payout Domain Agent 컴파일 그래프](generated/tax-payout.png)
+
+<details>
+<summary>Mermaid 원본 보기</summary>
+
 ```mermaid
 ---
 config:
@@ -131,15 +154,15 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	model(model)
-	tools(tools)
-	CompleteDomainResult\2ebefore_model(CompleteDomainResult.before_model)
-	RequireDomainTool\2eafter_model(RequireDomainTool.after_model)
-	SingleDomainSubmitPerModelCall\2eafter_model(SingleDomainSubmitPerModelCall.after_model)
-	DomainModelCallLimit\2ebefore_model(DomainModelCallLimit.before_model)
-	DomainModelCallLimit\2eafter_model(DomainModelCallLimit.after_model)
-	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model(ToolCallLimitMiddleware[search_documents].after_model)
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model(ToolCallLimitMiddleware[submit_domain_result].after_model)
+	model("model")
+	tools("tools")
+	CompleteDomainResult\2ebefore_model("CompleteDomainResult.before_model")
+	RequireDomainTool\2eafter_model("RequireDomainTool.after_model")
+	SingleDomainSubmitPerModelCall\2eafter_model("SingleDomainSubmitPerModelCall.after_model")
+	DomainModelCallLimit\2ebefore_model("DomainModelCallLimit.before_model")
+	DomainModelCallLimit\2eafter_model("DomainModelCallLimit.after_model")
+	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	__end__([<p>__end__</p>]):::last
 	CompleteDomainResult\2ebefore_model -.-> DomainModelCallLimit\2ebefore_model;
 	CompleteDomainResult\2ebefore_model -.-> __end__;
@@ -161,9 +184,16 @@ graph TD;
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
 ```
+
+</details>
 
 ## Product Domain Agent 컴파일 그래프
 
+![Product Domain Agent 컴파일 그래프](generated/product.png)
+
+<details>
+<summary>Mermaid 원본 보기</summary>
+
 ```mermaid
 ---
 config:
@@ -172,15 +202,15 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	model(model)
-	tools(tools)
-	CompleteDomainResult\2ebefore_model(CompleteDomainResult.before_model)
-	RequireDomainTool\2eafter_model(RequireDomainTool.after_model)
-	SingleDomainSubmitPerModelCall\2eafter_model(SingleDomainSubmitPerModelCall.after_model)
-	DomainModelCallLimit\2ebefore_model(DomainModelCallLimit.before_model)
-	DomainModelCallLimit\2eafter_model(DomainModelCallLimit.after_model)
-	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model(ToolCallLimitMiddleware[search_documents].after_model)
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model(ToolCallLimitMiddleware[submit_domain_result].after_model)
+	model("model")
+	tools("tools")
+	CompleteDomainResult\2ebefore_model("CompleteDomainResult.before_model")
+	RequireDomainTool\2eafter_model("RequireDomainTool.after_model")
+	SingleDomainSubmitPerModelCall\2eafter_model("SingleDomainSubmitPerModelCall.after_model")
+	DomainModelCallLimit\2ebefore_model("DomainModelCallLimit.before_model")
+	DomainModelCallLimit\2eafter_model("DomainModelCallLimit.after_model")
+	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	__end__([<p>__end__</p>]):::last
 	CompleteDomainResult\2ebefore_model -.-> DomainModelCallLimit\2ebefore_model;
 	CompleteDomainResult\2ebefore_model -.-> __end__;
@@ -202,3 +232,5 @@ graph TD;
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
 ```
+
+</details>

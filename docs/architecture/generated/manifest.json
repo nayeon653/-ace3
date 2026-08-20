@@ -1,0 +1,21 @@
+{
+  "artifacts": {
+    "agent-system.png": {
+      "mermaid_sha256": "804d794a8040565b98f03935f39182ad4b41b7e63687fcafbd6624359a7b799e"
+    },
+    "main-supervisor.png": {
+      "mermaid_sha256": "bfc8ee2d66e90ce8816070e5bfe8ab815c7c286c538c44a8922771bab5ebe4a2"
+    },
+    "policy.png": {
+      "mermaid_sha256": "7dc6e6f4eab8769c9b419130709bfe3a4f91920b772e198226f360b130b1a1f1"
+    },
+    "product.png": {
+      "mermaid_sha256": "7dc6e6f4eab8769c9b419130709bfe3a4f91920b772e198226f360b130b1a1f1"
+    },
+    "tax-payout.png": {
+      "mermaid_sha256": "7dc6e6f4eab8769c9b419130709bfe3a4f91920b772e198226f360b130b1a1f1"
+    }
+  },
+  "renderer": "langchain-core MermaidDrawMethod.API",
+  "version": 1
+}

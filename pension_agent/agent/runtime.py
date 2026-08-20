@@ -4,9 +4,13 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from httpx import AsyncClient, Client, Limits
+from langchain_core.language_models import BaseChatModel
 
+from pension_agent.agent.contracts import DomainName
+from pension_agent.agent.domain_agent import DomainAgent
 from pension_agent.agent.execution import AsyncConcurrencyLimiter, ModelConcurrencyMiddleware
 from pension_agent.agent.model_factory import create_chat_clovax
 from pension_agent.agent.orchestration import (
@@ -27,6 +31,7 @@ from pension_agent.agent.product import (
 from pension_agent.agent.search import (
     LimitedChunkRetriever,
     LimitedQueryEmbedder,
+    SearchRunner,
     SearchService,
 )
 from pension_agent.agent.tax_payout import (
@@ -54,6 +59,61 @@ logger = logging.getLogger(__name__)
 
 class AgentRuntimeBuildError(RuntimeError):
     """Agent 런타임을 안전하게 조립하지 못한 경우."""
+
+
+class DomainAgentFactory(Protocol):
+    """런타임 Domain Agent Factory의 공통 호출 계약."""
+
+    def __call__(
+        self,
+        *,
+        model: BaseChatModel,
+        search_service: SearchRunner,
+        model_concurrency: ModelConcurrencyMiddleware | None = None,
+    ) -> DomainAgent: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DomainAgentSpec:
+    """런타임과 시각화가 공유하는 Domain Agent 등록 정보."""
+
+    slug: str
+    display_name: str
+    domain: DomainName
+    tool_name: str
+    tool_description: str
+    factory: DomainAgentFactory
+
+
+def domain_agent_specs() -> tuple[DomainAgentSpec, ...]:
+    """현재 런타임에 등록된 Domain Agent 명세를 반환한다."""
+
+    return (
+        DomainAgentSpec(
+            slug="policy",
+            display_name="Policy",
+            domain="policy",
+            tool_name=POLICY_TOOL_NAME,
+            tool_description=POLICY_TOOL_DESCRIPTION,
+            factory=create_policy_agent,
+        ),
+        DomainAgentSpec(
+            slug="tax-payout",
+            display_name="Tax/Payout",
+            domain="tax_payout",
+            tool_name=TAX_PAYOUT_TOOL_NAME,
+            tool_description=TAX_PAYOUT_TOOL_DESCRIPTION,
+            factory=create_tax_payout_agent,
+        ),
+        DomainAgentSpec(
+            slug="product",
+            display_name="Product",
+            domain="product",
+            tool_name=PRODUCT_TOOL_NAME,
+            tool_description=PRODUCT_TOOL_DESCRIPTION,
+            factory=create_product_agent,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,41 +229,25 @@ async def build_runtime_answer_service(
             retriever=limited_retriever,
         )
 
-        policy_agent = create_policy_agent(
-            model=model,
-            search_service=search_service,
-            model_concurrency=model_concurrency,
+        domain_agents = tuple(
+            (
+                spec,
+                spec.factory(
+                    model=model,
+                    search_service=search_service,
+                    model_concurrency=model_concurrency,
+                ),
+            )
+            for spec in domain_agent_specs()
         )
-        tax_payout_agent = create_tax_payout_agent(
-            model=model,
-            search_service=search_service,
-            model_concurrency=model_concurrency,
-        )
-        product_agent = create_product_agent(
-            model=model,
-            search_service=search_service,
-            model_concurrency=model_concurrency,
-        )
-
-        domain_tools = (
+        domain_tools = tuple(
             create_domain_agent_tool(
-                name=POLICY_TOOL_NAME,
-                description=POLICY_TOOL_DESCRIPTION,
-                domain="policy",
-                runner=policy_agent,
-            ),
-            create_domain_agent_tool(
-                name=TAX_PAYOUT_TOOL_NAME,
-                description=TAX_PAYOUT_TOOL_DESCRIPTION,
-                domain="tax_payout",
-                runner=tax_payout_agent,
-            ),
-            create_domain_agent_tool(
-                name=PRODUCT_TOOL_NAME,
-                description=PRODUCT_TOOL_DESCRIPTION,
-                domain="product",
-                runner=product_agent,
-            ),
+                name=spec.tool_name,
+                description=spec.tool_description,
+                domain=spec.domain,
+                runner=agent,
+            )
+            for spec, agent in domain_agents
         )
         supervisor = create_main_supervisor(
             model=model,

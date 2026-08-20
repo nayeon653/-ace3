@@ -1,75 +1,49 @@
-"""외부 연결 없이 전체 Agent 그래프 문서를 생성한다."""
+"""전체 Agent 그래프 문서와 PNG 이미지를 생성한다."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.runnables.graph import MermaidDrawMethod
+from langchain_core.runnables.graph_mermaid import draw_mermaid_png
 
 from pension_agent.agent.execution import AsyncConcurrencyLimiter, ModelConcurrencyMiddleware
 from pension_agent.agent.orchestration import create_domain_agent_tool, create_main_supervisor
-from pension_agent.agent.policy import (
-    POLICY_TOOL_DESCRIPTION,
-    POLICY_TOOL_NAME,
-    create_policy_agent,
+from pension_agent.agent.runtime import DomainAgentSpec, domain_agent_specs
+from pension_agent.config import (
+    BGE_M3_EMBEDDING_CONFIG,
+    DEFAULT_AGENT_RUNTIME_CONFIG,
+    MAIN_SUPERVISOR_HCX_CONFIG,
 )
-from pension_agent.agent.product import (
-    PRODUCT_TOOL_DESCRIPTION,
-    PRODUCT_TOOL_NAME,
-    create_product_agent,
-)
-from pension_agent.agent.tax_payout import (
-    TAX_PAYOUT_TOOL_DESCRIPTION,
-    TAX_PAYOUT_TOOL_NAME,
-    create_tax_payout_agent,
-)
-from pension_agent.config import DEFAULT_AGENT_RUNTIME_CONFIG
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = REPOSITORY_ROOT / "docs" / "architecture" / "agent-graphs.md"
+DEFAULT_IMAGE_DIR = REPOSITORY_ROOT / "docs" / "architecture" / "generated"
+DEFAULT_MANIFEST = DEFAULT_IMAGE_DIR / "manifest.json"
 
-_SYSTEM_OVERVIEW = """flowchart TB
-    question[\"GET /answer 질문\"] --> supervisor
 
-    subgraph main[\"Main Supervisor · CompiledStateGraph\"]
-        supervisor[\"HCX-005 model\"] <--> domain_tools[\"Domain Agent tools\"]
-    end
+@dataclass(frozen=True, slots=True)
+class GraphArtifact:
+    """하나의 Mermaid 그래프와 PNG 산출물 정보."""
 
-    domain_tools -->|analyze_policy| policy
-    domain_tools -->|analyze_tax_payout| tax_payout
-    domain_tools -->|analyze_product| product
+    name: str
+    title: str
+    mermaid: str
 
-    subgraph domains[\"Domain Agents · 각각 CompiledStateGraph\"]
-        policy[\"Policy Agent\"]
-        tax_payout[\"Tax/Payout Agent\"]
-        product[\"Product Agent\"]
-    end
+    @property
+    def image_name(self) -> str:
+        return f"{self.name}.png"
 
-    policy --> domain_tools
-    tax_payout --> domain_tools
-    product --> domain_tools
-
-    policy --> search_tools
-    tax_payout --> search_tools
-    product --> search_tools
-
-    subgraph search[\"공용 검색 경로\"]
-        search_tools[\"search_documents\"] --> search_service[\"SearchService\"]
-        search_service --> embedding[\"CLOVA bge-m3 query embedding\"]
-        search_service --> qdrant[\"Qdrant hybrid retrieval\"]
-    end
-
-    supervisor --> answer[\"최종 답변\"]
-"""
-
-_GRAPH_TITLES = {
-    "main-supervisor": "Main Supervisor 컴파일 그래프",
-    "policy": "Policy Domain Agent 컴파일 그래프",
-    "tax-payout": "Tax/Payout Domain Agent 컴파일 그래프",
-    "product": "Product Domain Agent 컴파일 그래프",
-}
+    @property
+    def source_sha256(self) -> str:
+        return hashlib.sha256(self.mermaid.encode()).hexdigest()
 
 
 class _OfflineSearchService:
@@ -79,130 +53,275 @@ class _OfflineSearchService:
         raise RuntimeError("그래프 생성 중에는 SearchService를 실행할 수 없습니다.")
 
 
-def _compiled_graphs() -> dict[str, Any]:
-    """제품 런타임과 같은 Factory·middleware 구성의 컴파일 그래프를 반환한다."""
+def _domain_node_id(spec: DomainAgentSpec) -> str:
+    return f"domain_{spec.slug.replace('-', '_')}"
 
+
+def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
+    """런타임 Domain 등록 정보에서 전체 호출 경계 Mermaid를 만든다."""
+
+    lines = [
+        "flowchart TB",
+        '    question["GET /answer 질문"] --> supervisor',
+        "",
+        '    subgraph main["Main Supervisor · CompiledStateGraph"]',
+        (
+            f'        supervisor["{MAIN_SUPERVISOR_HCX_CONFIG.model} model"] '
+            '<--> domain_tools["Domain Agent tools"]'
+        ),
+        "    end",
+        "",
+    ]
+    lines.extend(
+        f"    domain_tools -->|{spec.tool_name}| {_domain_node_id(spec)}" for spec in specs
+    )
+    lines.extend(
+        (
+            "",
+            '    subgraph domains["Domain Agents · 각각 CompiledStateGraph"]',
+        )
+    )
+    lines.extend(f'        {_domain_node_id(spec)}["{spec.display_name} Agent"]' for spec in specs)
+    lines.extend(("    end", ""))
+    for spec in specs:
+        node_id = _domain_node_id(spec)
+        lines.extend(
+            (
+                f"    {node_id} --> domain_tools",
+                f"    {node_id} --> search_tools",
+            )
+        )
+    lines.extend(
+        (
+            "",
+            '    subgraph search["공용 검색 경로"]',
+            '        search_tools["search_documents"] --> search_service["SearchService"]',
+            (
+                '        search_service --> embedding["CLOVA '
+                f'{BGE_M3_EMBEDDING_CONFIG.model} query embedding"]'
+            ),
+            '        search_service --> qdrant["Qdrant hybrid retrieval"]',
+            "    end",
+            "",
+            '    supervisor --> answer["최종 답변"]',
+        )
+    )
+    return "\n".join(lines)
+
+
+def _quote_mermaid_node_labels(mermaid: str) -> str:
+    """Mermaid.ink가 대괄호 포함 node label을 파싱하도록 따옴표로 감싼다."""
+
+    normalized: list[str] = []
+    for line in mermaid.splitlines():
+        stripped = line.strip()
+        if (
+            not stripped.endswith(")")
+            or ":::" in stripped
+            or "-->" in stripped
+            or "-.->" in stripped
+            or "(" not in stripped
+        ):
+            normalized.append(line)
+            continue
+        prefix, label = line.split("(", maxsplit=1)
+        escaped_label = label[:-1].replace('"', '\\"')
+        normalized.append(f'{prefix}("{escaped_label}")')
+    return "\n".join(normalized)
+
+
+def build_artifacts() -> tuple[GraphArtifact, ...]:
+    """제품 런타임과 같은 등록 정보·Factory·middleware로 그래프를 조립한다."""
+
+    specs = domain_agent_specs()
     model = FakeMessagesListChatModel(responses=[])
     search_service = _OfflineSearchService()
     model_concurrency = ModelConcurrencyMiddleware(
         AsyncConcurrencyLimiter(DEFAULT_AGENT_RUNTIME_CONFIG.max_concurrent_hcx_calls)
     )
     domain_agents = {
-        "policy": create_policy_agent(
+        spec.slug: spec.factory(
             model=model,
             search_service=search_service,
             model_concurrency=model_concurrency,
-        ),
-        "tax-payout": create_tax_payout_agent(
-            model=model,
-            search_service=search_service,
-            model_concurrency=model_concurrency,
-        ),
-        "product": create_product_agent(
-            model=model,
-            search_service=search_service,
-            model_concurrency=model_concurrency,
-        ),
+        )
+        for spec in specs
     }
-    domain_tools = (
+    domain_tools = tuple(
         create_domain_agent_tool(
-            name=POLICY_TOOL_NAME,
-            description=POLICY_TOOL_DESCRIPTION,
-            domain="policy",
-            runner=domain_agents["policy"],
-        ),
-        create_domain_agent_tool(
-            name=TAX_PAYOUT_TOOL_NAME,
-            description=TAX_PAYOUT_TOOL_DESCRIPTION,
-            domain="tax_payout",
-            runner=domain_agents["tax-payout"],
-        ),
-        create_domain_agent_tool(
-            name=PRODUCT_TOOL_NAME,
-            description=PRODUCT_TOOL_DESCRIPTION,
-            domain="product",
-            runner=domain_agents["product"],
-        ),
+            name=spec.tool_name,
+            description=spec.tool_description,
+            domain=spec.domain,
+            runner=domain_agents[spec.slug],
+        )
+        for spec in specs
     )
     supervisor = create_main_supervisor(
         model=model,
         tools=domain_tools,
         model_concurrency=model_concurrency,
     )
-    return {
+    compiled_graphs = {
         "main-supervisor": supervisor,
-        **{name: agent.graph for name, agent in domain_agents.items()},
+        **{spec.slug: domain_agents[spec.slug].graph for spec in specs},
     }
+    titles = {
+        "main-supervisor": "Main Supervisor 컴파일 그래프",
+        **{spec.slug: f"{spec.display_name} Domain Agent 컴파일 그래프" for spec in specs},
+    }
+    return (
+        GraphArtifact(
+            name="agent-system",
+            title="전체 호출 구조",
+            mermaid=_system_overview(specs),
+        ),
+        *(
+            GraphArtifact(
+                name=name,
+                title=titles[name],
+                mermaid=_quote_mermaid_node_labels(
+                    graph.get_graph(xray=True).draw_mermaid().rstrip()
+                ),
+            )
+            for name, graph in compiled_graphs.items()
+        ),
+    )
 
 
-def render_document() -> str:
-    """전체 구조와 실제 컴파일 그래프를 GitHub Mermaid 문서로 만든다."""
+def render_document(artifacts: tuple[GraphArtifact, ...] | None = None) -> str:
+    """PNG와 원본 Mermaid를 함께 보여주는 GitHub 문서를 만든다."""
 
+    artifacts = artifacts or build_artifacts()
     sections = [
         "# Agent 전체 그래프",
         "",
         "<!-- 이 파일은 tools/render_agent_graphs.py로 생성됩니다. 직접 수정하지 마세요. -->",
         "",
         (
-            "`make agent-graph`로 현재 코드에서 다시 생성합니다. 그래프 생성에는 HCX, "
-            "Qdrant 또는 외부 네트워크 연결이 필요하지 않습니다."
+            "`make agent-graph`로 현재 코드에서 PNG와 함께 다시 생성합니다. 컴파일 그래프는 "
+            "LangGraph의 `get_graph(xray=True)` 결과를 사용합니다."
         ),
-        "",
-        "## 전체 호출 구조",
-        "",
-        (
-            "Supervisor가 Domain Agent를 LangChain Tool로 호출하므로, 이 그림은 독립적으로 "
-            "컴파일된 그래프 사이의 런타임 호출 경계를 함께 표시합니다."
-        ),
-        "",
-        "```mermaid",
-        _SYSTEM_OVERVIEW.rstrip(),
-        "```",
     ]
-    for name, graph in _compiled_graphs().items():
+    for artifact in artifacts:
         sections.extend(
             (
                 "",
-                f"## {_GRAPH_TITLES[name]}",
+                f"## {artifact.title}",
+                "",
+                f"![{artifact.title}](generated/{artifact.image_name})",
+                "",
+                "<details>",
+                "<summary>Mermaid 원본 보기</summary>",
                 "",
                 "```mermaid",
-                graph.get_graph().draw_mermaid().rstrip(),
+                artifact.mermaid,
                 "```",
+                "",
+                "</details>",
             )
         )
     return "\n".join(sections) + "\n"
 
 
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="전체 Agent 그래프 문서를 생성합니다.")
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=DEFAULT_OUTPUT,
-        help="생성할 Markdown 경로",
+def render_manifest(artifacts: tuple[GraphArtifact, ...] | None = None) -> str:
+    """이미지가 어떤 Mermaid 원본에서 생성됐는지 기록한다."""
+
+    artifacts = artifacts or build_artifacts()
+    payload = {
+        "version": 1,
+        "renderer": "langchain-core MermaidDrawMethod.API",
+        "artifacts": {
+            artifact.image_name: {"mermaid_sha256": artifact.source_sha256}
+            for artifact in artifacts
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def outputs_are_current(artifacts: tuple[GraphArtifact, ...]) -> bool:
+    """문서·manifest·PNG 집합이 현재 그래프와 일치하는지 확인한다."""
+
+    if not DEFAULT_OUTPUT.is_file() or DEFAULT_OUTPUT.read_text(
+        encoding="utf-8"
+    ) != render_document(artifacts):
+        return False
+    if not DEFAULT_MANIFEST.is_file() or DEFAULT_MANIFEST.read_text(
+        encoding="utf-8"
+    ) != render_manifest(artifacts):
+        return False
+    return all(
+        (image_path := DEFAULT_IMAGE_DIR / artifact.image_name).is_file()
+        and image_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        for artifact in artifacts
     )
+
+
+def _previous_image_names() -> set[str]:
+    if not DEFAULT_MANIFEST.is_file():
+        return set()
+    try:
+        payload = json.loads(DEFAULT_MANIFEST.read_text(encoding="utf-8"))
+        return set(payload.get("artifacts", {}))
+    except (AttributeError, json.JSONDecodeError, TypeError):
+        return set()
+
+
+def write_outputs(artifacts: tuple[GraphArtifact, ...]) -> None:
+    """Mermaid.ink로 PNG를 모두 렌더링한 뒤 산출물을 교체한다."""
+
+    DEFAULT_IMAGE_DIR.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".agent-graphs-",
+        dir=DEFAULT_IMAGE_DIR.parent,
+    ) as temporary_directory:
+        temporary_path = Path(temporary_directory)
+        for artifact in artifacts:
+            image_path = temporary_path / artifact.image_name
+            image = draw_mermaid_png(
+                mermaid_syntax=artifact.mermaid,
+                output_file_path=str(image_path),
+                draw_method=MermaidDrawMethod.API,
+                max_retries=3,
+            )
+            if not image.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise RuntimeError(f"올바르지 않은 PNG 응답입니다: {artifact.image_name}")
+
+        previous_names = _previous_image_names()
+        DEFAULT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+        for artifact in artifacts:
+            (temporary_path / artifact.image_name).replace(DEFAULT_IMAGE_DIR / artifact.image_name)
+        current_names = {artifact.image_name for artifact in artifacts}
+        for stale_name in previous_names - current_names:
+            stale_path = DEFAULT_IMAGE_DIR / stale_name
+            if stale_path.parent == DEFAULT_IMAGE_DIR and stale_path.is_file():
+                stale_path.unlink()
+
+    DEFAULT_OUTPUT.write_text(render_document(artifacts), encoding="utf-8")
+    DEFAULT_MANIFEST.write_text(render_manifest(artifacts), encoding="utf-8")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="전체 Agent 그래프와 PNG를 생성합니다.")
     parser.add_argument(
         "--check",
         action="store_true",
-        help="기존 문서가 현재 그래프와 일치하는지만 확인",
+        help="외부 연결 없이 기존 산출물이 현재 그래프와 일치하는지만 확인",
     )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
-    output = args.output.resolve()
-    rendered = render_document()
+    artifacts = build_artifacts()
     if args.check:
-        if not output.is_file() or output.read_text(encoding="utf-8") != rendered:
-            print(f"Agent 그래프 문서가 최신 상태가 아닙니다: {output}")
+        if not outputs_are_current(artifacts):
+            print("Agent 그래프 산출물이 최신 상태가 아닙니다. make agent-graph를 실행하세요.")
             return 1
-        print(f"Agent 그래프 문서가 최신 상태입니다: {output}")
+        print(f"Agent 그래프 산출물이 최신 상태입니다: {DEFAULT_OUTPUT}")
         return 0
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(rendered, encoding="utf-8")
-    print(f"Agent 그래프 문서를 생성했습니다: {output}")
+    write_outputs(artifacts)
+    print(f"Agent 그래프 문서와 PNG {len(artifacts)}개를 생성했습니다: {DEFAULT_OUTPUT}")
     return 0
 
 
