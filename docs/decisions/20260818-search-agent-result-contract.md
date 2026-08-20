@@ -1,11 +1,12 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-18
 type: architecture
 related:
   - 20260813-main-supervisor-domain-agent-tools.md
 supersedes: []
-superseded-by: []
+superseded-by:
+  - 20260820-80-router-search-service.md
 ---
 
 # Search Agent의 근거 선택 책임과 결과 계약을 채택
