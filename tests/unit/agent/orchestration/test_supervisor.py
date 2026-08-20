@@ -151,6 +151,20 @@ def test_main_supervisor_prompt_is_packaged() -> None:
     assert "JSON이나 Tool 호출 형식을 직접 출력하지 않는다" in prompt
 
 
+def test_main_supervisor_prompt_has_data_aware_routing_boundaries() -> None:
+    prompt = (
+        resources.files("pension_agent.prompts")
+        .joinpath("orchestration", "main-supervisor.md")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "연금저축·IRP 전용 클래스 설명이 반복" in prompt
+    assert "판단에 필요한 근거 문서군을 기준으로 Tool을 선택" in prompt
+    assert "계좌·제도 이름에 `펀드`가 포함" in prompt
+    assert ("`연금저축펀드와 IRP는 무엇이 다른가요?` → 업무·제도 + 세제·수령") in prompt
+    assert "`A펀드와 B펀드의 위험과 보수를 비교해 주세요.` → 상품·운용" in prompt
+
+
 @pytest.mark.anyio
 async def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth(
     anyio_backend: str,
