@@ -8,7 +8,7 @@ from pension_agent.core import DocumentType
 
 
 class Permission(StrEnum):
-    """Search Agent에 전달하는 Domain Agent 식별자."""
+    """Search Service에 전달하는 Domain Agent 식별자."""
 
     POLICY = "policy"
     TAX_PAYOUT = "tax_payout"

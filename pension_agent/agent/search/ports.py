@@ -1,4 +1,4 @@
-"""Search Agent가 외부 제공자와 검색 구현에 요구하는 Port."""
+"""Search Service가 외부 제공자와 검색 구현에 요구하는 Port."""
 
 from dataclasses import dataclass
 from typing import Protocol
@@ -22,7 +22,7 @@ class QueryEmbedder(Protocol):
 
 
 class ChunkRetriever(Protocol):
-    """Search Tool이 의존하는 도메인 중립 청크 조회 기능."""
+    """Search Service가 의존하는 도메인 중립 청크 조회 기능."""
 
     async def search_chunks(
         self,

@@ -1,4 +1,4 @@
-"""Search Agent 결과를 사용하는 얇은 Domain Agent를 검증한다."""
+"""Search Service 결과를 사용하는 얇은 Domain Agent를 검증한다."""
 
 import asyncio
 from collections.abc import Callable, Sequence
@@ -8,7 +8,10 @@ from uuid import UUID
 
 import pytest
 from langchain.messages import AIMessage
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatResult
 from langchain_core.runnables import Runnable
 from langsmith import RunTree, get_current_run_tree, tracing_context
 
@@ -16,7 +19,12 @@ from pension_agent.agent.contracts import DomainName, Permission, validate_domai
 from pension_agent.agent.domain_agent import DomainAgent
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.product import create_product_agent, load_product_agent_prompt
-from pension_agent.agent.search import SearchAgentAdapter, SearchChunkPayload, SearchResult
+from pension_agent.agent.search import (
+    SearchChunkPayload,
+    SearchRequest,
+    SearchResult,
+    SearchRunner,
+)
 from pension_agent.agent.tax_payout import (
     create_tax_payout_agent,
     load_tax_payout_agent_prompt,
@@ -32,6 +40,22 @@ def anyio_backend() -> str:
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
     bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
+    invocation_count: int = 0
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self.invocation_count += 1
+        return super()._generate(
+            messages,
+            stop=stop,
+            run_manager=run_manager,
+            **kwargs,
+        )
 
     def bind_tools(
         self,
@@ -43,19 +67,19 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
 
 
 @dataclass
-class FakeSearchAdapter:
+class FakeSearchService:
     result: SearchResult
-    calls: list[tuple[str, Permission]] = field(default_factory=list)
+    calls: list[tuple[SearchRequest, Permission]] = field(default_factory=list)
 
     async def search(
         self,
-        objective: str,
+        request: SearchRequest,
         *,
         permission: Permission,
         deadline: float | None = None,
     ) -> SearchResult:
         assert deadline is not None
-        self.calls.append((objective, permission))
+        self.calls.append((request, permission))
         return self.result
 
 
@@ -77,6 +101,7 @@ def _model(
     conclusion: str = "가입 유형에 따라 이전 가능 여부가 달라집니다.",
     missing_conditions: list[str] | None = None,
     warnings: list[str] | None = None,
+    evidence_chunk_ids: list[str] | None = None,
 ) -> ToolCallingFakeModel:
     if missing_conditions is None:
         missing_conditions = (
@@ -84,6 +109,8 @@ def _model(
         )
     if warnings is None:
         warnings = []
+    if evidence_chunk_ids is None:
+        evidence_chunk_ids = ["550e8400-e29b-41d4-a716-446655440000"]
     return ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -107,6 +134,7 @@ def _model(
                             "conclusion": conclusion,
                             "missing_conditions": missing_conditions,
                             "warnings": warnings,
+                            "evidence_chunk_ids": evidence_chunk_ids,
                         },
                         "id": "submit-call",
                         "type": "tool_call",
@@ -137,16 +165,15 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
     permission: Permission,
     document_type: DocumentType,
 ) -> None:
-    search = FakeSearchAdapter(
+    search = FakeSearchService(
         SearchResult(
             execution_status="completed",
-            coverage="sufficient",
-            selected_chunks=[_chunk(document_type)],
+            retrieved_chunks=[_chunk(document_type)],
         )
     )
     model = _model()
     model.bindings.clear()
-    agent = factory(model=model, search_adapter=cast(SearchAgentAdapter, search))
+    agent = factory(model=model, search_service=cast(SearchRunner, search))
     assert agent.max_concurrency == 3
     result = await agent(
         {"question": "연금계좌를 이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
@@ -165,7 +192,15 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         }
     ]
     assert result["calculations"] == []
-    assert search.calls == [("이전 가능 여부의 문서 근거 확인", permission)]
+    assert search.calls == [
+        (
+            SearchRequest(objective="이전 가능 여부의 문서 근거 확인"),
+            permission,
+        )
+    ]
+    assert {evidence["chunk_id"] for evidence in result["evidence"]} <= {
+        chunk.chunk_id for chunk in search.result.retrieved_chunks
+    }
     assert all(
         set(names) == {"search_documents", "submit_domain_result"}
         for names, _kwargs in model.bindings
@@ -173,13 +208,143 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
 
 
 @pytest.mark.anyio
-async def test_no_evidence_forces_undetermined_result() -> None:
-    search = FakeSearchAdapter(
-        SearchResult(execution_status="completed", coverage="none", limitations=["근거 없음"])
+async def test_domain_agent_rejects_evidence_id_outside_search_result() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+        )
+    )
+    valid_chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "이전 가능 여부의 문서 근거 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "이전할 수 있습니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["123e4567-e89b-12d3-a456-426614174000"],
+                        },
+                        "id": "invalid-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "가입 유형에 따라 이전할 수 있습니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [valid_chunk_id],
+                        },
+                        "id": "valid-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
     )
     agent = create_policy_agent(
-        model=_model(),
-        search_adapter=cast(SearchAgentAdapter, search),
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
+
+    assert [evidence["chunk_id"] for evidence in result["evidence"]] == [valid_chunk_id]
+    assert "123e4567-e89b-12d3-a456-426614174000" not in str(result)
+
+
+@pytest.mark.anyio
+async def test_parallel_domain_submissions_keep_only_first_call() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "이전 근거"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "첫 번째 검증된 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-first",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "두 번째 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-second",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+        ]
+    )
+    agent = create_policy_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": "이전 가능해?", "objective": "이전 판단"})
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"]["conclusion"] == "첫 번째 검증된 결론"
+    assert model.invocation_count == 2
+
+
+@pytest.mark.anyio
+async def test_no_evidence_forces_undetermined_result() -> None:
+    search = FakeSearchService(
+        SearchResult(execution_status="completed", limitations=["근거 없음"])
+    )
+    model = _model()
+    agent = create_policy_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
     )
     result = await agent({"question": "외부 정보를 알려줘", "objective": "제공 문서 근거 확인"})
 
@@ -189,19 +354,21 @@ async def test_no_evidence_forces_undetermined_result() -> None:
     )
     assert result["decision"]["missing_conditions"] == ["제공 문서의 관련 근거"]
     assert result["evidence"] == []
+    assert model.invocation_count == 1
 
 
 @pytest.mark.anyio
 async def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions() -> None:
-    search = FakeSearchAdapter(
-        SearchResult(execution_status="completed", coverage="none", limitations=["근거 없음"])
+    search = FakeSearchService(
+        SearchResult(execution_status="completed", limitations=["근거 없음"])
+    )
+    model = _model(
+        conclusion="모든 가입자는 언제나 이전할 수 있습니다.",
+        missing_conditions=["가입자의 임의 조건"],
     )
     agent = create_policy_agent(
-        model=_model(
-            conclusion="모든 가입자는 언제나 이전할 수 있습니다.",
-            missing_conditions=["가입자의 임의 조건"],
-        ),
-        search_adapter=cast(SearchAgentAdapter, search),
+        model=model,
+        search_service=cast(SearchRunner, search),
     )
     result = await agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
 
@@ -212,20 +379,20 @@ async def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions()
     }
     assert "언제나 이전" not in str(result)
     assert "가입자의 임의 조건" not in str(result)
+    assert model.invocation_count == 1
 
 
 @pytest.mark.anyio
-async def test_partial_evidence_cannot_be_promoted_to_determined() -> None:
-    search = FakeSearchAdapter(
+async def test_domain_agent_owns_search_sufficiency_decision() -> None:
+    search = FakeSearchService(
         SearchResult(
             execution_status="completed",
-            coverage="partial",
-            selected_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
         )
     )
     agent = create_policy_agent(
-        model=_model(),
-        search_adapter=cast(SearchAgentAdapter, search),
+        model=_model(decision_status="conditional", missing_conditions=["가입 유형"]),
+        search_service=cast(SearchRunner, search),
     )
     result = await agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
 
@@ -235,12 +402,13 @@ async def test_partial_evidence_cannot_be_promoted_to_determined() -> None:
 
 @pytest.mark.anyio
 async def test_search_failure_is_returned_without_evidence() -> None:
-    search = FakeSearchAdapter(
+    search = FakeSearchService(
         SearchResult(execution_status="failed", error="검색을 완료하지 못했습니다.")
     )
+    model = _model()
     agent = create_product_agent(
-        model=_model(),
-        search_adapter=cast(SearchAgentAdapter, search),
+        model=model,
+        search_service=cast(SearchRunner, search),
     )
     result = await agent({"question": "상품 위험은?", "objective": "상품 위험 판단"})
 
@@ -248,15 +416,94 @@ async def test_search_failure_is_returned_without_evidence() -> None:
     assert result["evidence"] == []
     assert result["calculations"] == []
     assert "provider" not in result["error"].lower()
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_user_provided_source_hint_is_forwarded_to_search_service() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "guide.pdf 이전 절차",
+                            "source_file_name": "guide.pdf",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    agent = create_policy_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "guide.pdf에서 이전 절차를 찾아줘",
+            "objective": "이전 절차 판단",
+        }
+    )
+
+    assert result["decision"]["status"] == "undetermined"
+    assert search.calls == [
+        (
+            SearchRequest(
+                objective="guide.pdf 이전 절차",
+                source_file_name="guide.pdf",
+            ),
+            Permission.POLICY,
+        )
+    ]
+
+
+@pytest.mark.anyio
+async def test_model_generated_source_hint_is_rejected_before_search_service() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "이전 절차",
+                            "source_file_name": "hallucinated.pdf",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    agent = create_policy_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": "이전 절차를 알려줘", "objective": "이전 절차 판단"})
+
+    assert result["execution_status"] == "failed"
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert model.invocation_count == 1
 
 
 @pytest.mark.anyio
 async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
-    search = FakeSearchAdapter(
+    search = FakeSearchService(
         SearchResult(
             execution_status="completed",
-            coverage="sufficient",
-            selected_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
         )
     )
     model = ToolCallingFakeModel(
@@ -282,6 +529,7 @@ async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
                             "conclusion": "세율은 10%입니다.",
                             "missing_conditions": [],
                             "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
                         },
                         "id": "submit-call",
                         "type": "tool_call",
@@ -292,7 +540,7 @@ async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
     )
     agent = create_tax_payout_agent(
         model=model,
-        search_adapter=cast(SearchAgentAdapter, search),
+        search_service=cast(SearchRunner, search),
     )
     result = await agent({"question": "세율은?", "objective": "세율 판단"})
 
@@ -306,11 +554,10 @@ async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
 
 @pytest.mark.anyio
 async def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() -> None:
-    search = FakeSearchAdapter(
+    search = FakeSearchService(
         SearchResult(
             execution_status="completed",
-            coverage="sufficient",
-            selected_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
             limitations=["한도는 900만원입니다.", "자료 범위가 제한적입니다."],
         )
     )
@@ -320,7 +567,7 @@ async def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() 
             missing_conditions=["연봉 5천만원 여부"],
             warnings=["세율은 10%입니다.", "일반적인 주의가 필요합니다."],
         ),
-        search_adapter=cast(SearchAgentAdapter, search),
+        search_service=cast(SearchRunner, search),
     )
     result = await agent({"question": "공제액은?", "objective": "공제액 판단"})
 
@@ -336,11 +583,10 @@ async def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() 
 
 @pytest.mark.anyio
 async def test_not_applicable_result_cannot_expose_substantive_ungrounded_conclusion() -> None:
-    search = FakeSearchAdapter(
+    search = FakeSearchService(
         SearchResult(
             execution_status="completed",
-            coverage="sufficient",
-            selected_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
         )
     )
     agent = create_policy_agent(
@@ -349,7 +595,7 @@ async def test_not_applicable_result_cannot_expose_substantive_ungrounded_conclu
             conclusion="연금 이전은 언제나 가능합니다.",
             warnings=["반드시 이전하세요."],
         ),
-        search_adapter=cast(SearchAgentAdapter, search),
+        search_service=cast(SearchRunner, search),
     )
     result = await agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
 

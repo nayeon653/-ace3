@@ -4,7 +4,7 @@ from pension_agent.config.agent_runtime import (
     DEFAULT_AGENT_RUNTIME_CONFIG,
     AgentRuntimeConfig,
 )
-from pension_agent.config.defaults import DEFAULT_SEARCH_AGENT_CONFIG
+from pension_agent.config.defaults import DEFAULT_SEARCH_SERVICE_CONFIG
 from pension_agent.config.domain_agent import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
 from pension_agent.config.hcx import (
     BGE_M3_EMBEDDING_CONFIG,
@@ -15,14 +15,14 @@ from pension_agent.config.hcx import (
     ClovaStudioConnection,
 )
 from pension_agent.config.qdrant import QdrantConnection
-from pension_agent.config.search_agent import SearchAgentConfig
+from pension_agent.config.search_service import SearchServiceConfig
 
 __all__ = [
     "BGE_M3_EMBEDDING_CONFIG",
     "BGE_M3_INDEXING_CONFIG",
     "DEFAULT_AGENT_RUNTIME_CONFIG",
     "DEFAULT_DOMAIN_AGENT_CONFIG",
-    "DEFAULT_SEARCH_AGENT_CONFIG",
+    "DEFAULT_SEARCH_SERVICE_CONFIG",
     "MAIN_SUPERVISOR_HCX_CONFIG",
     "AgentRuntimeConfig",
     "ChatClovaXConfig",
@@ -30,5 +30,5 @@ __all__ = [
     "ClovaStudioConnection",
     "DomainAgentConfig",
     "QdrantConnection",
-    "SearchAgentConfig",
+    "SearchServiceConfig",
 ]
