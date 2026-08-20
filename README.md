@@ -76,6 +76,7 @@ ingest → retrieval
 make setup   # 런타임 + 개발 의존성 설치
 make check   # Ruff 린트·포맷 + mypy 타입 검사 + pytest
 make build   # wheel + source distribution 빌드
+make agent-graph  # 전체 Agent 그래프 문서와 PNG 생성
 
 make qdrant-up     # 로컬 Qdrant 실행
 make qdrant-check  # readiness + Python 클라이언트 연결 확인
@@ -207,6 +208,7 @@ Policy와 Tax/Payout은 `pension_reference`, Product는 `fund_prospectus` 문서
 - [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
 - [`docs/qdrant-retrieval-spec.md`](docs/qdrant-retrieval-spec.md) — Qdrant 저장·검색 계약 진입점
 - [`docs/operations/api-server.md`](docs/operations/api-server.md) — API 서버 로컬 실행·배포·문제 해결
+- [`docs/operations/agent-graph-visualization.md`](docs/operations/agent-graph-visualization.md) — 전체 Agent 그래프 생성·검수
 - [`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md) — 로컬 Qdrant 실행·연결·데이터 관리
 - [`docs/operations/qdrant-indexing.md`](docs/operations/qdrant-indexing.md) — 청크 검증·임베딩·Qdrant 적재·재시작
 - [`docs/operations/document-parsing.md`](docs/operations/document-parsing.md) — Docling 실행·저장·검수 정책
