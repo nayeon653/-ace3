@@ -1,5 +1,6 @@
 """외부 I/O 없이 Main Supervisor 컴포넌트를 검증한다."""
 
+import asyncio
 from collections.abc import Sequence
 from importlib import resources
 from typing import Any, ClassVar
@@ -10,6 +11,7 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.runnables import Runnable
 
 from pension_agent.agent.contracts import DomainName, DomainRequest, DomainResult
+from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.orchestration import (
     AnswerService,
     FinalAnswerMissingError,
@@ -17,6 +19,11 @@ from pension_agent.agent.orchestration import (
     create_domain_agent_tool,
     create_main_supervisor,
 )
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
@@ -38,7 +45,12 @@ def _runner(
     conclusion: str,
     requests: list[DomainRequest],
 ):
-    def run(request: DomainRequest) -> DomainResult:
+    async def run(
+        request: DomainRequest,
+        *,
+        deadline: float | None = None,
+    ) -> DomainResult:
+        assert deadline is not None
         requests.append(request)
         return {
             "domain": domain,
@@ -65,7 +77,11 @@ def _tool_call(name: str, call_id: str, objective: str) -> dict[str, Any]:
     }
 
 
-def test_main_supervisor_runs_domain_tools_and_accumulates_results() -> None:
+@pytest.mark.anyio
+async def test_main_supervisor_runs_domain_tools_and_accumulates_results(
+    anyio_backend: str,
+) -> None:
+    del anyio_backend
     requests: list[DomainRequest] = []
     policy_tool = create_domain_agent_tool(
         name="analyze_policy",
@@ -96,13 +112,14 @@ def test_main_supervisor_runs_domain_tools_and_accumulates_results() -> None:
     model.bindings.clear()
     supervisor = create_main_supervisor(model=model, tools=[policy_tool, product_tool])
 
-    result = supervisor.invoke(
+    result = await supervisor.ainvoke(
         {
             "messages": [{"role": "user", "content": "이전 후 상품을 바꿀 수 있나요?"}],
             "question_id": "Q-001",
             "question": "이전 후 상품을 바꿀 수 있나요?",
             "domain_results": [],
-        }
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
     )
 
     answer = build_agent_answer(result["messages"])
@@ -134,7 +151,11 @@ def test_main_supervisor_prompt_is_packaged() -> None:
     assert "JSON이나 Tool 호출 형식을 직접 출력하지 않는다" in prompt
 
 
-def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth() -> None:
+@pytest.mark.anyio
+async def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth(
+    anyio_backend: str,
+) -> None:
+    del anyio_backend
     requests: list[DomainRequest] = []
     policy_tool = create_domain_agent_tool(
         name="analyze_policy",
@@ -158,13 +179,14 @@ def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth() 
     )
     supervisor = create_main_supervisor(model=model, tools=[policy_tool])
 
-    result = supervisor.invoke(
+    result = await supervisor.ainvoke(
         {
             "messages": [{"role": "user", "content": "가입과 이전 절차를 알려주세요."}],
             "question_id": "Q-MULTI-POLICY",
             "question": "가입과 이전 절차를 알려주세요.",
             "domain_results": [],
-        }
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
     )
 
     assert {request["objective"] for request in requests} == {
@@ -181,7 +203,11 @@ def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth() 
     assert len(blocked) == 1
 
 
-def test_main_supervisor_model_limit_is_not_returned_as_a_user_answer() -> None:
+@pytest.mark.anyio
+async def test_main_supervisor_model_limit_is_not_returned_as_a_user_answer(
+    anyio_backend: str,
+) -> None:
+    del anyio_backend
     requests: list[DomainRequest] = []
     policy_tool = create_domain_agent_tool(
         name="analyze_policy",
@@ -208,4 +234,4 @@ def test_main_supervisor_model_limit_is_not_returned_as_a_user_answer() -> None:
     service = AnswerService(supervisor)
 
     with pytest.raises(FinalAnswerMissingError, match="최종 자연어 답변"):
-        service.run(question_id="Q-LIMIT", question="이전할 수 있나요?")
+        await service.run(question_id="Q-LIMIT", question="이전할 수 있나요?")

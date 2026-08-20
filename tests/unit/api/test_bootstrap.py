@@ -2,19 +2,31 @@
 
 from typing import cast
 
+import pytest
+
 from pension_agent.agent.orchestration import AnswerService
 from pension_agent.api import bootstrap
 
 
-def test_build_answer_service_delegates_to_agent_runtime(monkeypatch) -> None:
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_build_answer_service_delegates_to_agent_runtime(
+    monkeypatch,
+    anyio_backend: str,
+) -> None:
+    del anyio_backend
     sentinel = cast(AnswerService, object())
     calls: list[None] = []
 
-    def build() -> AnswerService:
+    async def build() -> AnswerService:
         calls.append(None)
         return sentinel
 
     monkeypatch.setattr(bootstrap, "build_runtime_answer_service", build)
 
-    assert bootstrap.build_answer_service() is sentinel
+    assert await bootstrap.build_answer_service() is sentinel
     assert calls == [None]

@@ -8,18 +8,21 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient, QdrantClient
 
 from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG
 from pension_agent.core import SearchMode, SearchQuery
 from pension_agent.ingest.qdrant_indexer import EmbeddingCache, ensure_collection, index_chunks
 from pension_agent.ingest.qdrant_input import PreparedChunk
-from pension_agent.retrieval import QdrantChunkRetriever
+from pension_agent.retrieval import AsyncQdrantChunkRetriever
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("QDRANT_DOCKER_INTEGRATION") != "1",
-    reason="Docker Qdrant 통합 테스트는 전용 CI job이나 make target에서 실행합니다.",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        os.environ.get("QDRANT_DOCKER_INTEGRATION") != "1",
+        reason="Docker Qdrant 통합 테스트는 전용 CI job이나 make target에서 실행합니다.",
+    ),
+    pytest.mark.anyio,
+]
 
 _QDRANT_URL = "http://127.0.0.1:6333"
 _DENSE_DIMENSIONS = 2
@@ -55,7 +58,12 @@ def _chunk() -> PreparedChunk:
     )
 
 
-def test_indexed_chunk_is_found_by_default_hybrid_search(tmp_path: Path) -> None:
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def test_indexed_chunk_is_found_by_default_hybrid_search(tmp_path: Path) -> None:
     assert DEFAULT_SEARCH_AGENT_CONFIG.default_search_mode is SearchMode.HYBRID
 
     collection_name = f"pension_documents_hybrid_smoke_{uuid4().hex}"
@@ -63,6 +71,7 @@ def test_indexed_chunk_is_found_by_default_hybrid_search(tmp_path: Path) -> None
         url=_QDRANT_URL,
         cloud_inference=False,
     )
+    async_client: AsyncQdrantClient | None = None
     try:
         ensure_collection(
             client,
@@ -82,8 +91,15 @@ def test_indexed_chunk_is_found_by_default_hybrid_search(tmp_path: Path) -> None
             )
 
         assert result.complete is True
-        retriever = QdrantChunkRetriever(client, collection_name=collection_name)
-        hits = retriever.search_chunks(
+        async_client = AsyncQdrantClient(
+            url=_QDRANT_URL,
+            cloud_inference=False,
+        )
+        retriever = AsyncQdrantChunkRetriever(
+            async_client,
+            collection_name=collection_name,
+        )
+        hits = await retriever.search_chunks(
             SearchQuery(
                 text="IRP 계좌 이전",
                 dense=(1.0, 0.0),
@@ -95,6 +111,8 @@ def test_indexed_chunk_is_found_by_default_hybrid_search(tmp_path: Path) -> None
         assert [hit.chunk.chunk_id for hit in hits] == [chunk.point_id]
         assert hits[0].chunk.content == "IRP 계좌 이전 절차와 가입 유형 확인"
     finally:
+        if async_client is not None:
+            await async_client.close()
         if client.collection_exists(collection_name):
             client.delete_collection(collection_name)
         client.close()

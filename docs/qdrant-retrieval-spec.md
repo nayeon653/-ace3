@@ -45,7 +45,8 @@ flowchart LR
 - `retrieval`은 Qdrant 요청 생성, 필터 변환, payload 검증과 결과 변환을 소유한다.
 - `agent.search`는 공용 검색 타입과 `ChunkRetriever` Port만 사용한다.
 - 각 Domain Agent는 도메인 이름인 `Permission`을 상태에 넣고, 중앙 매핑으로 검색 문서군을 제한한다.
-- `retrieval`의 `QdrantChunkRetriever`가 이 Port를 구현하고 Qdrant SDK를 캡슐화한다.
+- 온라인 Agent에서는 `retrieval`의 `AsyncQdrantChunkRetriever`가 async Port를 구현한다.
+  `QdrantChunkRetriever`는 오프라인 적재 검증과 동기 도구에서 같은 계약을 유지한다.
 - Qdrant SDK 타입은 `pension_agent/retrieval/` 밖으로 노출하지 않는다.
 - `content`만 답변 근거로 사용하고 `embedding_content`는 외부 응답에 노출하지 않는다.
 

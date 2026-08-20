@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from threading import Lock
 from time import sleep
 from typing import Any
 
 import pytest
+from httpx import AsyncClient, Client
 from pydantic import SecretStr
 
 from pension_agent.config import BGE_M3_EMBEDDING_CONFIG, ClovaStudioConnection
@@ -92,3 +94,25 @@ def test_embedder_rejects_invalid_request_rate() -> None:
             client=Any,
             requests_per_minute=0,
         )
+
+
+def test_query_embedder_uses_runtime_owned_http_clients() -> None:
+    connection = ClovaStudioConnection(
+        api_key=SecretStr("test-secret-key"),
+        api_base_url="https://example.test/v1/openai",
+    )
+    http_client = Client()
+    http_async_client = AsyncClient()
+    try:
+        embedder = create_clova_query_embedder(
+            config=BGE_M3_EMBEDDING_CONFIG,
+            connection=connection,
+            http_client=http_client,
+            http_async_client=http_async_client,
+        )
+
+        assert embedder.http_client is http_client
+        assert embedder.http_async_client is http_async_client
+    finally:
+        http_client.close()
+        asyncio.run(http_async_client.aclose())

@@ -1,8 +1,8 @@
 """Search Agent 결과를 사용하는 얇은 Domain Agent를 검증한다."""
 
+import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from threading import Event
 from typing import Any, ClassVar, cast
 from uuid import UUID
 
@@ -25,6 +25,11 @@ from pension_agent.config import DomainAgentConfig
 from pension_agent.core import DocumentType
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 class ToolCallingFakeModel(FakeMessagesListChatModel):
     bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
 
@@ -42,7 +47,14 @@ class FakeSearchAdapter:
     result: SearchResult
     calls: list[tuple[str, Permission]] = field(default_factory=list)
 
-    def search(self, objective: str, *, permission: Permission) -> SearchResult:
+    async def search(
+        self,
+        objective: str,
+        *,
+        permission: Permission,
+        deadline: float | None = None,
+    ) -> SearchResult:
+        assert deadline is not None
         self.calls.append((objective, permission))
         return self.result
 
@@ -105,6 +117,7 @@ def _model(
     )
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("factory", "domain", "permission", "document_type"),
     [
@@ -118,7 +131,7 @@ def _model(
         (create_product_agent, "product", Permission.PRODUCT, DocumentType.FUND_PROSPECTUS),
     ],
 )
-def test_domain_agents_use_search_result_and_submit_verified_result(
+async def test_domain_agents_use_search_result_and_submit_verified_result(
     factory: Callable[..., DomainAgent],
     domain: DomainName,
     permission: Permission,
@@ -134,13 +147,10 @@ def test_domain_agents_use_search_result_and_submit_verified_result(
     model = _model()
     model.bindings.clear()
     agent = factory(model=model, search_adapter=cast(SearchAgentAdapter, search))
-    assert agent.max_workers == 3
-    try:
-        result = agent(
-            {"question": "연금계좌를 이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
-        )
-    finally:
-        agent.close()
+    assert agent.max_concurrency == 3
+    result = await agent(
+        {"question": "연금계좌를 이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
+    )
 
     validate_domain_result(result)
     assert result["domain"] == domain
@@ -162,7 +172,8 @@ def test_domain_agents_use_search_result_and_submit_verified_result(
     )
 
 
-def test_no_evidence_forces_undetermined_result() -> None:
+@pytest.mark.anyio
+async def test_no_evidence_forces_undetermined_result() -> None:
     search = FakeSearchAdapter(
         SearchResult(execution_status="completed", coverage="none", limitations=["근거 없음"])
     )
@@ -170,10 +181,7 @@ def test_no_evidence_forces_undetermined_result() -> None:
         model=_model(),
         search_adapter=cast(SearchAgentAdapter, search),
     )
-    try:
-        result = agent({"question": "외부 정보를 알려줘", "objective": "제공 문서 근거 확인"})
-    finally:
-        agent.close()
+    result = await agent({"question": "외부 정보를 알려줘", "objective": "제공 문서 근거 확인"})
 
     assert result["decision"]["status"] == "undetermined"
     assert result["decision"]["conclusion"] == (
@@ -183,7 +191,8 @@ def test_no_evidence_forces_undetermined_result() -> None:
     assert result["evidence"] == []
 
 
-def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions() -> None:
+@pytest.mark.anyio
+async def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions() -> None:
     search = FakeSearchAdapter(
         SearchResult(execution_status="completed", coverage="none", limitations=["근거 없음"])
     )
@@ -194,10 +203,7 @@ def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions() -> No
         ),
         search_adapter=cast(SearchAgentAdapter, search),
     )
-    try:
-        result = agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
-    finally:
-        agent.close()
+    result = await agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
 
     assert result["decision"] == {
         "status": "undetermined",
@@ -208,7 +214,8 @@ def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions() -> No
     assert "가입자의 임의 조건" not in str(result)
 
 
-def test_partial_evidence_cannot_be_promoted_to_determined() -> None:
+@pytest.mark.anyio
+async def test_partial_evidence_cannot_be_promoted_to_determined() -> None:
     search = FakeSearchAdapter(
         SearchResult(
             execution_status="completed",
@@ -220,16 +227,14 @@ def test_partial_evidence_cannot_be_promoted_to_determined() -> None:
         model=_model(),
         search_adapter=cast(SearchAgentAdapter, search),
     )
-    try:
-        result = agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
-    finally:
-        agent.close()
+    result = await agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
 
     assert result["decision"]["status"] == "conditional"
     assert result["decision"]["missing_conditions"]
 
 
-def test_search_failure_is_returned_without_evidence() -> None:
+@pytest.mark.anyio
+async def test_search_failure_is_returned_without_evidence() -> None:
     search = FakeSearchAdapter(
         SearchResult(execution_status="failed", error="검색을 완료하지 못했습니다.")
     )
@@ -237,10 +242,7 @@ def test_search_failure_is_returned_without_evidence() -> None:
         model=_model(),
         search_adapter=cast(SearchAgentAdapter, search),
     )
-    try:
-        result = agent({"question": "상품 위험은?", "objective": "상품 위험 판단"})
-    finally:
-        agent.close()
+    result = await agent({"question": "상품 위험은?", "objective": "상품 위험 판단"})
 
     assert result["execution_status"] == "failed"
     assert result["evidence"] == []
@@ -248,7 +250,8 @@ def test_search_failure_is_returned_without_evidence() -> None:
     assert "provider" not in result["error"].lower()
 
 
-def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
+@pytest.mark.anyio
+async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
     search = FakeSearchAdapter(
         SearchResult(
             execution_status="completed",
@@ -291,10 +294,7 @@ def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
         model=model,
         search_adapter=cast(SearchAgentAdapter, search),
     )
-    try:
-        result = agent({"question": "세율은?", "objective": "세율 판단"})
-    finally:
-        agent.close()
+    result = await agent({"question": "세율은?", "objective": "세율 판단"})
 
     assert result["decision"]["status"] == "conditional"
     assert result["decision"]["conclusion"] == (
@@ -304,7 +304,8 @@ def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
     assert result["calculations"] == []
 
 
-def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() -> None:
+@pytest.mark.anyio
+async def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() -> None:
     search = FakeSearchAdapter(
         SearchResult(
             execution_status="completed",
@@ -321,10 +322,7 @@ def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() -> Non
         ),
         search_adapter=cast(SearchAgentAdapter, search),
     )
-    try:
-        result = agent({"question": "공제액은?", "objective": "공제액 판단"})
-    finally:
-        agent.close()
+    result = await agent({"question": "공제액은?", "objective": "공제액 판단"})
 
     serialized = str(result)
     assert result["decision"]["status"] == "conditional"
@@ -336,7 +334,8 @@ def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() -> Non
     assert "자료 범위가 제한적입니다." in result["warnings"]
 
 
-def test_not_applicable_result_cannot_expose_substantive_ungrounded_conclusion() -> None:
+@pytest.mark.anyio
+async def test_not_applicable_result_cannot_expose_substantive_ungrounded_conclusion() -> None:
     search = FakeSearchAdapter(
         SearchResult(
             execution_status="completed",
@@ -352,10 +351,7 @@ def test_not_applicable_result_cannot_expose_substantive_ungrounded_conclusion()
         ),
         search_adapter=cast(SearchAgentAdapter, search),
     )
-    try:
-        result = agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
-    finally:
-        agent.close()
+    result = await agent({"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"})
 
     assert result["decision"] == {
         "status": "not_applicable",
@@ -366,61 +362,191 @@ def test_not_applicable_result_cannot_expose_substantive_ungrounded_conclusion()
     assert result["evidence"] == []
 
 
-def test_domain_agent_rejects_new_work_instead_of_queueing_behind_timeout() -> None:
-    started = Event()
-    release = Event()
+@pytest.mark.anyio
+async def test_domain_agent_waits_for_capacity_instead_of_failing_fast() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
 
     class BlockingGraph:
-        def invoke(self, input: dict[str, Any], /) -> dict[str, Any]:
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: Any,
+        ) -> dict[str, Any]:
             del input
+            assert context.deadline > asyncio.get_running_loop().time()
             started.set()
-            release.wait(timeout=1)
-            return {}
+            await release.wait()
+            return _completed_graph_state()
 
     agent = DomainAgent(
         domain="policy",
         graph=BlockingGraph(),
-        config=DomainAgentConfig(timeout_seconds=0.01),
-        max_workers=1,
+        max_concurrency=1,
     )
     request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
-    try:
-        first = agent(request)
-        assert started.is_set()
-        second = agent(request)
-    finally:
-        release.set()
-        agent.close()
+    first_task = asyncio.create_task(agent(request))
+    await started.wait()
+    second_task = asyncio.create_task(agent(request))
+    await asyncio.sleep(0)
+    assert not second_task.done()
+    release.set()
+    first, second = await asyncio.gather(first_task, second_task)
+
+    assert first["execution_status"] == "completed"
+    assert second["execution_status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_domain_agent_capacity_wait_respects_parent_deadline() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingGraph:
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: Any,
+        ) -> dict[str, Any]:
+            del input, context
+            started.set()
+            await release.wait()
+            return _completed_graph_state()
+
+    agent = DomainAgent(domain="policy", graph=BlockingGraph(), max_concurrency=1)
+    request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
+    first_task = asyncio.create_task(agent(request))
+    await started.wait()
+
+    second = await agent(
+        request,
+        deadline=asyncio.get_running_loop().time() + 0.01,
+    )
+    release.set()
+    first = await first_task
+
+    assert first["execution_status"] == "completed"
+    assert second["execution_status"] == "timeout"
+
+
+@pytest.mark.anyio
+async def test_domain_agent_does_not_start_graph_after_parent_deadline() -> None:
+    class UnexpectedGraph:
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: Any,
+        ) -> dict[str, Any]:
+            raise AssertionError((input, context))
+
+    agent = DomainAgent(domain="policy", graph=UnexpectedGraph())
+
+    result = await agent(
+        {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"},
+        deadline=asyncio.get_running_loop().time() - 1,
+    )
+
+    assert result["execution_status"] == "timeout"
+
+
+@pytest.mark.anyio
+async def test_domain_agent_timeout_cancels_graph_and_releases_capacity() -> None:
+    cancelled = asyncio.Event()
+
+    class TimeoutOnceGraph:
+        calls = 0
+
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: Any,
+        ) -> dict[str, Any]:
+            del input, context
+            self.calls += 1
+            if self.calls == 1:
+                try:
+                    await asyncio.sleep(10)
+                finally:
+                    cancelled.set()
+            return _completed_graph_state()
+
+    agent = DomainAgent(
+        domain="policy",
+        graph=TimeoutOnceGraph(),
+        config=DomainAgentConfig(timeout_seconds=0.01, max_concurrency=1),
+    )
+    request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
+
+    first = await agent(request)
+    second = await agent(request)
 
     assert first["execution_status"] == "timeout"
-    assert second["execution_status"] == "failed"
-    assert "처리 가능한 요청 수" in second["error"]
+    assert cancelled.is_set()
+    assert second["execution_status"] == "completed"
 
 
-def test_domain_agent_propagates_tracing_context_to_worker() -> None:
+@pytest.mark.anyio
+async def test_domain_agent_external_cancellation_releases_capacity() -> None:
+    started = asyncio.Event()
+
+    class CancellableGraph:
+        block = True
+
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: Any,
+        ) -> dict[str, Any]:
+            del input, context
+            if self.block:
+                started.set()
+                await asyncio.sleep(10)
+            return _completed_graph_state()
+
+    graph = CancellableGraph()
+    agent = DomainAgent(domain="policy", graph=graph, max_concurrency=1)
+    request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
+    task = asyncio.create_task(agent(request))
+    await started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    graph.block = False
+
+    result = await agent(request)
+
+    assert result["execution_status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_domain_agent_propagates_tracing_context_to_async_graph() -> None:
     observed_parent_ids: list[UUID | None] = []
 
     class ContextRecordingGraph:
-        def invoke(self, input: dict[str, Any], /) -> dict[str, Any]:
-            del input
+        async def ainvoke(
+            self,
+            input: dict[str, Any],
+            /,
+            *,
+            context: Any,
+        ) -> dict[str, Any]:
+            del input, context
             current_run = get_current_run_tree()
             observed_parent_ids.append(current_run.id if current_run is not None else None)
-            return {
-                "domain_result": {
-                    "domain": "policy",
-                    "execution_status": "completed",
-                    "decision": {
-                        "status": "determined",
-                        "conclusion": "이전할 수 있습니다.",
-                        "missing_conditions": [],
-                    },
-                    "evidence": [],
-                    "calculations": [],
-                    "warnings": [],
-                }
-            }
+            return _completed_graph_state()
 
-    agent = DomainAgent(domain="policy", graph=ContextRecordingGraph(), max_workers=1)
+    agent = DomainAgent(domain="policy", graph=ContextRecordingGraph(), max_concurrency=1)
     parents = [
         RunTree(
             name=f"request-{index}",
@@ -430,17 +556,31 @@ def test_domain_agent_propagates_tracing_context_to_worker() -> None:
         )
         for index in range(2)
     ]
-    try:
-        for parent in parents:
-            with tracing_context(parent=parent, enabled=False):
-                result = agent(
-                    {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
-                )
-    finally:
-        agent.close()
+    for parent in parents:
+        with tracing_context(parent=parent, enabled=False):
+            result = await agent(
+                {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
+            )
 
     assert result["execution_status"] == "completed"
     assert observed_parent_ids == [parent.id for parent in parents]
+
+
+def _completed_graph_state() -> dict[str, Any]:
+    return {
+        "domain_result": {
+            "domain": "policy",
+            "execution_status": "completed",
+            "decision": {
+                "status": "determined",
+                "conclusion": "이전할 수 있습니다.",
+                "missing_conditions": [],
+            },
+            "evidence": [],
+            "calculations": [],
+            "warnings": [],
+        }
+    }
 
 
 def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() -> None:

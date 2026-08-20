@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 from time import monotonic, sleep
 
+from httpx import AsyncClient, Client
 from langchain_naver import ClovaXEmbeddings  # type: ignore[import-untyped]
 from openai import OpenAIError
 
@@ -55,10 +56,17 @@ def create_clova_query_embedder(
     *,
     config: ClovaEmbeddingConfig,
     connection: ClovaStudioConnection,
+    http_client: Client | None = None,
+    http_async_client: AsyncClient | None = None,
 ) -> ClovaXEmbeddings:
     """고정 bge-m3 설정과 환경 연결 정보로 Query Embedder를 만든다."""
 
-    return _create_clova_client(config=config, connection=connection)
+    return _create_clova_client(
+        config=config,
+        connection=connection,
+        http_client=http_client,
+        http_async_client=http_async_client,
+    )
 
 
 def create_clova_document_embedder(
@@ -81,6 +89,8 @@ def _create_clova_client(
     *,
     config: ClovaEmbeddingConfig,
     connection: ClovaStudioConnection,
+    http_client: Client | None = None,
+    http_async_client: AsyncClient | None = None,
 ) -> ClovaXEmbeddings:
     if connection.api_key is None or not connection.api_key.get_secret_value().strip():
         raise ClovaEmbeddingFactoryError("CLOVASTUDIO_API_KEY가 설정되지 않았습니다.")
@@ -96,6 +106,8 @@ def _create_clova_client(
             max_retries=config.max_retries,
             api_key=connection.api_key,
             base_url=connection.api_base_url,
+            http_client=http_client,
+            http_async_client=http_async_client,
         )
     except (ImportError, OpenAIError, RuntimeError, TypeError, ValueError):
         pass

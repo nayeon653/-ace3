@@ -68,6 +68,7 @@ stack trace, 내부 경로와 모델 내부 메시지는 포함하지 않는다.
 |---|---|
 | 400 | 필수 파라미터 누락, 빈 값 등 입력 오류 |
 | 500 | 의존성 초기화, 근거 검색, Agent 실행이나 응답 조립 오류 |
+| 503 | 프로세스의 활성 4개와 대기 64개 answer admission이 모두 사용 중인 경우 |
 
 오류 응답은 원시 입력 검증 내용이나 내부 실행 정보를 노출하지 않고 다음 형태로
 반환한다.
@@ -103,6 +104,15 @@ Domain Agent 3종, Main Supervisor와 `AnswerService`를 프로세스당 한 번
 `/answer` 요청은 조립된 동일 객체를 재사용하며 요청별
 상태는 공유하지 않는다. 필수 인증·연결 설정이 없거나 조립에 실패하면 서버 시작이
 실패한다. `/health` 요청 자체는 조립된 Agent를 실행하지 않는다.
+
+제품 실행 경로는 FastAPI부터 HCX, query embedding과 Qdrant까지 native async를
+사용한다. `/answer` capacity 대기부터 최종 응답 조립까지 기본 180초의 하나의 deadline을
+적용하며, 프로세스당 활성 답변 4개, 대기 답변 64개와 provider별 동시성 상한을 둔다.
+admission 68개를 넘는 요청은 Agent를 시작하지 않고 정제된 503을 반환한다. 연결이 먼저
+끊기면 ASGI disconnect를 감지해 하위 answer coroutine을 취소한다. 따라서 provider를
+기다리는 요청이 있어도 `/health`는 같은 event loop에서 독립적으로 응답한다. 구체적인
+상한과 Uvicorn worker 수에 따른 배수는
+[`API 서버 실행과 확인`](operations/api-server.md)의 비동기 실행 예산을 따른다.
 
 서버 실행, 환경변수, 로컬 확인과 배포 방법은
 [`API 서버 실행과 확인`](operations/api-server.md)을 따른다.

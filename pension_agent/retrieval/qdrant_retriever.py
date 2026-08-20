@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -9,8 +10,9 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from kiwipiepy import Kiwi  # type: ignore[import-untyped]
+from langsmith.utils import ContextThreadPoolExecutor
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
-from qdrant_client import QdrantClient, models
+from qdrant_client import AsyncQdrantClient, QdrantClient, models
 from qdrant_client.http.exceptions import ApiException
 
 from pension_agent.core import (
@@ -34,6 +36,10 @@ SPARSE_MODEL_NAME = "qdrant/bm25"
 _CONTENT_TAG_PREFIXES = ("N", "V", "M")
 _CONTENT_TAGS = frozenset({"SL", "SH", "SN", "XR"})
 _MAX_RESULT_LIMIT = 100
+_KIWI_EXECUTOR = ContextThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="kiwi-tokenizer",
+)
 
 BM25_OPTIONS = models.Bm25Config(
     k=1.2,
@@ -92,6 +98,19 @@ def to_bm25_text(text: str) -> str:
         for token in _kiwi().tokenize(text)
         if token.tag.startswith(_CONTENT_TAG_PREFIXES) or token.tag in _CONTENT_TAGS
     )
+
+
+async def async_to_bm25_text(text: str) -> str:
+    """Kiwi CPU 작업을 이벤트 루프 밖의 단일 전용 worker에서 실행한다."""
+
+    future = _KIWI_EXECUTOR.submit(to_bm25_text, text)
+    return await asyncio.wrap_future(future)
+
+
+async def prewarm_kiwi() -> None:
+    """요청 수신 전에 Kiwi lazy 초기화를 완료한다."""
+
+    await async_to_bm25_text("형태소 분석 준비")
 
 
 def make_locator(
@@ -258,46 +277,201 @@ class QdrantChunkRetriever:
         query_filter: models.Filter | None,
         limit: int,
     ) -> _QueryPlan:
-        if query.mode is SearchMode.SPARSE:
-            return _QueryPlan(
-                query=_sparse_document(sparse_text),
-                using=SPARSE_VECTOR_NAME,
-                prefetch=None,
-                query_filter=query_filter,
-                limit=limit,
-            )
+        return _build_query_plan(
+            query=query,
+            sparse_text=sparse_text,
+            query_filter=query_filter,
+            limit=limit,
+            prefetch_limit=self._prefetch_limit,
+        )
 
-        dense = list(query.dense or ())
-        if query.mode is SearchMode.DENSE or not sparse_text:
-            return _QueryPlan(
-                query=dense,
-                using=DENSE_VECTOR_NAME,
-                prefetch=None,
-                query_filter=query_filter,
-                limit=limit,
-            )
 
-        prefetch_limit = max(self._prefetch_limit, limit)
-        return _QueryPlan(
-            prefetch=[
-                models.Prefetch(
-                    query=_sparse_document(sparse_text),
-                    using=SPARSE_VECTOR_NAME,
-                    limit=prefetch_limit,
-                    filter=query_filter,
-                ),
-                models.Prefetch(
-                    query=dense,
-                    using=DENSE_VECTOR_NAME,
-                    limit=prefetch_limit,
-                    filter=query_filter,
-                ),
-            ],
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
-            using=None,
-            query_filter=None,
+class AsyncQdrantChunkRetriever:
+    """온라인 Agent가 사용하는 native async Qdrant 조회 Adapter."""
+
+    def __init__(
+        self,
+        client: AsyncQdrantClient,
+        *,
+        collection_name: str,
+        prefetch_limit: int = 30,
+    ) -> None:
+        collection_name = collection_name.strip()
+        if not collection_name:
+            raise ValueError("Qdrant collection 이름은 비어 있을 수 없습니다.")
+        _validate_limit(prefetch_limit)
+        self._client = client
+        self._collection_name = collection_name
+        self._prefetch_limit = prefetch_limit
+
+    async def search_chunks(
+        self,
+        query: SearchQuery,
+        *,
+        filters: SearchFilters | None = None,
+        limit: int = 10,
+    ) -> list[SearchHit]:
+        """전체 corpus를 이벤트 루프를 막지 않고 검색한다."""
+
+        _validate_limit(limit)
+        query_filter = QdrantFilterBuilder.build(filters or SearchFilters())
+        sparse_text = await async_to_bm25_text(query.text)
+        if query.mode is SearchMode.SPARSE and not sparse_text:
+            return []
+
+        plan = _build_query_plan(
+            query=query,
+            sparse_text=sparse_text,
+            query_filter=query_filter,
+            limit=limit,
+            prefetch_limit=self._prefetch_limit,
+        )
+        try:
+            response = await self._client.query_points(
+                collection_name=self._collection_name,
+                query=plan.query,
+                using=plan.using,
+                prefetch=plan.prefetch,
+                query_filter=plan.query_filter,
+                limit=plan.limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except ApiException as exc:
+            raise RetrievalBackendError("Qdrant 검색 요청에 실패했습니다.") from exc
+
+        return [
+            SearchHit(chunk=_to_chunk(point), score=float(point.score)) for point in response.points
+        ]
+
+    async def search_within_document(
+        self,
+        query: SearchQuery,
+        *,
+        source_file_name: str,
+        document_types: frozenset[DocumentType] | None = None,
+        limit: int = 10,
+    ) -> list[SearchHit]:
+        """원본 파일 하나로 검색 범위를 제한한다."""
+
+        return await self.search_chunks(
+            query,
+            filters=SearchFilters(
+                source_file_name=source_file_name,
+                document_types=document_types,
+            ),
             limit=limit,
         )
+
+    async def get_neighbor_chunks(
+        self,
+        request: NeighborRequest,
+        *,
+        document_types: frozenset[DocumentType] | None = None,
+    ) -> list[RetrievedChunk]:
+        """같은 문서의 인접 청크를 문서 순서대로 조회한다."""
+
+        limit = request.before + request.after + 1
+        _validate_limit(limit)
+        try:
+            records, _next_offset = await self._client.scroll(
+                collection_name=self._collection_name,
+                scroll_filter=QdrantFilterBuilder.neighbors(
+                    request,
+                    document_types=document_types,
+                ),
+                limit=limit,
+                order_by="chunk_index",
+                with_payload=True,
+                with_vectors=False,
+            )
+        except ApiException as exc:
+            raise RetrievalBackendError("Qdrant 인접 청크 조회에 실패했습니다.") from exc
+
+        chunks = [_to_chunk(record) for record in records]
+        return sorted(chunks, key=lambda chunk: chunk.chunk_index)
+
+    async def get_chunk(
+        self,
+        chunk_id: str,
+        *,
+        document_types: frozenset[DocumentType] | None = None,
+    ) -> RetrievedChunk | None:
+        """UUID chunk ID로 근거 하나를 다시 조회한다."""
+
+        try:
+            point_id = str(UUID(chunk_id))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise RetrievalDataError("chunk_id가 올바른 UUID가 아닙니다.") from exc
+
+        try:
+            records = await self._client.retrieve(
+                collection_name=self._collection_name,
+                ids=[point_id],
+                with_payload=True,
+                with_vectors=False,
+            )
+        except ApiException as exc:
+            raise RetrievalBackendError("Qdrant 청크 조회에 실패했습니다.") from exc
+
+        if not records:
+            return None
+        if len(records) != 1:
+            raise RetrievalDataError("단건 chunk ID 조회가 여러 point를 반환했습니다.")
+        chunk = _to_chunk(records[0])
+        if document_types is not None and chunk.document_type not in document_types:
+            return None
+        return chunk
+
+
+def _build_query_plan(
+    *,
+    query: SearchQuery,
+    sparse_text: str,
+    query_filter: models.Filter | None,
+    limit: int,
+    prefetch_limit: int,
+) -> _QueryPlan:
+    if query.mode is SearchMode.SPARSE:
+        return _QueryPlan(
+            query=_sparse_document(sparse_text),
+            using=SPARSE_VECTOR_NAME,
+            prefetch=None,
+            query_filter=query_filter,
+            limit=limit,
+        )
+
+    dense = list(query.dense or ())
+    if query.mode is SearchMode.DENSE or not sparse_text:
+        return _QueryPlan(
+            query=dense,
+            using=DENSE_VECTOR_NAME,
+            prefetch=None,
+            query_filter=query_filter,
+            limit=limit,
+        )
+
+    resolved_prefetch_limit = max(prefetch_limit, limit)
+    return _QueryPlan(
+        prefetch=[
+            models.Prefetch(
+                query=_sparse_document(sparse_text),
+                using=SPARSE_VECTOR_NAME,
+                limit=resolved_prefetch_limit,
+                filter=query_filter,
+            ),
+            models.Prefetch(
+                query=dense,
+                using=DENSE_VECTOR_NAME,
+                limit=resolved_prefetch_limit,
+                filter=query_filter,
+            ),
+        ],
+        query=models.FusionQuery(fusion=models.Fusion.RRF),
+        using=None,
+        query_filter=None,
+        limit=limit,
+    )
 
 
 def _sparse_document(text: str) -> models.Document:

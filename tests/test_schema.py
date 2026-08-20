@@ -9,7 +9,12 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from pension_agent.agent.contracts import AgentAnswer, DomainResult
-from pension_agent.agent.orchestration import AnswerService, AnswerServiceResult, SupervisorState
+from pension_agent.agent.orchestration import (
+    AnswerService,
+    AnswerServiceOverloadedError,
+    AnswerServiceResult,
+    SupervisorState,
+)
 from pension_agent.api.app import create_app
 from pension_agent.api.dependencies import get_deployment_commit_sha
 
@@ -34,13 +39,17 @@ class FakeAnswerService:
         self.result = result
         self.error = error
         self.calls: list[dict[str, str]] = []
+        self.close_calls = 0
 
-    def run(self, *, question_id: str, question: str) -> AnswerServiceResult:
+    async def run(self, *, question_id: str, question: str) -> AnswerServiceResult:
         self.calls.append({"question_id": question_id, "question": question})
         if self.error is not None:
             raise self.error
         assert self.result is not None
         return self.result
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
 
 
 def _evidence(chunk_id: str, content: str) -> dict[str, str]:
@@ -126,7 +135,7 @@ def application(
     service: FakeAnswerService,
     factory_calls: list[None],
 ) -> FastAPI:
-    def service_factory() -> AnswerService:
+    async def service_factory() -> AnswerService:
         factory_calls.append(None)
         return cast(AnswerService, service)
 
@@ -234,12 +243,31 @@ def test_answer_failure_returns_sanitized_internal_error(
     assert str(error) not in response.text
 
 
+def test_answer_overload_returns_sanitized_service_unavailable(
+    client: TestClient,
+    service: FakeAnswerService,
+) -> None:
+    service.error = AnswerServiceOverloadedError("내부 대기열 상태")
+
+    response = client.get(
+        "/answer",
+        params={"question_id": "Q-001", "question": "질문"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "현재 처리 가능한 요청 수를 초과했습니다."}
+    assert "내부 대기열 상태" not in response.text
+
+
 def test_health_returns_commit_without_running_answer_service(
     client: TestClient,
     application: FastAPI,
     service: FakeAnswerService,
 ) -> None:
-    application.dependency_overrides[get_deployment_commit_sha] = lambda: "abc123def456"
+    async def deployment_commit_sha() -> str:
+        return "abc123def456"
+
+    application.dependency_overrides[get_deployment_commit_sha] = deployment_commit_sha
 
     response = client.get("/health")
 
@@ -267,6 +295,16 @@ def test_lifespan_builds_one_service_and_reuses_it(
     assert len(service.calls) == 2
 
 
+def test_lifespan_awaits_service_close(
+    application: FastAPI,
+    service: FakeAnswerService,
+) -> None:
+    with TestClient(application):
+        assert service.close_calls == 0
+
+    assert service.close_calls == 1
+
+
 def test_openapi_describes_public_contract(client: TestClient) -> None:
     openapi = client.get("/openapi.json").json()
     answer_operation = openapi["paths"]["/answer"]["get"]
@@ -279,3 +317,4 @@ def test_openapi_describes_public_contract(client: TestClient) -> None:
     assert all(answer_properties[field]["description"] for field in REQUIRED_KEYS)
     assert answer_operation["responses"]["400"]["description"]
     assert answer_operation["responses"]["500"]["description"]
+    assert answer_operation["responses"]["503"]["description"]

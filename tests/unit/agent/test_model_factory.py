@@ -1,6 +1,9 @@
 """네트워크 호출 없이 ChatClovaX Factory 계약을 검증한다."""
 
+import asyncio
+
 import pytest
+from httpx import AsyncClient, Client
 from langchain_naver import ChatClovaX
 from pydantic import SecretStr
 
@@ -73,3 +76,25 @@ def test_factory_sanitizes_provider_initialization_errors(monkeypatch: pytest.Mo
     assert error.value.__cause__ is None
     assert error.value.__context__ is None
     assert secret not in str(error.value)
+
+
+def test_factory_uses_runtime_owned_http_clients() -> None:
+    connection = ClovaStudioConnection(
+        api_key=SecretStr("test-secret-key"),
+        api_base_url="https://example.test/v1/openai",
+    )
+    http_client = Client()
+    http_async_client = AsyncClient()
+    try:
+        model = create_chat_clovax(
+            config=MAIN_SUPERVISOR_HCX_CONFIG,
+            connection=connection,
+            http_client=http_client,
+            http_async_client=http_async_client,
+        )
+
+        assert model.http_client is http_client
+        assert model.http_async_client is http_async_client
+    finally:
+        http_client.close()
+        asyncio.run(http_async_client.aclose())

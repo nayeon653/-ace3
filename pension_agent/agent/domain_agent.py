@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import Mapping
-from concurrent.futures import Future, TimeoutError
 from dataclasses import dataclass, field
-from threading import BoundedSemaphore
 from typing import Annotated, Any, NotRequired, Protocol, cast
 
 from langchain.agents import AgentState, create_agent
@@ -21,7 +20,6 @@ from langchain.messages import AIMessage, HumanMessage, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langgraph.types import Command
-from langsmith.utils import ContextThreadPoolExecutor
 from pydantic import Field, TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import (
@@ -32,6 +30,11 @@ from pension_agent.agent.contracts import (
     EvidenceChunk,
     Permission,
     validate_domain_result,
+)
+from pension_agent.agent.execution import (
+    ExecutionContext,
+    ModelConcurrencyMiddleware,
+    effective_deadline,
 )
 from pension_agent.agent.search import SearchAgentAdapter, SearchResult
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
@@ -59,7 +62,13 @@ class DomainAgentState(AgentState):
 class DomainGraph(Protocol):
     """Domain Agent 실행기가 사용하는 최소 Graph 계약."""
 
-    def invoke(self, input: dict[str, Any], /) -> Mapping[str, Any]:
+    async def ainvoke(
+        self,
+        input: dict[str, Any],
+        /,
+        *,
+        context: ExecutionContext,
+    ) -> Mapping[str, Any]:
         """초기 상태로 Domain Agent를 실행한다."""
 
 
@@ -135,20 +144,22 @@ class DomainAgent:
     domain: DomainName
     graph: DomainGraph
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG
-    max_workers: int = 3
-    _executor: ContextThreadPoolExecutor = field(init=False, repr=False)
-    _capacity: BoundedSemaphore = field(init=False, repr=False)
+    max_concurrency: int | None = None
+    _capacity: asyncio.Semaphore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.max_workers < 1:
-            raise ValueError("Domain Agent worker 수는 1 이상이어야 합니다.")
-        self._executor = ContextThreadPoolExecutor(
-            max_workers=self.max_workers,
-            thread_name_prefix=f"{self.domain}-agent",
-        )
-        self._capacity = BoundedSemaphore(self.max_workers)
+        if self.max_concurrency is None:
+            self.max_concurrency = self.config.max_concurrency
+        if self.max_concurrency < 1:
+            raise ValueError("Domain Agent 동시 실행 상한은 1 이상이어야 합니다.")
+        self._capacity = asyncio.Semaphore(self.max_concurrency)
 
-    def __call__(self, request: DomainRequest) -> DomainResult:
+    async def __call__(
+        self,
+        request: DomainRequest,
+        *,
+        deadline: float | None = None,
+    ) -> DomainResult:
         """질문 원문과 하나의 판단 목표를 Domain Agent에 전달한다."""
 
         question = request["question"].strip()
@@ -156,28 +167,34 @@ class DomainAgent:
         if not question or not objective:
             return _failed_domain_result(self.domain, "도메인 판단 요청이 올바르지 않습니다.")
 
-        if not self._capacity.acquire(blocking=False):
+        run_deadline = effective_deadline(
+            timeout_seconds=self.config.timeout_seconds,
+            parent_deadline=deadline,
+        )
+        if run_deadline <= asyncio.get_running_loop().time():
             return _failed_domain_result(
                 self.domain,
-                "Domain Agent가 현재 처리 가능한 요청 수를 초과했습니다.",
+                "Domain Agent 실행 시간이 초과됐습니다.",
+                execution_status="timeout",
             )
         try:
-            future: Future[Mapping[str, Any]] = self._executor.submit(
-                self.graph.invoke,
-                {
-                    "messages": [
-                        {"role": "user", "content": _domain_request_text(question, objective)}
-                    ]
-                },
-            )
-        except RuntimeError:
-            self._capacity.release()
-            return _failed_domain_result(self.domain, "Domain Agent 실행기를 사용할 수 없습니다.")
-        future.add_done_callback(lambda completed: self._capacity.release())
-        try:
-            state = future.result(timeout=self.config.timeout_seconds)
+            async with asyncio.timeout_at(run_deadline):
+                await self._capacity.acquire()
+                try:
+                    state = await self.graph.ainvoke(
+                        {
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": _domain_request_text(question, objective),
+                                }
+                            ]
+                        },
+                        context=ExecutionContext(deadline=run_deadline),
+                    )
+                finally:
+                    self._capacity.release()
         except TimeoutError:
-            future.cancel()
             return _failed_domain_result(
                 self.domain,
                 "Domain Agent 실행 시간이 초과됐습니다.",
@@ -200,11 +217,6 @@ class DomainAgent:
             )
         return result
 
-    def close(self) -> None:
-        """프로세스 종료 시 실행 worker를 정리한다."""
-
-        self._executor.shutdown(wait=False, cancel_futures=True)
-
 
 def create_domain_agent(
     *,
@@ -214,6 +226,7 @@ def create_domain_agent(
     search_adapter: SearchAgentAdapter,
     system_prompt: str,
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
+    model_concurrency: ModelConcurrencyMiddleware | None = None,
 ) -> DomainAgent:
     """Search Agent Tool과 최종 결과 제출 Tool만 가진 Domain Agent를 만든다."""
 
@@ -224,7 +237,9 @@ def create_domain_agent(
         tools=(search_tool, result_tool),
         system_prompt=system_prompt,
         state_schema=DomainAgentState,
+        context_schema=ExecutionContext,
         middleware=(
+            *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteDomainResult(),
             RequireDomainTool(),
             DomainModelCallLimit(max_model_calls=config.max_model_calls),
@@ -253,14 +268,18 @@ def _create_search_tool(
         SEARCH_DOCUMENTS_TOOL_NAME,
         description="하나의 구체적인 판단 목표에 필요한 제공 문서 근거를 검색한다.",
     )
-    def search_documents(
+    async def search_documents(
         objective: Annotated[
             str,
             Field(min_length=1, description="하나의 구체적인 근거 검색 목표"),
         ],
-        runtime: ToolRuntime[None, DomainAgentState],
+        runtime: ToolRuntime[ExecutionContext, DomainAgentState],
     ) -> Command:
-        result = search_adapter.search(objective, permission=permission)
+        result = await search_adapter.search(
+            objective,
+            permission=permission,
+            deadline=runtime.context.deadline,
+        )
         if runtime.tool_call_id is None:
             raise ValueError("Search Agent Tool 호출 ID가 없습니다.")
         return Command(
@@ -287,7 +306,7 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
             "판단, 누락 조건과 경고만 제출한다."
         ),
     )
-    def submit_domain_result(
+    async def submit_domain_result(
         status: Annotated[
             DecisionStatus,
             Field(description="determined, conditional, undetermined, not_applicable 중 하나"),
@@ -298,7 +317,7 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
             Field(description="조건부 또는 미확정 판단에 필요한 누락 조건"),
         ],
         warnings: Annotated[list[str], Field(description="이용자가 알아야 할 제한과 주의사항")],
-        runtime: ToolRuntime[None, DomainAgentState],
+        runtime: ToolRuntime[ExecutionContext, DomainAgentState],
     ) -> Command | str:
         search_result = runtime.state.get("search_result")
         if search_result is None:

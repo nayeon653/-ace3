@@ -1,5 +1,6 @@
 """Agent에서 공용으로 사용하는 ChatClovaX 모델 Factory."""
 
+from httpx import AsyncClient, Client
 from langchain_naver import ChatClovaX  # type: ignore[import-untyped]
 from openai import OpenAIError
 
@@ -14,6 +15,8 @@ def create_chat_clovax(
     *,
     config: ChatClovaXConfig,
     connection: ClovaStudioConnection,
+    http_client: Client | None = None,
+    http_async_client: AsyncClient | None = None,
 ) -> ChatClovaX:
     """동작 설정과 인증·연결 설정을 주입받아 ChatClovaX를 만든다."""
 
@@ -32,6 +35,8 @@ def create_chat_clovax(
             max_retries=config.max_retries,
             api_key=connection.api_key,
             base_url=connection.api_base_url,
+            http_client=http_client,
+            http_async_client=http_async_client,
         )
     except (ImportError, OpenAIError, RuntimeError, TypeError, ValueError):
         pass

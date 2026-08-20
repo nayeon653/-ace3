@@ -1,6 +1,6 @@
 """Search Agent가 사용하는 결정론적 검색 Tool."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from langchain.tools import ToolRuntime
@@ -12,6 +12,7 @@ from pension_agent.agent.contracts import (
     document_types_for_permission,
     validate_permission,
 )
+from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.search.ports import ChunkRetriever, QueryEmbedder
 from pension_agent.agent.search.schemas import (
     GetChunkPayload,
@@ -56,7 +57,7 @@ class _SearchOperations:
         self._embedder = embedder
         self._retriever = retriever
 
-    def search_chunks(
+    async def search_chunks(
         self,
         text: str,
         *,
@@ -65,15 +66,15 @@ class _SearchOperations:
         limit: int = 10,
     ) -> list[SearchHit]:
         _validate_limit(limit)
-        hits = self._retriever.search_chunks(
-            self._build_query(text, mode=mode),
+        hits = await self._retriever.search_chunks(
+            await self._build_query(text, mode=mode),
             filters=SearchFilters(document_types=document_types),
             limit=limit,
         )
         _validate_authorized_hits(hits, document_types=document_types)
         return hits
 
-    def search_within_document(
+    async def search_within_document(
         self,
         text: str,
         *,
@@ -86,8 +87,8 @@ class _SearchOperations:
         source_file_name = source_file_name.strip()
         if not source_file_name:
             raise SearchToolInputError("원본 파일명 필터는 비어 있을 수 없습니다.")
-        hits = self._retriever.search_within_document(
-            self._build_query(text, mode=mode),
+        hits = await self._retriever.search_within_document(
+            await self._build_query(text, mode=mode),
             source_file_name=source_file_name,
             document_types=document_types,
             limit=limit,
@@ -95,31 +96,31 @@ class _SearchOperations:
         _validate_authorized_hits(hits, document_types=document_types)
         return hits
 
-    def get_neighbor_chunks(
+    async def get_neighbor_chunks(
         self,
         request: NeighborRequest,
         *,
         document_types: frozenset[DocumentType],
     ) -> list[RetrievedChunk]:
-        chunks = self._retriever.get_neighbor_chunks(
+        chunks = await self._retriever.get_neighbor_chunks(
             request,
             document_types=document_types,
         )
         _validate_authorized_chunks(chunks, document_types=document_types)
         return chunks
 
-    def get_chunk(
+    async def get_chunk(
         self,
         chunk_id: str,
         *,
         document_types: frozenset[DocumentType],
     ) -> RetrievedChunk | None:
-        chunk = self._retriever.get_chunk(chunk_id, document_types=document_types)
+        chunk = await self._retriever.get_chunk(chunk_id, document_types=document_types)
         if chunk is not None:
             _validate_authorized_chunks([chunk], document_types=document_types)
         return chunk
 
-    def _build_query(self, text: str, *, mode: SearchMode) -> SearchQuery:
+    async def _build_query(self, text: str, *, mode: SearchMode) -> SearchQuery:
         normalized_text = text.strip()
         if not normalized_text:
             raise SearchToolInputError("검색문은 비어 있을 수 없습니다.")
@@ -128,7 +129,7 @@ class _SearchOperations:
 
         provider_failed = False
         try:
-            raw_dense = self._embedder.embed_query(normalized_text)
+            raw_dense = await self._embedder.aembed_query(normalized_text)
         # 외부 임베딩 구현마다 예외 계층이 달라 Provider 경계에서 한 번에 정제한다.
         except Exception:  # noqa: BLE001
             provider_failed = True
@@ -158,7 +159,7 @@ def create_search_tools(
     operations = _SearchOperations(embedder=embedder, retriever=retriever)
 
     @tool("search_chunks", description="전체 제공 문서에서 검색어와 관련된 근거 청크를 찾는다.")
-    def search_chunks(
+    async def search_chunks(
         text: Annotated[str, Field(min_length=1, description="근거를 찾을 검색어")],
         mode: Annotated[
             SearchMode,
@@ -172,9 +173,9 @@ def create_search_tools(
             int,
             Field(ge=1, le=_MAX_RESULT_LIMIT, strict=True, description="반환할 청크 수"),
         ] = config.default_result_limit,
-        runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
+        runtime: ToolRuntime[ExecutionContext, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
-        def operation() -> SearchHitsPayload:
+        async def operation() -> SearchHitsPayload:
             resolved_permission = _resolve_permission(runtime, fallback=permission)
             document_types = _resolve_document_types(
                 resolved_permission,
@@ -183,7 +184,7 @@ def create_search_tools(
             return SearchHitsPayload(
                 hits=[
                     _search_hit_payload(hit)
-                    for hit in operations.search_chunks(
+                    for hit in await operations.search_chunks(
                         text,
                         document_types=document_types,
                         mode=mode,
@@ -192,13 +193,13 @@ def create_search_tools(
                 ]
             )
 
-        return _tool_payload(operation)
+        return await _tool_payload(operation)
 
     @tool(
         "search_within_document",
         description="지정한 원본 문서 하나에서 검색어와 관련된 근거 청크를 찾는다.",
     )
-    def search_within_document(
+    async def search_within_document(
         text: Annotated[str, Field(min_length=1, description="근거를 찾을 검색어")],
         source_file_name: Annotated[
             str,
@@ -212,15 +213,15 @@ def create_search_tools(
             int,
             Field(ge=1, le=_MAX_RESULT_LIMIT, strict=True, description="반환할 청크 수"),
         ] = config.default_result_limit,
-        runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
+        runtime: ToolRuntime[ExecutionContext, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
-        def operation() -> SearchHitsPayload:
+        async def operation() -> SearchHitsPayload:
             resolved_permission = _resolve_permission(runtime, fallback=permission)
             document_types = document_types_for_permission(resolved_permission)
             return SearchHitsPayload(
                 hits=[
                     _search_hit_payload(hit)
-                    for hit in operations.search_within_document(
+                    for hit in await operations.search_within_document(
                         text,
                         source_file_name=source_file_name,
                         document_types=document_types,
@@ -230,13 +231,13 @@ def create_search_tools(
                 ]
             )
 
-        return _tool_payload(operation)
+        return await _tool_payload(operation)
 
     @tool(
         "get_neighbor_chunks",
         description="선택한 근거 청크와 같은 문서에서 앞뒤 문맥을 문서 순서로 조회한다.",
     )
-    def get_neighbor_chunks(
+    async def get_neighbor_chunks(
         source_file_name: Annotated[str, Field(min_length=1, description="원본 파일명")],
         chunk_index: Annotated[int, Field(ge=0, strict=True, description="기준 청크 순서")],
         before: Annotated[
@@ -257,9 +258,9 @@ def create_search_tools(
                 description="뒤쪽 청크 수. before + after + 1은 100 이하여야 한다.",
             ),
         ] = config.default_neighbor_after,
-        runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
+        runtime: ToolRuntime[ExecutionContext, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
-        def operation() -> NeighborChunksPayload:
+        async def operation() -> NeighborChunksPayload:
             resolved_permission = _resolve_permission(runtime, fallback=permission)
             invalid_request = False
             try:
@@ -276,37 +277,37 @@ def create_search_tools(
             return NeighborChunksPayload(
                 chunks=[
                     _chunk_payload(chunk)
-                    for chunk in operations.get_neighbor_chunks(
+                    for chunk in await operations.get_neighbor_chunks(
                         request,
                         document_types=document_types_for_permission(resolved_permission),
                     )
                 ]
             )
 
-        return _tool_payload(operation)
+        return await _tool_payload(operation)
 
     @tool("get_chunk", description="이미 알고 있는 UUID 청크 ID로 근거 하나를 다시 조회한다.")
-    def get_chunk(
+    async def get_chunk(
         chunk_id: Annotated[str, Field(min_length=1, description="조회할 UUID 청크 ID")],
-        runtime: ToolRuntime[None, SearchAgentState] = None,  # type: ignore[assignment]
+        runtime: ToolRuntime[ExecutionContext, SearchAgentState] = None,  # type: ignore[assignment]
     ) -> str:
-        def operation() -> GetChunkPayload:
+        async def operation() -> GetChunkPayload:
             resolved_permission = _resolve_permission(runtime, fallback=permission)
-            chunk = operations.get_chunk(
+            chunk = await operations.get_chunk(
                 chunk_id,
                 document_types=document_types_for_permission(resolved_permission),
             )
             return GetChunkPayload(chunk=_chunk_payload(chunk) if chunk is not None else None)
 
-        return _tool_payload(operation)
+        return await _tool_payload(operation)
 
     return search_chunks, search_within_document, get_neighbor_chunks, get_chunk
 
 
-def _tool_payload(operation: Callable[[], BaseModel]) -> str:
+async def _tool_payload(operation: Callable[[], Awaitable[BaseModel]]) -> str:
     unexpected_failure = False
     try:
-        payload = operation()
+        payload = await operation()
     except (
         QueryEmbeddingError,
         RetrievalError,
@@ -356,7 +357,7 @@ def _validate_limit(limit: int) -> None:
 
 
 def _resolve_permission(
-    runtime: ToolRuntime[None, SearchAgentState] | None,
+    runtime: ToolRuntime[ExecutionContext, SearchAgentState] | None,
     *,
     fallback: Permission | None,
 ) -> Permission:

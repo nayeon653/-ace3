@@ -8,17 +8,19 @@ Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 �
 
 ## 공개 진입점
 
-`QdrantChunkRetriever`는 `ChunkRetriever` Port를 구현하는 Qdrant Adapter다.
+제품 `/answer` 경로에서는 `AsyncQdrantChunkRetriever`가 async `ChunkRetriever` Port를
+구현한다. 기존 `QdrantChunkRetriever`는 오프라인 적재 검증과 동기 도구에서 계속
+사용하며, 온라인 Agent에는 주입하지 않는다.
 
 | 함수 | 목적 | Qdrant 호출 | 반환 |
 | --- | --- | --- | --- |
-| `search_chunks(query, filters=None, limit=10)` | 전체 corpus의 Dense·Sparse·Hybrid 검색 | `query_points` | `list[SearchHit]` |
-| `search_within_document(query, source_file_name, document_types=None, limit=10)` | 파일·문서군으로 제한한 검색 | `query_points` | `list[SearchHit]` |
-| `get_neighbor_chunks(request, document_types=None)` | 허용된 문서군 안에서 앞뒤 청크 복원 | `scroll` | `list[RetrievedChunk]` |
-| `get_chunk(chunk_id, document_types=None)` | UUID로 허용된 청크 하나 재조회 | `retrieve` | `RetrievedChunk | None` |
+| `await search_chunks(query, filters=None, limit=10)` | 전체 corpus의 Dense·Sparse·Hybrid 검색 | `await query_points` | `list[SearchHit]` |
+| `await search_within_document(query, source_file_name, document_types=None, limit=10)` | 파일·문서군으로 제한한 검색 | `await query_points` | `list[SearchHit]` |
+| `await get_neighbor_chunks(request, document_types=None)` | 허용된 문서군 안에서 앞뒤 청크 복원 | `await scroll` | `list[RetrievedChunk]` |
+| `await get_chunk(chunk_id, document_types=None)` | UUID로 허용된 청크 하나 재조회 | `await retrieve` | `RetrievedChunk | None` |
 
-생성자는 연결된 `QdrantClient`, 비어 있지 않은 collection 이름과 1~100 범위의
-`prefetch_limit`을 받는다. 기본 prefetch 후보 수는 30이다.
+온라인 생성자는 연결된 `AsyncQdrantClient`, 비어 있지 않은 collection 이름과 1~100
+범위의 `prefetch_limit`을 받는다. 기본 prefetch 후보 수는 30이다.
 
 Domain Agent는 `create_search_agent(model, embedder, retriever)`로 만든 Search Agent에
 근거 검색 목표를 전달한다. Factory는 `create_agent`에 주입된 HCX 모델과 다음
@@ -44,7 +46,7 @@ Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, �
 안의 추가 필터를 선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
 임베딩하고 공용 `SearchQuery`를 만든 뒤 `ChunkRetriever`에 위임한다. Sparse 검색과
 청크 조회는 임베더를 호출하지 않는다. 첫 모델 호출은 `tool_choice=required`로 검색
-Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 4회, 검색 Tool 호출을
+Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 6회, 검색 Tool 호출을
 3회로 제한한다.
 
 ```mermaid
@@ -54,7 +56,7 @@ flowchart LR
     T -->|"Dense / Hybrid"| E["QueryEmbedder"]
     E -->|"dense vector"| T
     T -->|"SearchQuery"| B["ChunkRetriever"]
-    B -. "구현" .-> Q["QdrantChunkRetriever"]
+    B -. "온라인 구현" .-> Q["AsyncQdrantChunkRetriever"]
     Q -->|"SearchHit[]"| T
     T -->|"관찰 후보 누적"| S
     S -->|"SearchSelection"| V["Python ID 검증·원본 재조회"]
@@ -75,7 +77,7 @@ flowchart LR
 선택적 `document_type` 인자는 권한을 좁힐 수만 있고 넓힐 수 없다.
 
 ```python
-result = search_adapter.search(objective, permission=Permission.POLICY)
+result = await search_adapter.search(objective, permission=Permission.POLICY)
 ```
 
 검색 Tool은 권한에서 허용된 문서 유형을 Qdrant payload filter에 포함해 Dense, Sparse,
@@ -100,6 +102,7 @@ vector를 반환하면 Tool 결과의 정제된 `error`로 전달한다. Qdrant 
 | --- | --- | --- |
 | `max_model_calls` | `6` | 검색 3회, 최종 제출과 HCX 형식 교정을 포함한 모델 호출 상한 |
 | `max_tool_calls` | `3` | 한 요청의 검색 Tool 호출 상한. 최종 결과 제출은 제외 |
+| `max_concurrency` | `4` | 프로세스에서 동시에 실행할 Search Agent 상한 |
 | `timeout_seconds` | `45` | Domain Adapter가 Search Agent 전체 실행을 기다리는 상한 |
 | `default_search_mode` | `hybrid` | 검색 Tool의 기본 검색 방식 |
 | `default_result_limit` | `10` | 검색 Tool의 기본 결과 수 |
@@ -197,7 +200,8 @@ Repository를 추가하지 않고 다음 세 패턴만 사용한다.
 
 - **Query Object**: `SearchQuery`, `SearchFilters`, `NeighborRequest`가 입력을 검증한다.
 - **Filter Builder**: 허용된 세 payload index만 Qdrant 조건으로 변환한다.
-- **Port/Adapter**: Agent의 `ChunkRetriever` Port를 `QdrantChunkRetriever`가 구현한다.
+- **Port/Adapter**: 온라인 Agent의 async `ChunkRetriever` Port를
+  `AsyncQdrantChunkRetriever`가 구현한다.
 
 ```python
 query = SearchQuery(
@@ -211,25 +215,25 @@ filters = SearchFilters(
 ```
 
 ```python
-retriever = QdrantChunkRetriever(
+retriever = AsyncQdrantChunkRetriever(
     client,
     collection_name="pension_documents",
 )
 
-hits = retriever.search_chunks(
+hits = await retriever.search_chunks(
     query,
     filters=filters,
     limit=10,
 )
 
-document_hits = retriever.search_within_document(
+document_hits = await retriever.search_within_document(
     query,
     source_file_name="guide.pdf",
     document_types=frozenset({DocumentType.PENSION_REFERENCE}),
     limit=10,
 )
 
-neighbors = retriever.get_neighbor_chunks(
+neighbors = await retriever.get_neighbor_chunks(
     NeighborRequest(
         source_file_name="guide.pdf",
         chunk_index=7,
@@ -239,7 +243,7 @@ neighbors = retriever.get_neighbor_chunks(
     document_types=frozenset({DocumentType.PENSION_REFERENCE}),
 )
 
-chunk = retriever.get_chunk(
+chunk = await retriever.get_chunk(
     "550e8400-e29b-41d4-a716-446655440000",
     document_types=frozenset({DocumentType.PENSION_REFERENCE}),
 )
@@ -249,13 +253,19 @@ chunk = retriever.get_chunk(
 검색은 원문 질의를 dense embedding과 Kiwi token 문자열로 각각 변환한다. 같은 payload
 filter로 두 결과를 prefetch한 뒤 RRF로 결합한다.
 
+query embedding은 `aembed_query()`, Qdrant는 `AsyncQdrantClient`의 coroutine을
+사용한다. 각 provider 호출은 프로세스 공용 limiter 안에서 실행한다. Kiwi tokenization은
+요청 전에 prewarm하고, 검색 중에는 프로세스 수명의 단일 worker executor에서 실행해
+event loop를 막지 않는다.
+
 ```python
-client.query_points(
+sparse_text = await async_to_bm25_text(query.text)
+await client.query_points(
     collection_name="pension_documents",
     prefetch=[
         models.Prefetch(
             query=models.Document(
-                text=to_bm25_text(query.text),
+                text=sparse_text,
                 model="qdrant/bm25",
                 options=BM25_OPTIONS,
             ),
