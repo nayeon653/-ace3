@@ -49,7 +49,7 @@ make qdrant-hybrid-test
 Python 환경에서 실행한다.
 
 `make qdrant-hybrid-test`는 임시 collection에 실제 인덱싱 코드로 dense와
-`qdrant/bm25` sparse vector를 적재한 뒤 Search Agent의 기본값과 같은 Hybrid 검색을
+`qdrant/bm25` sparse vector를 적재한 뒤 Search Service의 기본값과 같은 Hybrid 검색을
 실행한다. CLOVA API를 호출하지 않으며 테스트가 끝나면 성공 여부와 관계없이 임시
 collection을 삭제한다. Python embedded `QdrantClient(":memory:")`가 아니라 위 Docker
 HTTP endpoint를 검증하므로 로컬 제품 경로와 같은 Qdrant Core BM25를 사용한다.

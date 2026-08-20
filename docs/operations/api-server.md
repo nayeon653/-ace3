@@ -100,7 +100,7 @@ FastAPI lifespan은 서버 프로세스를 시작할 때 다음 객체를 한 �
 
 1. 런타임이 소유하는 HTTP client와 HCX-005 `ChatClovaX`, CLOVA `bge-m3` Query Embedder
 2. `AsyncQdrantClient`와 `AsyncQdrantChunkRetriever`
-3. Search Agent와 실행 Adapter
+3. 규칙 기반 `SearchRouter`, `SearchService`, `EvidenceFilter`
 4. `policy`, `tax_payout`, `product` Domain Agent와 Main Supervisor
 5. `AnswerService`
 
@@ -136,13 +136,13 @@ Domain/Search 설정에 버전 관리한다. 기본값은 다음과 같으며 �
 |---|---:|---|
 | 전체 `/answer` | 4 | 요청 전체 deadline 안에서 대기 |
 | `/answer` 대기열 | 64 | 활성 4개와 대기 64개를 넘으면 즉시 정제된 503 반환 |
-| HCX 모델 호출 | 4 | 모든 Supervisor·Domain·Search graph가 공유해서 대기 |
+| HCX 모델 호출 | 4 | 모든 Supervisor·Domain graph가 공유해서 대기 |
 | query embedding | 4 | provider 호출 전에 대기 |
 | Qdrant 조회 | 4 | provider 호출 전에 대기, client connection pool도 4 |
 | Domain Agent | 도메인별 3 | Domain 75초와 상위 deadline 중 빠른 시각까지 대기 |
-| Search Agent | 전체 공유 4 | Search 45초와 상위 deadline 중 빠른 시각까지 대기 |
+| Search Service | 전체 공유 4 | 검색 45초와 상위 deadline 중 빠른 시각까지 대기 |
 
-`/answer`의 기본 전체 제한은 180초다. capacity 대기, HCX retry, Domain, Search와 최종
+`/answer`의 기본 전체 제한은 180초다. capacity 대기, HCX retry, Domain, Search Service와 최종
 응답 조립을 모두 요청 시작 시 만든 하나의 absolute deadline 안에 포함한다. timeout이나
 ASGI `http.disconnect`는 하위 coroutine으로 전파되며 실행 슬롯을 돌려준다. 이미 원격
 provider가 받은 작업의 중단까지 보장하지는 않는다. 활성 Agent 작업은 4개, capacity를

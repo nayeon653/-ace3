@@ -80,22 +80,24 @@ trace tree에 기록한다.
 - 실행 순서, 지연시간과 제공되는 token 사용량
 
 정상적인 `/answer` 요청 하나에는 `main_supervisor` root trace가 정확히 하나 생성된다.
-Supervisor가 호출한 Domain Agent와 각 Domain Agent가 호출한 Search Agent는 별도 root가
-아니라 해당 `main_supervisor` 아래의 하위 run으로 연결된다. 온라인 Agent 경로는
+Supervisor가 호출한 Domain Agent와 각 Domain Agent의 `search_documents` 실행은 별도 root가
+아니라 해당 `main_supervisor` 아래의 하위 run으로 연결된다. `search_documents` 아래에서는
+결정론적 Search Service가 Router 선택, 검색과 EvidenceFilter 적용을 수행한다. 이 서비스는
+검색 전략을 정하거나 검색 결과를 작성하기 위한 HCX 모델 run을 만들지 않는다. 온라인 Agent 경로는
 `ainvoke()`와 native async Tool을 사용한다. Python은 `asyncio.Task`를 만들 때 현재
-`contextvars` context를 복사하므로, 동시에 실행되는 Domain·Search task도 각 요청의
+`contextvars` context를 복사하므로, 동시에 실행되는 Domain·검색 task도 각 요청의
 LangSmith parent를 자연스럽게 유지한다. 요청의 absolute deadline도 같은
-`ExecutionContext`로 Supervisor에서 Domain과 Search까지 전달한다.
+`ExecutionContext`로 Supervisor에서 Domain과 Search Service까지 전달한다.
 
 Kiwi 형태소 분석만 CPU 작업이라 process-wide 단일 thread로 offload한다. 이 작은
-executor는 submit 시 호출 task의 context를 복사하며, 전체 Domain/Search graph를 별도
+executor는 submit 시 호출 task의 context를 복사하며, 전체 Domain graph나 Search Service를 별도
 worker에서 실행하지 않는다. async task context가 누락되거나 서로 섞이면 다음처럼
 하나의 API 요청이 여러 root trace로 잘못 분리될 수 있다.
 
 ```text
 main_supervisor   (root)
 product_agent     (잘못 분리된 root)
-search_agent      (잘못 분리된 root)
+search_documents  (잘못 분리된 root)
 ```
 
 정상 상태에서는 같은 실행이 다음 계층으로 보인다.
@@ -105,8 +107,12 @@ main_supervisor
 └── analyze_product
     └── product_agent
         └── search_documents
-            └── search_agent
+            └── search_service  (Router·Qdrant·EvidenceFilter, LLM 호출 없음)
 ```
+
+`SearchRouter`와 `EvidenceFilter`는 `search_service` run 안의 결정론적 Python 단계이며
+각각을 별도 LangSmith child run으로 만들지 않는다. route와 선택 청크 ID는
+구조화 로그로 확인한다.
 
 회귀 테스트는 서로 다른 parent를 가진 두 async task를 실제로 겹쳐 실행해 parent ID가
 섞이지 않는지 확인한다. timeout이나 외부 취소가 발생해도 해당 run은 원래 trace tree
@@ -122,10 +128,11 @@ main_supervisor
 
 1. 요청 하나당 `main_supervisor` root trace가 하나만 생성되는지 확인한다.
 2. Main Supervisor 아래에 모델과 선택된 `analyze_*` Tool 실행이 연결되는지 확인한다.
-3. 선택된 Domain Agent와 그 하위 Search Agent가 같은 trace tree에 연결되는지 확인한다.
-4. 단일·복수 도메인 질문에서 Tool 선택이 의도와 일치하는지 확인한다.
-5. Tool 결과가 최종 답변에 반영되는지 확인한다.
-6. 질문별 지연시간과 token 정보가 제공되는지 확인한다.
+3. 선택된 Domain Agent와 그 하위 `search_documents`·Search Service 실행이 같은 trace tree에 연결되는지 확인한다.
+4. Search Service 아래에 검색 전략을 선택하는 HCX 모델 run이 생기지 않는지 확인한다.
+5. 단일·복수 도메인 질문에서 Tool 선택이 의도와 일치하는지 확인한다.
+6. Tool 결과가 최종 답변에 반영되는지 확인한다.
+7. 질문별 지연시간과 token 정보가 제공되는지 확인한다.
 
 팀에 공유할 필요가 있는 결론은 API key, 질문 원문이나 trace 링크를 공유하지 않고
 `docs/experiments.md`에 재현 방법과 관찰 결과만 요약한다.

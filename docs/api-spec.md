@@ -99,7 +99,7 @@ GET {TBD}/health
 `DEPLOY_COMMIT_SHA` 값이며, 로컬에서 주입하지 않으면 `unknown`을 반환한다. 운영
 배포에서는 이미지나 릴리스를 만든 정확한 Git 커밋 SHA를 반드시 주입한다.
 
-FastAPI lifespan은 서버 시작 시 HCX-005, bge-m3, Qdrant, Search Agent,
+FastAPI lifespan은 서버 시작 시 HCX-005, bge-m3, Qdrant, 결정론적 `SearchService`,
 Domain Agent 3종, Main Supervisor와 `AnswerService`를 프로세스당 한 번 조립한다.
 `/answer` 요청은 조립된 동일 객체를 재사용하며 요청별
 상태는 공유하지 않는다. 필수 인증·연결 설정이 없거나 조립에 실패하면 서버 시작이
