@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = REPOSITORY_ROOT / "docs" / "architecture" / "agent-graphs.md"
 DEFAULT_IMAGE_DIR = REPOSITORY_ROOT / "docs" / "architecture" / "generated"
 DEFAULT_MANIFEST = DEFAULT_IMAGE_DIR / "manifest.json"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,15 +229,38 @@ def render_manifest(artifacts: tuple[GraphArtifact, ...] | None = None) -> str:
     """이미지가 어떤 Mermaid 원본에서 생성됐는지 기록한다."""
 
     artifacts = artifacts or build_artifacts()
+    image_hashes = {
+        artifact.image_name: _file_sha256(DEFAULT_IMAGE_DIR / artifact.image_name)
+        for artifact in artifacts
+    }
+    return _render_manifest(artifacts, image_hashes=image_hashes)
+
+
+def _render_manifest(
+    artifacts: tuple[GraphArtifact, ...],
+    *,
+    image_hashes: Mapping[str, str],
+) -> str:
+    """Mermaid 원본과 생성된 PNG의 해시 manifest를 만든다."""
+
     payload = {
         "version": 1,
         "renderer": "langchain-core MermaidDrawMethod.API",
         "artifacts": {
-            artifact.image_name: {"mermaid_sha256": artifact.source_sha256}
+            artifact.image_name: {
+                "image_sha256": image_hashes[artifact.image_name],
+                "mermaid_sha256": artifact.source_sha256,
+            }
             for artifact in artifacts
         },
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def _file_sha256(path: Path) -> str:
+    """파일 전체 내용의 SHA-256을 반환한다."""
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def outputs_are_current(artifacts: tuple[GraphArtifact, ...]) -> bool:
@@ -245,15 +270,19 @@ def outputs_are_current(artifacts: tuple[GraphArtifact, ...]) -> bool:
         encoding="utf-8"
     ) != render_document(artifacts):
         return False
-    if not DEFAULT_MANIFEST.is_file() or DEFAULT_MANIFEST.read_text(
-        encoding="utf-8"
-    ) != render_manifest(artifacts):
+    expected_image_names = {artifact.image_name for artifact in artifacts}
+    actual_image_names = {path.name for path in DEFAULT_IMAGE_DIR.glob("*.png")}
+    if actual_image_names != expected_image_names:
         return False
-    return all(
+    if not all(
         (image_path := DEFAULT_IMAGE_DIR / artifact.image_name).is_file()
-        and image_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        and image_path.read_bytes()[: len(PNG_SIGNATURE)] == PNG_SIGNATURE
         for artifact in artifacts
-    )
+    ):
+        return False
+    return DEFAULT_MANIFEST.is_file() and DEFAULT_MANIFEST.read_text(
+        encoding="utf-8"
+    ) == render_manifest(artifacts)
 
 
 def _previous_image_names() -> set[str]:
@@ -283,9 +312,14 @@ def write_outputs(artifacts: tuple[GraphArtifact, ...]) -> None:
                 draw_method=MermaidDrawMethod.API,
                 max_retries=3,
             )
-            if not image.startswith(b"\x89PNG\r\n\x1a\n"):
+            if not image.startswith(PNG_SIGNATURE):
                 raise RuntimeError(f"올바르지 않은 PNG 응답입니다: {artifact.image_name}")
 
+        image_hashes = {
+            artifact.image_name: _file_sha256(temporary_path / artifact.image_name)
+            for artifact in artifacts
+        }
+        manifest = _render_manifest(artifacts, image_hashes=image_hashes)
         previous_names = _previous_image_names()
         DEFAULT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
         for artifact in artifacts:
@@ -297,7 +331,7 @@ def write_outputs(artifacts: tuple[GraphArtifact, ...]) -> None:
                 stale_path.unlink()
 
     DEFAULT_OUTPUT.write_text(render_document(artifacts), encoding="utf-8")
-    DEFAULT_MANIFEST.write_text(render_manifest(artifacts), encoding="utf-8")
+    DEFAULT_MANIFEST.write_text(manifest, encoding="utf-8")
 
 
 def _parse_args() -> argparse.Namespace:
