@@ -16,10 +16,13 @@ Docling 청크를 Qdrant에 저장하고 Agent가 검색하는 전체 계약의 
 flowchart LR
     C["Docling canonical chunk"] --> I["Collection·payload 명세"]
     I --> Q[("Qdrant")]
-    A["Domain Agent"] --> F["검색 함수 명세"]
+    A["Domain Agent"] --> S["SearchService"]
+    S --> R["SearchRouter"]
+    R --> F["검색 함수 명세"]
     F --> Q
     Q --> E["RetrievedChunk / SearchHit"]
-    E --> A
+    E --> V["EvidenceFilter"]
+    V --> A
 ```
 
 ## 결정 요약
@@ -43,16 +46,20 @@ flowchart LR
 
 - `core`는 Qdrant를 모르는 검색 입력·결과·오류 타입을 소유한다.
 - `retrieval`은 Qdrant 요청 생성, 필터 변환, payload 검증과 결과 변환을 소유한다.
-- `agent.search`는 공용 검색 타입과 `ChunkRetriever` Port만 사용한다.
-- 각 Domain Agent는 도메인 이름인 `Permission`을 상태에 넣고, 중앙 매핑으로 검색 문서군을 제한한다.
+- `agent.search`는 규칙 기반 `SearchRouter`, 실행 경계인 `SearchService`, 결과를 정제하는
+  `EvidenceFilter`와 공용 검색 타입·`ChunkRetriever` Port를 소유한다.
+- 각 Domain Agent는 도메인 이름인 `Permission`을 Search Service에 전달하고, 중앙 매핑으로
+  검색 문서군을 제한한다.
 - 온라인 Agent에서는 `retrieval`의 `AsyncQdrantChunkRetriever`가 async Port를 구현한다.
   `QdrantChunkRetriever`는 오프라인 적재 검증과 동기 도구에서 같은 계약을 유지한다.
 - Qdrant SDK 타입은 `pension_agent/retrieval/` 밖으로 노출하지 않는다.
 - `content`만 답변 근거로 사용하고 `embedding_content`는 외부 응답에 노출하지 않는다.
 
-범용 Repository 계층은 두지 않는다. Search Agent가 실제 저장소 구현에 의존하지 않도록
+범용 Repository 계층은 두지 않는다. Search Service가 실제 저장소 구현에 의존하지 않도록
 필요한 네 검색 연산만 `ChunkRetriever` Protocol로 정의한다. 검색 입력은 Query Object,
-payload 조건은 Filter Builder, Qdrant 접근은 Retriever Adapter로 구성한다.
+payload 조건은 Filter Builder, Qdrant 접근은 Retriever 구현으로 구성한다. Search Router와
+EvidenceFilter는 LLM을 호출하지 않으며, Search Service는 검증된 원문 청크만 Domain Agent에
+반환한다.
 
 ## 현재 범위 밖
 

@@ -109,7 +109,7 @@ LangSmith tracing은 기본적으로 꺼져 있습니다. 개발자가 개인 �
 로컬에 등록해 활성화하면 일반 `/answer` 요청을 포함한 모든 Agent 실행을 추적합니다.
 개인 계정·project 설정과 활성화 방법은
 [`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 따릅니다.
-서버 시작 과정에서 HCX-005, bge-m3, Qdrant, Search Agent, Domain Agent 3종,
+서버 시작 과정에서 HCX-005, bge-m3, Qdrant, 결정론적 `SearchService`, Domain Agent 3종,
 Main Supervisor와 `AnswerService`를 프로세스당 한 번 조립하고 모든 `/answer`
 요청에서 재사용합니다. 온라인 경로는 HCX, query embedding과 Qdrant까지 native async로
 실행하며 프로세스 단위 동시성 상한과 요청 전체 deadline을 적용합니다.
@@ -183,18 +183,20 @@ supervisor = create_main_supervisor(model=model, tools=domain_tools)
 |---|---|
 | `contracts/` | Main·Domain·API가 공유하는 입출력 계약 |
 | `orchestration/` | Main Supervisor, 상태, Domain Tool Adapter, 실행 서비스 |
-| `search/` | Search Agent, 검색 Port, Tool, 미들웨어, 검색 스키마 |
+| `search/` | 규칙 Router, SearchService, EvidenceFilter, 검색 Port·스키마 |
 | `policy/` | 업무·제도 Domain Agent |
 | `tax_payout/` | 세제·수령 Domain Agent |
 | `product/` | 상품·운용 Domain Agent |
 
 구체 Domain Agent의 선택과 Tool 등록은 `pension_agent/agent/runtime.py`에서 수행한다.
 `orchestration`은 구체 Domain Agent를 import하지 않으며, Domain Agent끼리도 직접
-의존하지 않는다. Search Agent는 저장소 구현 대신 `ChunkRetriever` Port에 의존하고,
+의존하지 않는다. `SearchService`는 저장소 구현 대신 `ChunkRetriever` Port에 의존하고,
 온라인에서는 `retrieval/AsyncQdrantChunkRetriever`가 Qdrant 접근을 구현한다.
 Policy와 Tax/Payout은 `pension_reference`, Product는 `fund_prospectus` 문서군만
-검색하도록 Agent별 `permissions`를 실행 상태에 주입한다. Search Agent는
-최종 검색 결과 제출 Tool로 선택 ID만 받고 Python이 Qdrant 원본을 재조회한다.
+검색하도록 Domain별 `Permission`을 검색 실행에 전달한다. `SearchRouter`는 LLM 호출 없이
+전체·문서 범위·청크 직접 조회 중 하나를 선택하고, `EvidenceFilter`는 중복·탐색 전용 청크를
+제거한다. `SearchService`는 검증된 원문 청크를 반환하며, Domain Agent가 그중 결론에 실제로
+사용한 청크 ID만 최종 근거로 제출한다.
 
 ## 더 읽기
 

@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from qdrant_client import AsyncQdrantClient, QdrantClient
 
-from pension_agent.config import DEFAULT_SEARCH_AGENT_CONFIG
+from pension_agent.config import DEFAULT_SEARCH_SERVICE_CONFIG
 from pension_agent.core import SearchMode, SearchQuery
 from pension_agent.ingest.qdrant_indexer import EmbeddingCache, ensure_collection, index_chunks
 from pension_agent.ingest.qdrant_input import PreparedChunk
@@ -64,7 +64,7 @@ def anyio_backend() -> str:
 
 
 async def test_indexed_chunk_is_found_by_default_hybrid_search(tmp_path: Path) -> None:
-    assert DEFAULT_SEARCH_AGENT_CONFIG.default_search_mode is SearchMode.HYBRID
+    assert DEFAULT_SEARCH_SERVICE_CONFIG.default_search_mode is SearchMode.HYBRID
 
     collection_name = f"pension_documents_hybrid_smoke_{uuid4().hex}"
     client = QdrantClient(
@@ -103,7 +103,7 @@ async def test_indexed_chunk_is_found_by_default_hybrid_search(tmp_path: Path) -
             SearchQuery(
                 text="IRP 계좌 이전",
                 dense=(1.0, 0.0),
-                mode=DEFAULT_SEARCH_AGENT_CONFIG.default_search_mode,
+                mode=DEFAULT_SEARCH_SERVICE_CONFIG.default_search_mode,
             ),
             limit=1,
         )

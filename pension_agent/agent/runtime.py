@@ -27,8 +27,7 @@ from pension_agent.agent.product import (
 from pension_agent.agent.search import (
     LimitedChunkRetriever,
     LimitedQueryEmbedder,
-    SearchAgentAdapter,
-    create_search_agent,
+    SearchService,
 )
 from pension_agent.agent.tax_payout import (
     TAX_PAYOUT_TOOL_DESCRIPTION,
@@ -165,27 +164,24 @@ async def build_runtime_answer_service(
             retriever,
             AsyncConcurrencyLimiter(config.max_concurrent_qdrant_calls),
         )
-        search_graph = create_search_agent(
-            model=model,
+        search_service = SearchService(
             embedder=limited_embedder,
             retriever=limited_retriever,
-            model_concurrency=model_concurrency,
         )
-        search_adapter = SearchAgentAdapter(search_graph)
 
         policy_agent = create_policy_agent(
             model=model,
-            search_adapter=search_adapter,
+            search_service=search_service,
             model_concurrency=model_concurrency,
         )
         tax_payout_agent = create_tax_payout_agent(
             model=model,
-            search_adapter=search_adapter,
+            search_service=search_service,
             model_concurrency=model_concurrency,
         )
         product_agent = create_product_agent(
             model=model,
-            search_adapter=search_adapter,
+            search_service=search_service,
             model_concurrency=model_concurrency,
         )
 

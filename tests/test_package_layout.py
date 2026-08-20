@@ -34,7 +34,6 @@ def test_runtime_resource_directories_are_packaged() -> None:
     assert package_root.joinpath("config", "defaults").is_dir()
     prompt_root = package_root.joinpath("prompts")
     assert prompt_root.joinpath("orchestration", "main-supervisor.md").is_file()
-    assert prompt_root.joinpath("search", "search-agent.md").is_file()
     assert prompt_root.joinpath("domain", "policy-agent.md").is_file()
     assert prompt_root.joinpath("domain", "tax-payout-agent.md").is_file()
     assert prompt_root.joinpath("domain", "product-agent.md").is_file()

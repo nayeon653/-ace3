@@ -85,7 +85,7 @@ def test_orchestration_does_not_select_concrete_domain_agents() -> None:
     )
 
 
-def test_search_agent_does_not_depend_on_orchestration_or_domain_agents() -> None:
+def test_search_service_does_not_depend_on_orchestration_or_domain_agents() -> None:
     _assert_no_imports(
         AGENT_ROOT / "search",
         ("pension_agent.agent.orchestration",)

@@ -1,7 +1,10 @@
-# Agent용 Qdrant 검색 함수 명세
+# Router Search Service용 Qdrant 검색 함수 명세
 
-Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 검색하는 런타임 계약이다.
-전체 결정과 저장 스키마는 다음 문서를 기준으로 한다.
+Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 검색하는 목표 런타임
+계약이다. 이 구조로의 전환은 [GitHub issue #80](https://github.com/nayeon653/-ace3/issues/80)에서
+추적하며, 아키텍처 결정은
+[Router 기반 결정론적 Search Service](../decisions/20260820-80-router-search-service.md)를
+따른다. 전체 검색·저장 스키마는 다음 문서를 기준으로 한다.
 
 - [Qdrant retrieval 계약](../qdrant-retrieval-spec.md)
 - [Qdrant collection·payload 명세](qdrant-index-spec.md)
@@ -10,7 +13,7 @@ Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 �
 
 제품 `/answer` 경로에서는 `AsyncQdrantChunkRetriever`가 async `ChunkRetriever` Port를
 구현한다. 기존 `QdrantChunkRetriever`는 오프라인 적재 검증과 동기 도구에서 계속
-사용하며, 온라인 Agent에는 주입하지 않는다.
+사용하며, 온라인 Search Service에는 주입하지 않는다.
 
 | 함수 | 목적 | Qdrant 호출 | 반환 |
 | --- | --- | --- | --- |
@@ -22,48 +25,88 @@ Domain Agent가 Qdrant SDK 타입을 직접 다루지 않고 제공 문서를 �
 온라인 생성자는 연결된 `AsyncQdrantClient`, 비어 있지 않은 collection 이름과 1~100
 범위의 `prefetch_limit`을 받는다. 기본 prefetch 후보 수는 30이다.
 
-Domain Agent는 `create_search_agent(model, embedder, retriever)`로 만든 Search Agent에
-근거 검색 목표를 전달한다. Factory는 `create_agent`에 주입된 HCX 모델과 다음
-Tool을 바인딩한다.
-
-| Tool | Agent가 사용하는 시점 |
-| --- | --- |
-| `search_chunks` | 전체 제공 문서에서 첫 후보를 찾을 때 |
-| `search_within_document` | 이미 확인한 원본 문서 안에서 추가 후보를 찾을 때 |
-| `get_neighbor_chunks` | 선택한 청크의 앞뒤 문맥이 필요할 때 |
-| `get_chunk` | 알고 있는 UUID 청크를 다시 검증할 때 |
-| `submit_search_result` | 최종 검색 결과로 충족도, 선택 ID와 한계를 제출할 때 |
-
-`submit_search_result`는 **최종 검색 결과 제출 Tool**이며 셸 터미널이나
-명령행 터미널을 뜻하지 않는다. HCX는 이 Tool에 `SearchSelection`을 Function
-calling으로 제출한다. Python은 선택 ID가 이번 실행의 검색 Tool 후보에
-있는지 확인하고, 같은 permission으로 `get_chunk`를 수행해 Qdrant 원본을 다시
-읽은 뒤에만 `SearchResult`를 만든다. Domain Agent는 Search Agent의 자유 형식
-메시지를 파싱하지 않는다.
-
-Domain Agent는 요청마다 자신의 도메인 이름인 `Permission`을 GraphState에 주입한다.
-Search Agent는 질문과 이전 Tool 결과를 보고 다음 Tool, 검색어, 검색 방식과 허용 범위
-안의 추가 필터를 선택한다. Tool 내부의 결정론적 실행부는 Dense·Hybrid 검색문만 `QueryEmbedder`로
-임베딩하고 공용 `SearchQuery`를 만든 뒤 `ChunkRetriever`에 위임한다. Sparse 검색과
-청크 조회는 임베더를 호출하지 않는다. 첫 모델 호출은 `tool_choice=required`로 검색
-Tool 사용을 강제한다. 기본 프로필은 한 요청의 모델 호출을 6회, 검색 Tool 호출을
-3회로 제한한다.
+Domain Agent에는 `search_documents` 하나만 노출한다. 이 Tool은 의미적 검색 요청인
+`SearchRequest`를 Search Service에 전달하며 Qdrant 함수, 검색 모드, 후보 수와 cutoff를
+직접 선택하지 않는다. Search Service는 HCX나 별도 Agent graph를 호출하지 않는다.
 
 ```mermaid
 flowchart LR
-    D["Domain Agent"] -->|"검색 목표 + permission"| S["Search Agent<br/>create_agent + HCX"]
-    S -->|"Tool 선택·인자 생성"| T["Search Tools"]
-    T -->|"Dense / Hybrid"| E["QueryEmbedder"]
-    E -->|"dense vector"| T
-    T -->|"SearchQuery"| B["ChunkRetriever"]
+    D["Domain Agent"] -->|"search_documents(SearchRequest)"| R["규칙 기반 Search Router"]
+    R --> P["SearchPlan"]
+    P --> X["Search Strategy Executor"]
+    X -->|"Dense / Hybrid"| E["QueryEmbedder"]
+    E -->|"dense vector"| X
+    X --> B["ChunkRetriever"]
     B -. "온라인 구현" .-> Q["AsyncQdrantChunkRetriever"]
-    Q -->|"SearchHit[]"| T
-    T -->|"관찰 후보 누적"| S
-    S -->|"SearchSelection"| V["Python ID 검증·원본 재조회"]
-    V -->|"SearchResult"| D
+    Q -->|"검증된 후보"| N["선택적 Neighbor Expansion"]
+    N --> F["EvidenceFilter"]
+    F -->|"SearchResult"| D
 ```
 
-## Agent 문서 접근 권한
+## SearchRequest와 SearchPlan
+
+`SearchRequest`에는 구현 세부사항이 아니라 다음 의미 힌트만 포함한다.
+
+| 필드 | 계약 |
+| --- | --- |
+| `objective` | 앞뒤 공백 제거 후 비어 있지 않은 하나의 근거 검색 목표 |
+| `source_file_name` | 사용자가 제공했거나 신뢰 상태에서 확인한 원본 파일명 |
+| `chunk_id` | 신뢰 상태에서 확인한 UUID 청크 ID |
+| `expand_neighbors` | 최초 결과의 앞뒤 구조 문맥이 필요한지 여부 |
+
+`permission`은 SearchRequest의 모델 생성 필드가 아니다. Domain Tool Adapter가 신뢰된
+실행 값으로 Search Service에 별도 전달한다. `chunk_id`와 `source_file_name`처럼 서로
+모순되는 힌트, 잘못된 UUID와 비어 있는 값은 Provider 호출 전에 거부한다.
+
+Router는 요청과 versioned config를 불변 `SearchPlan`으로 변환한다. 계획에는 최초 경로,
+정규화된 검색문, 검색 모드, permission에서 계산한 문서 유형 필터, 후보 수와 인접 확장
+여부를 포함한다. 같은 요청과 설정은 같은 계획을 만들며 Router는 결과를 보고 재진입하지
+않는다.
+
+| 조건 | 최초 경로 | 검색 모드 | embedding |
+| --- | --- | --- | --- |
+| 검증된 `chunk_id` | `get_chunk` | 해당 없음 | 호출하지 않음 |
+| 검증된 `source_file_name` | `search_within_document` | `hybrid` | 호출 |
+| 그 외 | `search_chunks` | `hybrid` | 호출 |
+
+한 요청에서 최초 경로는 정확히 하나이며 최대 한 번 실행한다. `get_neighbor_chunks`는
+최초 경로가 아니라 `expand_neighbors`가 설정된 경우의 후처리 단계다. 최초 경로의
+권한 검증된 최상위 후보 한 개만 기준으로 삼아 최대 한 번 실행한다. Dense·Sparse 전용
+자동 라우팅과 LLM 검색어 재작성은 평가로 필요성이 확인될 때까지 사용하지 않는다.
+
+## EvidenceFilter와 SearchResult
+
+검색 함수의 top-k를 그대로 Domain Agent에 전달하지 않는다. EvidenceFilter는 다음
+순서로 최종 후보를 만든다.
+
+1. Search Service가 permission에 허용된 `document_type`과 route별 provenance를 재검증한다.
+2. EvidenceFilter가 `chunk_id` 기준으로 중복을 제거한다.
+3. Retriever 점수의 안정 순서를 유지하고 versioned score cutoff를 적용한다.
+4. 검색 후보 수와 별도로 설정한 최종 전달 개수를 적용한다.
+5. 인접 확장을 요청한 경우에만 anchor를 보존하며 같은 문서의 청크를 문서 순서로 결합한다.
+
+cutoff와 최종 전달 수는 평가 baseline을 근거로 Search Service의 불변 설정에서 관리한다.
+질문 목록·목차처럼 답변 근거가 아닌 후보가 최종 결과에 남지 않는지 회귀 평가하며,
+검증되지 않은 cross-encoder나 새로운 모델은 이 계층에 추가하지 않는다.
+점수가 없는 `get_chunk` 결과와 인접 청크에는 검색 점수 cutoff를 적용하지 않고 권한,
+provenance, 중복과 최종 전달 수 계약을 적용한다.
+
+`SearchResult`는 Python만 조립하며 자연어 설명이나 업무 결론을 포함하지 않는다.
+
+| 필드 | 계약 |
+| --- | --- |
+| `execution_status` | `completed`, `failed`, `timeout` |
+| `retrieved_chunks` | 원문과 provenance를 보존한 최종 청크 목록 |
+| `limitations` | 완료했지만 확인하지 못한 검색 범위 |
+| `error` | 실패 또는 시간 초과 시의 정제된 오류 |
+
+완료된 검색은 빈 `retrieved_chunks`를 반환할 수 있다. 기존 `coverage`는 SearchResult에
+두지 않으며 근거 충분성, 결론과 누락 조건은 Domain Agent가 `decision.status`,
+`missing_conditions`, `warnings`로 판단한다. 실패와 시간 초과에는 청크를 포함하지 않고
+정제된 `error`를 필수로 둔다. 반환 청크의 본문, 파일명과 위치는 LLM이 다시 작성하지
+않는다.
+
+## Domain별 문서 접근 권한
 
 | Domain Agent | 허용 문서 유형 |
 | --- | --- |
@@ -71,51 +114,47 @@ flowchart LR
 | Tax/Payout | `pension_reference` |
 | Product | `fund_prospectus` |
 
-`permission`은 LLM Tool 인자가 아니라 신뢰된 호출자가 `SearchAgentState`에 주입하는
-필수 필드다. Search Agent는 첫 모델 호출 전에 이 값을 검증하며, 누락되거나 형식이
-잘못되면 모델과 검색을 실행하지 않고 명시적인 권한 오류로 종료한다. `search_chunks`의
-선택적 `document_type` 인자는 권한을 좁힐 수만 있고 넓힐 수 없다.
+`permission`은 LLM Tool 인자가 아니라 신뢰된 Domain Tool Adapter가 Search Service에
+주입하는 필수 값이다. Service는 Router 실행 전에 이를 검증하며, 누락되거나 형식이
+잘못되면 embedding과 Qdrant를 호출하지 않고 정제된 권한 오류로 종료한다.
 
 ```python
-result = await search_adapter.search(objective, permission=Permission.POLICY)
+result = await search_service.search(request, permission=Permission.POLICY)
 ```
 
-검색 Tool은 권한에서 허용된 문서 유형을 Qdrant payload filter에 포함해 Dense, Sparse,
-Hybrid 후보를 만들기 전에 corpus를 제한한다. Retriever가 필터를 지키지 않는 구현으로
-교체되거나 저장 데이터가 잘못된 경우를 대비해 반환 청크의 `document_type`도 다시
-검증한다. 파일명 검색, 인접 조회와 chunk ID 재조회에도 같은 권한을 적용한다.
+Search Strategy Executor는 권한에서 허용된 문서 유형을 Qdrant payload filter에 포함해
+Dense, Sparse, Hybrid 후보를 만들기 전에 corpus를 제한한다. Retriever가 필터를 지키지
+않는 구현으로 교체되거나 저장 데이터가 잘못된 경우를 대비해 Search Service가 반환
+청크의 `document_type`과 route에 따른 파일명·chunk ID·인접 범위를 다시 검증한다. 파일명 검색,
+인접 조회와 chunk ID 재조회에도 같은 권한을 적용한다.
 
 `QueryEmbedder`와 `ChunkRetriever`는 Protocol이므로 Agent 계층에 Qdrant SDK나 특정
 임베딩 SDK 타입을 노출하지 않는다. 임베딩 제공자가 예외를 반환하거나 유효하지 않은
-vector를 반환하면 Tool 결과의 정제된 `error`로 전달한다. Qdrant 요청·데이터 오류도
-원시 예외 대신 기존 retrieval 오류 계약의 안전한 메시지로 전달한다. 제품 실행에서는
-`PROJECT_RULES.md`에 따라 HCX-005 모델만 Factory에 주입한다.
+vector를 반환하면 Search Service가 정제된 `error`로 변환한다. Qdrant 요청·데이터
+오류도 원시 예외 대신 기존 retrieval 오류 계약의 안전한 메시지로 전달한다.
 
-## Search Agent 설정
+## Search Service 설정
 
-`config/search_agent.py`의 `SearchAgentConfig`는 허용할 필드와 범위, 필드 간 검증을
-정의한다. `config/defaults/search_agent.py`의 `DEFAULT_SEARCH_AGENT_CONFIG`는 저장소가
-현재 선택한 버전 관리 기본 프로필이다. 따라서 설정 구조를 바꾸는 일과 평가 결과에
-따라 기본값을 조정하는 일을 분리할 수 있다.
+Search Service 설정은 라우팅과 검색 품질·실행 예산을 버전 관리한다. ReAct 전용
+`max_model_calls`와 `max_tool_calls`는 사용하지 않는다.
 
-| 설정 | 기본값 | 목적 |
+| 설정 | 초기값 | 목적 |
 | --- | --- | --- |
-| `max_model_calls` | `6` | 검색 3회, 최종 제출과 HCX 형식 교정을 포함한 모델 호출 상한 |
-| `max_tool_calls` | `3` | 한 요청의 검색 Tool 호출 상한. 최종 결과 제출은 제외 |
-| `max_concurrency` | `4` | 프로세스에서 동시에 실행할 Search Agent 상한 |
-| `timeout_seconds` | `45` | Domain Adapter가 Search Agent 전체 실행을 기다리는 상한 |
-| `default_search_mode` | `hybrid` | 검색 Tool의 기본 검색 방식 |
-| `default_result_limit` | `10` | 검색 Tool의 기본 결과 수 |
-| `default_neighbor_before` | `1` | 인접 조회의 기본 앞쪽 청크 수 |
-| `default_neighbor_after` | `1` | 인접 조회의 기본 뒤쪽 청크 수 |
+| `max_concurrency` | `4` | 프로세스에서 동시에 실행할 검색 상한 |
+| `timeout_seconds` | `45` | 상위 deadline을 넘지 않는 검색 전체 제한 |
+| `default_search_mode` | `hybrid` | 일반·문서 범위 검색 방식 |
+| `candidate_limit` | `10` | Retriever에서 받을 후보 수 |
+| `result_limit` | `5` | EvidenceFilter가 최종 전달할 최대 청크 수 |
+| `minimum_score` | `None` | 평가 후 검색 모드별로 정할 선택적 무관 후보 cutoff |
+| `neighbor_before`, `neighbor_after` | 각각 `1` | 요청된 인접 문맥 범위 |
 
-Factory에 별도 설정을 넘기지 않으면 이 기본 프로필을 사용한다. 실험이나 테스트에서는
-검증된 `SearchAgentConfig`를 `create_search_agent(..., config=...)`에 주입해 동작을
-바꿀 수 있다. 결과 수 최대 100개, 인접 조회 합계 최대 100개, 원시 Provider·Retriever
-오류 정제는 운영 안전 계약이므로 프로필로 완화할 수 없다.
+같은 입력과 설정은 같은 SearchPlan과 후보 순서를 만든다. 결과 수 최대 100개, 인접 조회
+합계 최대 100개, permission과 원시 Provider·Retriever 오류 정제는 운영 안전 계약이므로
+설정으로 완화할 수 없다. score의 의미가 검색 모드마다 다르므로 `minimum_score`는
+평가 없이 활성화하거나 모드 사이에서 공유하지 않는다.
 
-인접 청크 조회는 `before + after + 1 <= 100`을 공용 `NeighborRequest`와 Tool 실행
-경계에서 함께 검증한다. 합계를 넘는 요청은 Retriever를 호출하지 않는다.
+인접 청크 조회는 `before + after + 1 <= 100`을 공용 `NeighborRequest`와 Search
+Service 실행 경계에서 함께 검증한다. 합계를 넘는 요청은 Retriever를 호출하지 않는다.
 
 ## 입력 계약
 
@@ -136,7 +175,7 @@ Factory에 별도 설정을 넘기지 않으면 이 기본 프로필을 사용�
 
 두 값이 함께 있으면 `must`로 결합해 모두 만족하는 Point만 검색한다. 필터가 없으면
 `None`을 전달해 전체 corpus를 검색한다. `element_types`는 payload에 보존하지만
-정확성과 Agent 사용 목적을 검증하기 전에는 검색 매개변수로 제공하지 않는다.
+정확성과 Search Service 사용 목적을 검증하기 전에는 검색 매개변수로 제공하지 않는다.
 
 ### NeighborRequest
 
@@ -200,7 +239,7 @@ Repository를 추가하지 않고 다음 세 패턴만 사용한다.
 
 - **Query Object**: `SearchQuery`, `SearchFilters`, `NeighborRequest`가 입력을 검증한다.
 - **Filter Builder**: 허용된 세 payload index만 Qdrant 조건으로 변환한다.
-- **Port/Adapter**: 온라인 Agent의 async `ChunkRetriever` Port를
+- **Port/Adapter**: 온라인 Search Service의 async `ChunkRetriever` Port를
   `AsyncQdrantChunkRetriever`가 구현한다.
 
 ```python
@@ -298,8 +337,8 @@ await client.query_points(
 
 ### Qdrant 기능 선택
 
-Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않고 현재 payload와 검색
-평가 계획에 필요한 부분만 채택한다.
+Qdrant Query API가 제공하는 기능을 Search Service에 그대로 노출하지 않고 현재
+payload와 검색 평가 계획에 필요한 부분만 채택한다.
 
 | 기능 | 상태 | 사용 위치 또는 보류 이유 |
 | --- | --- | --- |
@@ -307,10 +346,10 @@ Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않�
 | sparse BM25 | 사용 | `SearchMode.SPARSE`와 hybrid prefetch |
 | RRF hybrid | 기본 사용 | `SearchMode.HYBRID` |
 | payload filter | 사용 | 파일명·문서 유형 제한 |
-| point ID retrieve | 사용 | 이미 선택한 근거 재조회 |
+| point ID retrieve | 사용 | 신뢰된 청크 ID 직접 조회 |
 | filter + scroll | 사용 | 같은 파일의 인접 청크 복원 |
 | recommend·discovery | 보류 | positive·negative point 피드백 계약 없음 |
-| grouping·order by 검색 | 보류 | 현재 Agent 검색 요구와 index 없음 |
+| grouping·order by 검색 | 보류 | 현재 Search Service 요구와 index 없음 |
 | weighted RRF·formula | 보류 | 평가셋으로 가중치를 검증한 뒤 결정 |
 | random sampling | 제외 | 답변 근거 검색 목적에 부적합 |
 
@@ -318,7 +357,7 @@ Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않�
 
 ### search_chunks
 
-1. Agent permission을 포함한 `SearchFilters`를 Qdrant filter로 변환한다.
+1. SearchPlan의 permission을 포함한 `SearchFilters`를 Qdrant filter로 변환한다.
 2. 검색문을 Kiwi로 전처리해 Sparse BM25 입력을 만든다.
 3. `SearchMode`에 맞는 Query API 요청을 만든다.
 4. Qdrant payload를 검증한 뒤 `SearchHit`으로 변환한다.
@@ -353,10 +392,10 @@ Qdrant Query API가 제공하는 기능을 Agent에 그대로 노출하지 않�
 
 payload 계약 위반을 무시하거나 부분 근거로 반환하지 않는다.
 
-## 관련 구현
+## 관련 구현과 결정
 
-- [Search Agent](../../pension_agent/agent/search/agent.py)
-- [Search Agent Prompt](../../pension_agent/prompts/search/search-agent.md)
+- [Router 기반 결정론적 Search Service 결정](../decisions/20260820-80-router-search-service.md)
+- [GitHub issue #80](https://github.com/nayeon653/-ace3/issues/80)
 - [Search Port](../../pension_agent/agent/search/ports.py)
 - [공용 검색 타입](../../pension_agent/core/retrieval.py)
 - [Qdrant Filter Builder](../../pension_agent/retrieval/filters.py)

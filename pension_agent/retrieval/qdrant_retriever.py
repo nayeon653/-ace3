@@ -1,4 +1,4 @@
-"""Search Agent의 ChunkRetriever Port를 구현하는 Qdrant Adapter."""
+"""Search Service의 ChunkRetriever Port를 구현하는 Qdrant 조회 모듈."""
 
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def make_locator(
 
 
 class QdrantChunkRetriever:
-    """검색 방식과 조회 기능을 하나의 안정된 Agent 접근점으로 제공한다."""
+    """검색 방식과 조회 기능을 하나의 안정된 Search Service 접근점으로 제공한다."""
 
     def __init__(
         self,
@@ -287,7 +287,7 @@ class QdrantChunkRetriever:
 
 
 class AsyncQdrantChunkRetriever:
-    """온라인 Agent가 사용하는 native async Qdrant 조회 Adapter."""
+    """온라인 Search Service가 사용하는 native async Qdrant 조회 구현."""
 
     def __init__(
         self,

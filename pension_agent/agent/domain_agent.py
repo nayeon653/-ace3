@@ -1,4 +1,4 @@
-"""Search Agent만 비즈니스 Tool로 사용하는 공통 Domain Agent."""
+"""Search Service만 검색 Tool로 사용하는 공통 Domain Agent."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired, Protocol, cast
+from uuid import UUID
 
 from langchain.agents import AgentState, create_agent
 from langchain.agents.middleware import (
@@ -16,7 +17,7 @@ from langchain.agents.middleware import (
     ToolCallLimitMiddleware,
     hook_config,
 )
-from langchain.messages import AIMessage, HumanMessage, ToolMessage
+from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langgraph.types import Command
@@ -36,7 +37,7 @@ from pension_agent.agent.execution import (
     ModelConcurrencyMiddleware,
     effective_deadline,
 )
-from pension_agent.agent.search import SearchAgentAdapter, SearchResult
+from pension_agent.agent.search import SearchRequest, SearchResult, SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
@@ -55,6 +56,7 @@ _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못
 class DomainAgentState(AgentState):
     """Domain Agent의 검증된 검색·결과 상태."""
 
+    question: NotRequired[str]
     search_result: NotRequired[SearchResult]
     domain_result: NotRequired[DomainResult]
 
@@ -102,7 +104,7 @@ class RequireDomainTool(AgentMiddleware[Any, Any, Any]):
                 "messages": [
                     HumanMessage(
                         content=(
-                            "자유 형식 답변은 사용하지 않습니다. Search Agent Tool을 호출하고 "
+                            "자유 형식 답변은 사용하지 않습니다. search_documents Tool을 호출하고 "
                             "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
                         )
                     )
@@ -111,6 +113,38 @@ class RequireDomainTool(AgentMiddleware[Any, Any, Any]):
         return None
 
     @hook_config(can_jump_to=["model"])
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.after_model(state, runtime)
+
+
+class SingleDomainSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
+    """한 모델 응답의 병렬 DomainResult 제출을 하나로 제한한다."""
+
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        last_message = state.get("messages", [])[-1]
+        if not isinstance(last_message, AIMessage):
+            return None
+        submit_calls = [
+            call
+            for call in last_message.tool_calls
+            if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME
+        ]
+        if len(submit_calls) <= 1:
+            return None
+        kept_submit = False
+        tool_calls: list[ToolCall] = []
+        for call in last_message.tool_calls:
+            if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME:
+                tool_calls.append(call)
+                continue
+            if not kept_submit:
+                tool_calls.append(call)
+                kept_submit = True
+        return {
+            "messages": [last_message.model_copy(update={"tool_calls": tool_calls})],
+        }
+
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.after_model(state, runtime)
 
@@ -183,12 +217,13 @@ class DomainAgent:
                 try:
                     state = await self.graph.ainvoke(
                         {
+                            "question": question,
                             "messages": [
                                 {
                                     "role": "user",
                                     "content": _domain_request_text(question, objective),
                                 }
-                            ]
+                            ],
                         },
                         context=ExecutionContext(deadline=run_deadline),
                     )
@@ -223,14 +258,18 @@ def create_domain_agent(
     domain: DomainName,
     permission: Permission,
     model: BaseChatModel,
-    search_adapter: SearchAgentAdapter,
+    search_service: SearchRunner,
     system_prompt: str,
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
     model_concurrency: ModelConcurrencyMiddleware | None = None,
 ) -> DomainAgent:
-    """Search Agent Tool과 최종 결과 제출 Tool만 가진 Domain Agent를 만든다."""
+    """Search Service Tool과 최종 결과 제출 Tool만 가진 Domain Agent를 만든다."""
 
-    search_tool = _create_search_tool(search_adapter=search_adapter, permission=permission)
+    search_tool = _create_search_tool(
+        domain=domain,
+        search_service=search_service,
+        permission=permission,
+    )
     result_tool = _create_domain_result_tool(domain=domain)
     graph = create_agent(
         model=model,
@@ -242,6 +281,7 @@ def create_domain_agent(
             *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteDomainResult(),
             RequireDomainTool(),
+            SingleDomainSubmitPerModelCall(),
             DomainModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(
                 tool_name=SEARCH_DOCUMENTS_TOOL_NAME,
@@ -261,7 +301,8 @@ def create_domain_agent(
 
 def _create_search_tool(
     *,
-    search_adapter: SearchAgentAdapter,
+    domain: DomainName,
+    search_service: SearchRunner,
     permission: Permission,
 ) -> Any:
     @tool(
@@ -274,26 +315,63 @@ def _create_search_tool(
             Field(min_length=1, description="하나의 구체적인 근거 검색 목표"),
         ],
         runtime: ToolRuntime[ExecutionContext, DomainAgentState],
+        source_file_name: Annotated[
+            str | None,
+            Field(description="사용자가 명시했거나 이미 검증된 원본 파일명"),
+        ] = None,
+        chunk_id: Annotated[
+            str | None,
+            Field(description="이미 검증된 원문 청크 UUID"),
+        ] = None,
+        expand_neighbors: Annotated[
+            bool,
+            Field(description="기준 청크의 앞뒤 문맥이 필요한지 여부"),
+        ] = False,
     ) -> Command:
-        result = await search_adapter.search(
-            objective,
-            permission=permission,
-            deadline=runtime.context.deadline,
-        )
         if runtime.tool_call_id is None:
-            raise ValueError("Search Agent Tool 호출 ID가 없습니다.")
-        return Command(
-            update={
-                "search_result": result,
-                "messages": [
-                    ToolMessage(
-                        content=result.model_dump_json(),
-                        tool_call_id=runtime.tool_call_id,
-                        name=SEARCH_DOCUMENTS_TOOL_NAME,
-                    )
-                ],
-            }
+            raise ValueError("Search Service Tool 호출 ID가 없습니다.")
+        hints_are_trusted = all(
+            _hint_is_present_in_question(runtime.state, hint)
+            for hint in (source_file_name, chunk_id)
+            if hint is not None
         )
+        try:
+            if not hints_are_trusted:
+                raise ValueError("검색 힌트 출처를 확인할 수 없습니다.")
+            request = SearchRequest(
+                objective=objective,
+                source_file_name=source_file_name,
+                chunk_id=chunk_id,
+                expand_neighbors=expand_neighbors,
+            )
+        except (TypeError, ValueError, ValidationError):
+            result = SearchResult(
+                execution_status="failed",
+                error="검색 요청이 올바르지 않습니다.",
+            )
+        else:
+            result = await search_service.search(
+                request,
+                permission=permission,
+                deadline=runtime.context.deadline,
+            )
+        terminal_result = _terminal_domain_result_from_search(
+            domain=domain,
+            search_result=result,
+        )
+        update: dict[str, Any] = {
+            "search_result": result,
+            "messages": [
+                ToolMessage(
+                    content=result.model_dump_json(),
+                    tool_call_id=runtime.tool_call_id,
+                    name=SEARCH_DOCUMENTS_TOOL_NAME,
+                )
+            ],
+        }
+        if terminal_result is not None:
+            update["domain_result"] = terminal_result
+        return Command(update=update)
 
     return search_documents
 
@@ -317,23 +395,28 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
             Field(description="조건부 또는 미확정 판단에 필요한 누락 조건"),
         ],
         warnings: Annotated[list[str], Field(description="이용자가 알아야 할 제한과 주의사항")],
+        evidence_chunk_ids: Annotated[
+            list[str],
+            Field(description="결론에 실제 사용한 SearchResult 청크 UUID 목록"),
+        ],
         runtime: ToolRuntime[ExecutionContext, DomainAgentState],
     ) -> Command | str:
         search_result = runtime.state.get("search_result")
         if search_result is None:
             return json.dumps(
-                {"error": "Search Agent Tool을 먼저 호출해야 합니다."},
+                {"error": "search_documents Tool을 먼저 호출해야 합니다."},
                 ensure_ascii=False,
             )
-        result = _build_domain_result(
-            domain=domain,
-            search_result=search_result,
-            status=status,
-            conclusion=conclusion,
-            missing_conditions=missing_conditions,
-            warnings=warnings,
-        )
         try:
+            result = _build_domain_result(
+                domain=domain,
+                search_result=search_result,
+                status=status,
+                conclusion=conclusion,
+                missing_conditions=missing_conditions,
+                warnings=warnings,
+                evidence_chunk_ids=evidence_chunk_ids,
+            )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
             return json.dumps(
@@ -366,6 +449,7 @@ def _build_domain_result(
     conclusion: str,
     missing_conditions: list[str],
     warnings: list[str],
+    evidence_chunk_ids: list[str],
 ) -> DomainResult:
     if search_result.execution_status != "completed":
         return _failed_domain_result(
@@ -374,6 +458,10 @@ def _build_domain_result(
             execution_status=search_result.execution_status,
         )
 
+    selected_chunks = _select_evidence_chunks(
+        search_result=search_result,
+        evidence_chunk_ids=evidence_chunk_ids,
+    )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_limitations = list(search_result.limitations)
@@ -397,14 +485,11 @@ def _build_domain_result(
             value for value in normalized_limitations if not _NUMERIC_CLAIM_PATTERN.search(value)
         ]
         normalized_warnings.append(_NUMERIC_CLAIM_WARNING)
-    if search_result.coverage == "none":
+    if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
         normalized_missing = ["제공 문서의 관련 근거"]
-        normalized_warnings.append("제공 문서에서 관련 근거를 확인하지 못했습니다.")
-    elif search_result.coverage == "partial" and status in {"determined", "not_applicable"}:
-        status = "conditional"
-        normalized_missing = normalized_missing or ["판단을 완결할 추가 문서 근거"]
+        normalized_warnings.append("검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.")
 
     if status == "not_applicable":
         normalized_conclusion = _NOT_APPLICABLE_CONCLUSION
@@ -413,7 +498,7 @@ def _build_domain_result(
         normalized_limitations = []
 
     normalized_warnings.extend(normalized_limitations)
-    evidence = [_evidence_from_chunk(chunk) for chunk in search_result.selected_chunks]
+    evidence = [_evidence_from_chunk(chunk) for chunk in selected_chunks]
     if status == "not_applicable":
         evidence = []
     return {
@@ -428,6 +513,68 @@ def _build_domain_result(
         "calculations": [],
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
+
+
+def _select_evidence_chunks(
+    *,
+    search_result: SearchResult,
+    evidence_chunk_ids: list[str],
+) -> list[Any]:
+    """Domain 모델이 명시한 검증된 SearchResult 부분집합만 반환한다."""
+
+    try:
+        normalized_ids = [str(UUID(value.strip())) for value in evidence_chunk_ids]
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError("근거 청크 ID는 UUID 형식이어야 합니다.") from None
+    if len(normalized_ids) != len(set(normalized_ids)):
+        raise ValueError("근거 청크 ID는 중복될 수 없습니다.")
+    chunks_by_id = {chunk.chunk_id: chunk for chunk in search_result.retrieved_chunks}
+    if any(chunk_id not in chunks_by_id for chunk_id in normalized_ids):
+        raise ValueError("SearchResult에 없는 청크를 근거로 제출할 수 없습니다.")
+    return [chunks_by_id[chunk_id] for chunk_id in normalized_ids]
+
+
+def _terminal_domain_result_from_search(
+    *,
+    domain: DomainName,
+    search_result: SearchResult,
+) -> DomainResult | None:
+    """검색 실패나 빈 결과는 모델 재호출 없이 안전하게 종료한다."""
+
+    if search_result.execution_status != "completed":
+        return _failed_domain_result(
+            domain,
+            search_result.error or "검색을 완료하지 못했습니다.",
+            execution_status=search_result.execution_status,
+        )
+    if search_result.retrieved_chunks:
+        return None
+    return {
+        "domain": domain,
+        "execution_status": "completed",
+        "decision": {
+            "status": "undetermined",
+            "conclusion": _NO_EVIDENCE_CONCLUSION,
+            "missing_conditions": ["제공 문서의 관련 근거"],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": list(
+            dict.fromkeys(
+                [
+                    *search_result.limitations,
+                    "제공 문서에서 관련 근거를 확인하지 못했습니다.",
+                ]
+            )
+        ),
+    }
+
+
+def _hint_is_present_in_question(state: DomainAgentState, hint: str) -> bool:
+    """모델이 생성한 힌트 대신 사용자 원문에 있는 힌트만 허용한다."""
+
+    question = state.get("question", "")
+    return hint.strip() in question
 
 
 def _evidence_from_chunk(chunk: Any) -> EvidenceChunk:

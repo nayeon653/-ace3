@@ -15,4 +15,6 @@
 | 2026-08-13 | architecture | accepted | [HCX-005 단일 모델과 ChatClovaX Factory를 채택](20260813-hcx-005-model-factory.md) |
 | 2026-08-13 | operations | superseded | [합성 데이터 개발 실행에 한해 LangSmith 전체 추적을 허용](20260813-13-langsmith-tracing-policy.md) |
 | 2026-08-14 | operations | accepted | [개인 LangSmith 무료 계정의 기본 tracing으로 모든 개발 실행 추적](20260814-langsmith-full-tracing-policy.md) |
+| 2026-08-18 | architecture | superseded | [Search Agent의 근거 선택 책임과 결과 계약을 채택](20260818-search-agent-result-contract.md) |
 | 2026-08-19 | architecture | accepted | [온라인 Agent 실행 경로를 native async로 전환](20260819-agent-runtime-native-async.md) |
+| 2026-08-20 | architecture | accepted | [Router 기반 결정론적 Search Service를 채택](20260820-80-router-search-service.md) |

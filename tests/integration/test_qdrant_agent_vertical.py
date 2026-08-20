@@ -19,8 +19,10 @@ from pension_agent.agent.policy import (
     POLICY_TOOL_NAME,
     create_policy_agent,
 )
-from pension_agent.agent.search import SearchAgentAdapter, create_search_agent
+from pension_agent.agent.search import SearchService
 from pension_agent.api.presentation import build_answer_response
+from pension_agent.config import SearchServiceConfig
+from pension_agent.core import SearchMode
 from pension_agent.retrieval import AsyncQdrantChunkRetriever
 
 CHUNK_ID = "550e8400-e29b-41d4-a716-446655440000"
@@ -83,46 +85,15 @@ def anyio_backend() -> str:
 async def test_main_domain_search_qdrant_to_five_field_response() -> None:
     client = await _qdrant()
     retriever = AsyncQdrantChunkRetriever(client, collection_name="pension_documents_v1")
-    search_model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "search_chunks",
-                        "args": {
-                            "text": "IRP 이전 절차",
-                            "mode": "dense",
-                            "limit": 3,
-                        },
-                        "id": "search-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_search_result",
-                        "args": {
-                            "coverage": "sufficient",
-                            "selected_chunk_ids": [CHUNK_ID],
-                            "limitations": [],
-                        },
-                        "id": "search-submit",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-        ]
-    )
-    search_graph = create_search_agent(
-        model=search_model,
+    search_service = SearchService(
         embedder=FakeEmbedder(),
         retriever=retriever,
+        config=SearchServiceConfig(
+            default_search_mode=SearchMode.DENSE,
+            candidate_limit=3,
+            result_limit=3,
+        ),
     )
-    search_adapter = SearchAgentAdapter(search_graph)
 
     domain_model = ToolCallingFakeModel(
         responses=[
@@ -131,7 +102,7 @@ async def test_main_domain_search_qdrant_to_five_field_response() -> None:
                 tool_calls=[
                     {
                         "name": "search_documents",
-                        "args": {"objective": "IRP 이전 절차의 문서 근거 확인"},
+                        "args": {"objective": "IRP 이전 절차"},
                         "id": "domain-search",
                         "type": "tool_call",
                     }
@@ -147,6 +118,7 @@ async def test_main_domain_search_qdrant_to_five_field_response() -> None:
                             "conclusion": "IRP 이전은 접수 절차와 가입 유형 확인이 필요합니다.",
                             "missing_conditions": ["가입 유형"],
                             "warnings": [],
+                            "evidence_chunk_ids": [CHUNK_ID],
                         },
                         "id": "domain-submit",
                         "type": "tool_call",
@@ -155,7 +127,7 @@ async def test_main_domain_search_qdrant_to_five_field_response() -> None:
             ),
         ]
     )
-    policy_agent = create_policy_agent(model=domain_model, search_adapter=search_adapter)
+    policy_agent = create_policy_agent(model=domain_model, search_service=search_service)
     policy_tool = create_domain_agent_tool(
         name=POLICY_TOOL_NAME,
         description=POLICY_TOOL_DESCRIPTION,

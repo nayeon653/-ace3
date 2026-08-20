@@ -1,5 +1,5 @@
 """Safe default configuration resources shipped with the application."""
 
-from pension_agent.config.defaults.search_agent import DEFAULT_SEARCH_AGENT_CONFIG
+from pension_agent.config.search_service import DEFAULT_SEARCH_SERVICE_CONFIG
 
-__all__ = ["DEFAULT_SEARCH_AGENT_CONFIG"]
+__all__ = ["DEFAULT_SEARCH_SERVICE_CONFIG"]

@@ -2,18 +2,22 @@
 
 from pension_agent.agent.search import (
     ChunkRetriever,
+    EvidenceFilter,
     QueryEmbedder,
-    QueryEmbeddingError,
-    SearchPermissionError,
-    create_search_agent,
-    create_search_tools,
+    SearchRequest,
+    SearchResult,
+    SearchRouter,
+    SearchRunner,
+    SearchService,
 )
 
 __all__ = [
     "ChunkRetriever",
+    "EvidenceFilter",
     "QueryEmbedder",
-    "QueryEmbeddingError",
-    "SearchPermissionError",
-    "create_search_agent",
-    "create_search_tools",
+    "SearchRequest",
+    "SearchResult",
+    "SearchRouter",
+    "SearchRunner",
+    "SearchService",
 ]

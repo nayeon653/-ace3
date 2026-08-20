@@ -65,7 +65,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     embedder = object()
     qdrant_client = AsyncClosable("qdrant", closed)
     retriever = object()
-    search_graph = object()
+    search_service = object()
     _install_http_client_factory(monkeypatch, closed=closed, created=created)
 
     async def prewarm() -> None:
@@ -96,12 +96,11 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
         ),
     )
 
-    def create_search(**kwargs: Any) -> object:
-        created["search"] = kwargs
-        return search_graph
+    def create_search_service(**kwargs: Any) -> object:
+        created["search_service"] = kwargs
+        return search_service
 
-    monkeypatch.setattr(runtime, "create_search_agent", create_search)
-    monkeypatch.setattr(runtime, "SearchAgentAdapter", lambda graph: graph)
+    monkeypatch.setattr(runtime, "SearchService", create_search_service)
 
     def domain_factory(name: str):
         def build(**kwargs: Any) -> object:
@@ -143,14 +142,18 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     assert created["embedder_factory"]["http_async_client"] is embedding_http.async_
     assert created["qdrant_pool_size"] == 5
     assert created["client"] is qdrant_client
-    assert isinstance(created["search"]["embedder"], LimitedQueryEmbedder)
-    assert created["search"]["embedder"].inner is embedder
-    assert created["search"]["embedder"].limiter.max_concurrency == 3
-    assert isinstance(created["search"]["retriever"], LimitedChunkRetriever)
-    assert created["search"]["retriever"].inner is retriever
-    assert created["search"]["retriever"].limiter.max_concurrency == 5
-    shared_model_limit = created["search"]["model_concurrency"]
+    assert set(created["search_service"]) == {"embedder", "retriever"}
+    assert isinstance(created["search_service"]["embedder"], LimitedQueryEmbedder)
+    assert created["search_service"]["embedder"].inner is embedder
+    assert created["search_service"]["embedder"].limiter.max_concurrency == 3
+    assert isinstance(created["search_service"]["retriever"], LimitedChunkRetriever)
+    assert created["search_service"]["retriever"].inner is retriever
+    assert created["search_service"]["retriever"].limiter.max_concurrency == 5
+    shared_model_limit = created["policy"]["model_concurrency"]
     assert shared_model_limit._limiter.max_concurrency == 2
+    assert created["policy"]["search_service"] is search_service
+    assert created["tax_payout"]["search_service"] is search_service
+    assert created["product"]["search_service"] is search_service
     assert created["policy"]["model_concurrency"] is shared_model_limit
     assert created["tax_payout"]["model_concurrency"] is shared_model_limit
     assert created["product"]["model_concurrency"] is shared_model_limit
@@ -184,8 +187,7 @@ async def test_runtime_closes_partial_resources_when_domain_creation_fails(
         "create_async_qdrant_retriever",
         lambda *args, **kwargs: object(),
     )
-    monkeypatch.setattr(runtime, "create_search_agent", lambda **kwargs: object())
-    monkeypatch.setattr(runtime, "SearchAgentAdapter", lambda graph: graph)
+    monkeypatch.setattr(runtime, "SearchService", lambda **kwargs: object())
     monkeypatch.setattr(runtime, "create_policy_agent", lambda **kwargs: object())
     monkeypatch.setattr(runtime, "create_tax_payout_agent", lambda **kwargs: object())
 
