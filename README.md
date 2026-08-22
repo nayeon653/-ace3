@@ -87,6 +87,21 @@ make setup-parser  # Docling 파서 전용 환경 설치
 make parser-test   # 파서 단위 테스트
 ```
 
+### 검색 실험 노트북
+
+팀이 공유하는 Search Service 실험은
+[`notebooks/search/search_service_playground.ipynb`](notebooks/search/search_service_playground.ipynb)에서
+수행한다. 저장소 루트의 `.env`에 CLOVA Studio와 Qdrant 연결 정보를
+설정하고, 루트에서 다음 명령으로 JupyterLab을 실행한다.
+
+```bash
+uv sync --locked --group notebook
+uv run --locked --group notebook jupyter lab
+```
+
+노트북에는 API key나 `.env` 내용을 기록하지 않는다. 커밋 전에는 모든 셀의
+출력을 제거하고, 반복 평가 로직은 `evals/`나 `tests/`로 옮긴다.
+
 로컬 Qdrant의 대시보드, 연결 주소, 데이터 유지와 초기화 방법은
 [`docs/operations/qdrant-local.md`](docs/operations/qdrant-local.md)를 따른다.
 Qdrant Cloud에 CLOVA `bge-m3` 임베딩을 적재하는 검증·샘플·전체 실행 절차는

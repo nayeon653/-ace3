@@ -29,6 +29,7 @@ dist/
 # 로그/캐시
 logs/
 .cache/
+.ipynb_checkpoints/
 .pytest_cache/
 .ruff_cache/
 
