@@ -87,12 +87,17 @@ make setup-parser  # Docling 파서 전용 환경 설치
 make parser-test   # 파서 단위 테스트
 ```
 
-### 검색 실험 노트북
+### Agent 실험 노트북
 
-팀이 공유하는 Search Service 실험은
-[`notebooks/search/search_service_playground.ipynb`](notebooks/search/search_service_playground.ipynb)에서
-수행한다. 저장소 루트의 `.env`에 CLOVA Studio와 Qdrant 연결 정보를
-설정하고, 루트에서 다음 명령으로 JupyterLab을 실행한다.
+팀이 공유하는 실험 노트북은 역할별로 분리한다.
+
+- [`notebooks/search/search_service_playground.ipynb`](notebooks/search/search_service_playground.ipynb):
+  Search Service의 검색과 라우팅을 단독으로 확인한다.
+- [`notebooks/agent/main_agent_playground.ipynb`](notebooks/agent/main_agent_playground.ipynb):
+  Main Supervisor부터 Domain Agent와 최종 5개 응답 필드까지 전체 경로를 확인한다.
+
+저장소 루트의 `.env`에 CLOVA Studio와 Qdrant 연결 정보를 설정하고,
+루트에서 다음 명령으로 JupyterLab을 실행한다.
 
 ```bash
 uv sync --locked --group notebook
