@@ -138,7 +138,7 @@ def _create_product_catalog_query_tool(
             return _catalog_lookup_command(
                 runtime.tool_call_id,
                 payload={"query": query.model_dump(), "catalog_result": result["catalog_result"]},
-                result=result,
+                pending_catalog_result=result,
             )
         return _catalog_lookup_command(
             runtime.tool_call_id,
@@ -199,6 +199,7 @@ def _catalog_lookup_command(
     payload: dict[str, Any] | None = None,
     candidate_codes: list[str] | None = None,
     result: DomainResult | None = None,
+    pending_catalog_result: DomainResult | None = None,
 ) -> Command:
     if payload is not None:
         message_payload = payload
@@ -235,6 +236,9 @@ def _catalog_lookup_command(
     if result is not None:
         validate_domain_result(result)
         update["domain_result"] = result
+    if pending_catalog_result is not None:
+        validate_domain_result(pending_catalog_result)
+        update["product_catalog_result"] = pending_catalog_result
     return Command(update=update)
 
 

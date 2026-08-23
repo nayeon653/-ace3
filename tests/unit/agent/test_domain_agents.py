@@ -614,7 +614,7 @@ async def test_product_agent_returns_verified_ambiguous_candidates_without_docum
                         "type": "tool_call",
                     }
                 ],
-            )
+            ),
         ]
     )
     matcher = _product_matcher("ambiguous", "KR510902511M", "KR510902773M")
@@ -651,7 +651,24 @@ async def test_product_agent_returns_deterministic_catalog_result_without_docume
                         "type": "tool_call",
                     }
                 ],
-            )
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "모델이 만든 개수와 목록",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "catalog-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
         ]
     )
     planner = _catalog_browse_planner()
@@ -685,7 +702,7 @@ async def test_product_agent_returns_deterministic_catalog_result_without_docume
             "미래에셋 상품 개수와 목록 조회",
         )
     ]
-    assert model.invocation_count == 1
+    assert model.invocation_count == 2
 
 
 @pytest.mark.anyio
@@ -729,6 +746,60 @@ async def test_product_agent_owns_missing_recommendation_conditions() -> None:
     assert result["warnings"] == []
     assert search.calls == []
     assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_product_agent_overrides_determined_catalog_for_recommendation() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "catalog-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "상품 목록 중 하나를 추천합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "conditions-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_query_planner=_catalog_browse_planner(),
+    )
+
+    result = await agent({"question": "미래에셋 상품 추천", "objective": "미래에셋 상품 추천"})
+
+    assert result["decision"] == {
+        "status": "conditional",
+        "conclusion": "상품 추천을 위해 투자 조건을 확인해야 합니다.",
+        "missing_conditions": ["투자 기간", "위험 선호도", "유동성 필요", "비용 선호"],
+    }
+    assert "catalog_result" not in result
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert model.invocation_count == 2
 
 
 @pytest.mark.anyio

@@ -4,7 +4,7 @@
 
 # 실행 규칙
 
-- 상품 개수나 목록 질문은 첫 단계에서 `lookup_product_codes`를 호출한다. 이 Tool의 검증된 카탈로그 결과로 즉시 종료되며 `search_documents`를 호출하지 않는다.
+- 상품 개수나 목록 질문은 첫 단계에서 `lookup_product_codes`를 호출한다. 검증된 카탈로그 결과가 반환되면 `determined` 상태와 빈 `evidence_chunk_ids`로 `submit_domain_result`를 호출하며 `search_documents`는 호출하지 않는다.
 - 특정 상품 질문의 첫 단계에서는 `lookup_product_codes`로 상품을 식별하거나, `product_code` 없이 `search_documents`로 상품 문서 전체에서 판단 기준과 문서 용어를 먼저 탐색할 수 있다.
 - 전체 검색을 먼저 했다면 다음 단계에서 반드시 `lookup_product_codes`를 호출해 사용자 질문 원문과 상품 카탈로그를 대조한다.
 - `lookup_product_codes`는 전체 카탈로그에 근거한 단일 상품 식별 또는 개수·목록 조회만 담당하며 상품 문서는 검색하지 않는다.
@@ -14,7 +14,7 @@
 - `search_documents`를 호출할 때는 상품 식별에 사용한 오타·운용사 중심 표현을 그대로 넘기지 않고, 사용자가 확인하려는 비용·위험·유동성·운용 특성을 문서 근거 검색에 적합한 구체적인 `objective`로 재작성한다.
 - 검색 결과가 판단에 충분하지 않으면 같은 표현을 반복하지 않고, 누락된 판단 기준과 다른 문서 용어를 사용해 `objective`를 다시 작성한다.
 - 후보가 없거나 여러 개이면 조회 Tool이 안전한 미확정·조건부 결과로 종료하므로 문서를 검색하지 않는다.
-- 구체적인 추천 질문인데 위험 선호도, 투자 기간, 유동성 필요, 비용 선호 등 판단 조건이 없으면 카탈로그 Query Planner에 조건 판단을 맡기지 않는다. 문서를 검색하기 전 `submit_domain_result`를 `conditional`로 호출하고 필요한 사용자 조건을 `missing_conditions`에 제출한다.
+- 구체적인 추천 질문인데 위험 선호도, 투자 기간, 유동성 필요, 비용 선호 등 판단 조건이 없으면 카탈로그 Query Planner에 조건 판단을 맡기지 않는다. 카탈로그 결과를 이미 받았더라도 상품 목록을 추천으로 바꾸지 말고 `submit_domain_result`를 `conditional`로 호출해 필요한 사용자 조건을 `missing_conditions`에 제출한다.
 - 검색 모드·개수와 내부 문서 파일명은 직접 지정하지 않는다.
 - 검색 결과에 없는 상품 특성, 비용, 위험을 만들지 않는다.
 - 단일 상품 근거를 다른 상품에 일반화하지 않고 파일명과 위치를 구분한다.
