@@ -63,6 +63,61 @@ def test_catalog_validates_hcx_candidate_codes_before_returning_entries() -> Non
         catalog.select_products(["KR9999999999"])
 
 
+def test_catalog_queries_provider_count_and_items_deterministically() -> None:
+    catalog = load_product_catalog()
+
+    result = catalog.query(provider=" 미래에셋 ", return_mode="count_and_items")
+
+    assert result.provider == "미래에셋"
+    assert result.total_count == 25
+    assert len(result.items) == 25
+    assert [product.product_code for product in result.items] == sorted(
+        product.product_code
+        for product in catalog.products
+        if product.provider == "미래에셋"
+    )
+    assert result.catalog_version == catalog.version
+    assert len(result.catalog_version) == 64
+
+
+def test_catalog_count_query_omits_items_without_changing_total() -> None:
+    result = load_product_catalog().query(provider="미래에셋", return_mode="count")
+
+    assert result.total_count == 25
+    assert result.items == ()
+
+
+def test_catalog_query_without_provider_covers_the_full_snapshot() -> None:
+    result = load_product_catalog().query(provider=None, return_mode="items")
+
+    assert result.total_count == 100
+    assert len(result.items) == 100
+    assert result.provider is None
+
+
+def test_catalog_query_rejects_unknown_provider_and_return_mode() -> None:
+    catalog = load_product_catalog()
+
+    with pytest.raises(ProductCatalogError, match="없는 운용사"):
+        catalog.query(provider="없는운용사", return_mode="count")
+    with pytest.raises(ProductCatalogError, match="반환 방식"):
+        catalog.query(provider="미래에셋", return_mode="all")  # type: ignore[arg-type]
+
+
+def test_catalog_version_changes_with_validated_catalog_content() -> None:
+    first = ProductCatalog.from_payloads(
+        _catalog_payload("KR510902511M"),
+        {"aliases": {}},
+    )
+    second_payload = _catalog_payload("KR510902511M")
+    products = second_payload["products"]
+    assert isinstance(products, list)
+    products[0]["official_name"] = "변경된 상품명"
+    second = ProductCatalog.from_payloads(second_payload, {"aliases": {}})
+
+    assert first.version != second.version
+
+
 @pytest.mark.parametrize("product_code", ["", "KR123", "US510902511M", "KR9999999999"])
 def test_catalog_rejects_invalid_or_unknown_product_code(product_code: str) -> None:
     with pytest.raises(ProductCatalogError):
