@@ -763,9 +763,7 @@ async def test_product_agent_discards_unverified_code_from_search_before_lookup(
         DocumentType.FUND_PROSPECTUS,
         source_file_name="R2_KR510902511M.pdf",
     )
-    search = FakeSearchService(
-        SearchResult(execution_status="completed", retrieved_chunks=[chunk])
-    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -832,9 +830,7 @@ async def test_product_agent_discards_unverified_code_from_search_before_lookup(
         catalog_matcher=_product_matcher(),
     )
 
-    result = await agent(
-        {"question": "미래에셋 장기성장 위험은?", "objective": "상품 위험 판단"}
-    )
+    result = await agent({"question": "미래에셋 장기성장 위험은?", "objective": "상품 위험 판단"})
 
     assert search.calls == [
         (
