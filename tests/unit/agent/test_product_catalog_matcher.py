@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from langchain.messages import AIMessage
@@ -27,12 +27,15 @@ def anyio_backend() -> str:
 class BindingFakeModel(FakeMessagesListChatModel):
     """구조화 Tool binding만 지원하는 후보 식별용 Fake 모델."""
 
+    bindings: ClassVar[list[dict[str, Any]]] = []
+
     def bind_tools(
         self,
         tools: Sequence[Any],
         **kwargs: Any,
     ) -> Runnable[Any, AIMessage]:
-        del tools, kwargs
+        del tools
+        self.bindings.append(kwargs)
         return self
 
 
@@ -48,6 +51,15 @@ def _selection_response(status: str, product_codes: list[str]) -> AIMessage:
             }
         ],
     )
+
+
+def test_hcx_catalog_matcher_does_not_disable_parallel_tool_calls() -> None:
+    model = BindingFakeModel(responses=[])
+    model.bindings.clear()
+
+    HCXProductCatalogMatcher(model=model, catalog=load_product_catalog())
+
+    assert model.bindings == [{"tool_choice": PRODUCT_CATALOG_SELECTION_TOOL_NAME}]
 
 
 @pytest.mark.anyio

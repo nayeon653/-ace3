@@ -110,7 +110,6 @@ class HCXProductCatalogMatcher:
         self._model: Runnable[Any, AIMessage] = model.bind_tools(
             (_return_product_catalog_selection,),
             tool_choice=PRODUCT_CATALOG_SELECTION_TOOL_NAME,
-            parallel_tool_calls=False,
         )
         self._model_concurrency = model_concurrency
 
