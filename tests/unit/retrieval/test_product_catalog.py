@@ -48,6 +48,21 @@ def test_prompt_catalog_preserves_only_the_minimum_product_fields() -> None:
     }
 
 
+def test_catalog_validates_hcx_candidate_codes_before_returning_entries() -> None:
+    catalog = load_product_catalog()
+
+    selected = catalog.select_products([" kr510902511m ", "KR510902773M"])
+
+    assert [product.product_code for product in selected] == [
+        "KR510902511M",
+        "KR510902773M",
+    ]
+    with pytest.raises(ProductCatalogError, match="중복"):
+        catalog.select_products(["KR510902511M", "kr510902511m"])
+    with pytest.raises(ProductCatalogError, match="카탈로그에 없는"):
+        catalog.select_products(["KR9999999999"])
+
+
 @pytest.mark.parametrize("product_code", ["", "KR123", "US510902511M", "KR9999999999"])
 def test_catalog_rejects_invalid_or_unknown_product_code(product_code: str) -> None:
     with pytest.raises(ProductCatalogError):

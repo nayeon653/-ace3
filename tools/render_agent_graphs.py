@@ -6,12 +6,14 @@ import argparse
 import hashlib
 import json
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from langchain.messages import AIMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.runnables import Runnable
 from langchain_core.runnables.graph import MermaidDrawMethod
 from langchain_core.runnables.graph_mermaid import draw_mermaid_png
 
@@ -55,6 +57,18 @@ class _OfflineSearchService:
         raise RuntimeError("그래프 생성 중에는 SearchService를 실행할 수 없습니다.")
 
 
+class _GraphFakeModel(FakeMessagesListChatModel):
+    """그래프 조립에 필요한 Tool binding만 지원하는 오프라인 모델."""
+
+    def bind_tools(
+        self,
+        tools: Sequence[Any],
+        **kwargs: Any,
+    ) -> Runnable[Any, AIMessage]:
+        del tools, kwargs
+        return self
+
+
 def _domain_node_id(spec: DomainAgentSpec) -> str:
     return f"domain_{spec.slug.replace('-', '_')}"
 
@@ -93,6 +107,21 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
                 f"    {node_id} --> search_tools",
             )
         )
+    product_node = _domain_node_id(next(spec for spec in specs if spec.domain == "product"))
+    lines.extend(
+        (
+            "",
+            '    subgraph catalog["HCX 상품 후보 식별"]',
+            (
+                '        catalog_lookup["lookup_product_codes"] --> '
+                f'catalog_hcx["{MAIN_SUPERVISOR_HCX_CONFIG.model} model"]'
+            ),
+            '        product_catalog["상품 카탈로그"] --> catalog_hcx',
+            "    end",
+            f"    {product_node} --> catalog_lookup",
+            "    catalog_lookup --> product_catalog",
+        )
+    )
     lines.extend(
         (
             "",
@@ -136,7 +165,7 @@ def build_artifacts() -> tuple[GraphArtifact, ...]:
     """제품 런타임과 같은 등록 정보·Factory·middleware로 그래프를 조립한다."""
 
     specs = domain_agent_specs()
-    model = FakeMessagesListChatModel(responses=[])
+    model = _GraphFakeModel(responses=[])
     search_service = _OfflineSearchService()
     model_concurrency = ModelConcurrencyMiddleware(
         AsyncConcurrencyLimiter(DEFAULT_AGENT_RUNTIME_CONFIG.max_concurrent_hcx_calls)

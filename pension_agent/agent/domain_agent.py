@@ -20,6 +20,7 @@ from langchain.agents.middleware import (
 from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
+from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import Field, TypeAdapter, ValidationError
 
@@ -58,6 +59,8 @@ class DomainAgentState(AgentState):
     """Domain Agent의 검증된 검색·결과 상태."""
 
     question: NotRequired[str]
+    objective: NotRequired[str]
+    product_candidate_codes: NotRequired[list[str]]
     search_result: NotRequired[SearchResult]
     domain_result: NotRequired[DomainResult]
 
@@ -93,6 +96,9 @@ class CompleteDomainResult(AgentMiddleware[Any, Any, Any]):
 class RequireDomainTool(AgentMiddleware[Any, Any, Any]):
     """DomainResult가 제출될 때까지 Function calling을 강제한다."""
 
+    def __init__(self, *, domain: DomainName) -> None:
+        self._domain = domain
+
     @hook_config(can_jump_to=["model"])
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
@@ -100,15 +106,16 @@ class RequireDomainTool(AgentMiddleware[Any, Any, Any]):
             return None
         last_message = state.get("messages", [])[-1]
         if isinstance(last_message, AIMessage) and not last_message.tool_calls:
+            if state.get("search_result") is not None:
+                instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+            elif self._domain == "product" and not state.get("product_candidate_codes"):
+                instruction = "lookup_product_codes Tool로 상품 코드를 먼저 식별하세요."
+            else:
+                instruction = "search_documents Tool로 제공 문서 근거를 검색하세요."
             return {
                 "jump_to": "model",
                 "messages": [
-                    HumanMessage(
-                        content=(
-                            "자유 형식 답변은 사용하지 않습니다. search_documents Tool을 호출하고 "
-                            "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
-                        )
-                    )
+                    HumanMessage(content=f"자유 형식 답변은 사용하지 않습니다. {instruction}")
                 ],
             }
         return None
@@ -144,6 +151,39 @@ class SingleDomainSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
                 kept_submit = True
         return {
             "messages": [last_message.model_copy(update={"tool_calls": tool_calls})],
+        }
+
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.after_model(state, runtime)
+
+
+class EnforceProductToolSequence(AgentMiddleware[Any, Any, Any]):
+    """Product Agent가 코드 식별, 문서 검색, 결과 제출 순서를 건너뛰지 않게 한다."""
+
+    def __init__(self, *, lookup_tool_name: str) -> None:
+        self._lookup_tool_name = lookup_tool_name
+
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        last_message = state.get("messages", [])[-1]
+        if not isinstance(last_message, AIMessage) or state.get("domain_result") is not None:
+            return None
+        if state.get("search_result") is not None:
+            expected_tool = SUBMIT_DOMAIN_RESULT_TOOL_NAME
+        elif state.get("product_candidate_codes"):
+            expected_tool = SEARCH_DOCUMENTS_TOOL_NAME
+        else:
+            expected_tool = self._lookup_tool_name
+        expected_calls = [
+            call for call in last_message.tool_calls if call["name"] == expected_tool
+        ]
+        if not expected_calls:
+            return None
+        kept_call = expected_calls[0]
+        if last_message.tool_calls == [kept_call]:
+            return None
+        return {
+            "messages": [last_message.model_copy(update={"tool_calls": [kept_call]})],
         }
 
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
@@ -219,6 +259,7 @@ class DomainAgent:
                     state = await self.graph.ainvoke(
                         {
                             "question": question,
+                            "objective": objective,
                             "messages": [
                                 {
                                     "role": "user",
@@ -264,12 +305,13 @@ def create_domain_agent(
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
     model_concurrency: ModelConcurrencyMiddleware | None = None,
     product_code_resolver: ProductCodeResolver | None = None,
+    product_lookup_tool: BaseTool | None = None,
 ) -> DomainAgent:
-    """Search Service Tool과 최종 결과 제출 Tool만 가진 Domain Agent를 만든다."""
+    """도메인별 검색 Tool과 최종 결과 제출 Tool을 가진 Domain Agent를 만든다."""
 
     if domain == "product":
-        if product_code_resolver is None:
-            raise ValueError("Product Agent에는 상품 코드 resolver가 필요합니다.")
+        if product_code_resolver is None or product_lookup_tool is None:
+            raise ValueError("Product Agent에는 상품 코드 식별 Tool과 코드 resolver가 필요합니다.")
         search_tool = _create_product_search_tool(
             search_service=search_service,
             permission=permission,
@@ -282,16 +324,21 @@ def create_domain_agent(
             permission=permission,
         )
     result_tool = _create_domain_result_tool(domain=domain)
+    tools = (
+        (product_lookup_tool, search_tool, result_tool)
+        if product_lookup_tool is not None
+        else (search_tool, result_tool)
+    )
     graph = create_agent(
         model=model,
-        tools=(search_tool, result_tool),
+        tools=tools,
         system_prompt=system_prompt,
         state_schema=DomainAgentState,
         context_schema=ExecutionContext,
         middleware=(
             *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteDomainResult(),
-            RequireDomainTool(),
+            RequireDomainTool(domain=domain),
             SingleDomainSubmitPerModelCall(),
             DomainModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(
@@ -299,10 +346,27 @@ def create_domain_agent(
                 run_limit=config.max_search_calls,
                 exit_behavior="continue",
             ),
+            *(
+                (
+                    ToolCallLimitMiddleware(
+                        tool_name=product_lookup_tool.name,
+                        run_limit=1,
+                        exit_behavior="continue",
+                    ),
+                )
+                if product_lookup_tool is not None
+                else ()
+            ),
             ToolCallLimitMiddleware(
                 tool_name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                 run_limit=config.max_submit_calls,
                 exit_behavior="continue",
+            ),
+            # after_model hook은 역순 실행되므로 병렬 호출을 Tool 상한 집계보다 먼저 정제한다.
+            *(
+                (EnforceProductToolSequence(lookup_tool_name=product_lookup_tool.name),)
+                if product_lookup_tool is not None
+                else ()
             ),
         ),
         name=f"{domain}_agent",
@@ -415,7 +479,10 @@ def _create_product_search_tool(
         if runtime.tool_call_id is None:
             raise ValueError("Search Service Tool 호출 ID가 없습니다.")
         try:
-            source_file_name = product_code_resolver(product_code)
+            normalized_code = product_code.strip().upper()
+            if normalized_code not in runtime.state.get("product_candidate_codes", []):
+                raise ValueError("상품 코드 식별 결과에 없는 코드입니다.")
+            source_file_name = product_code_resolver(normalized_code)
             request = SearchRequest(
                 objective=objective,
                 source_file_name=source_file_name,

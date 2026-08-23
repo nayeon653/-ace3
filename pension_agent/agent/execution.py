@@ -4,7 +4,9 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
+
+_ResultT = TypeVar("_ResultT")
 
 from langchain.agents.middleware import AgentMiddleware
 
@@ -48,6 +50,12 @@ class ModelConcurrencyMiddleware(AgentMiddleware[Any, ExecutionContext, Any]):
 
         async with self._limiter.slot():
             return await handler(request)
+
+    async def arun(self, operation: Callable[[], Awaitable[_ResultT]]) -> _ResultT:
+        """Agent Tool 내부의 직접 HCX 호출에도 같은 공유 상한을 적용한다."""
+
+        async with self._limiter.slot():
+            return await operation()
 
 
 def effective_deadline(*, timeout_seconds: float, parent_deadline: float | None) -> float:

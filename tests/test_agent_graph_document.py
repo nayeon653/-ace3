@@ -66,6 +66,8 @@ def test_agent_graph_document_covers_runtime_boundaries() -> None:
     assert "analyze_policy" in document
     assert "analyze_tax_payout" in document
     assert "analyze_product" in document
+    assert "lookup_product_codes" in document
+    assert "상품 카탈로그" in document
     assert "search_documents" in document
     assert "submit_domain_result" in document
     assert "get_graph(xray=True)" in document

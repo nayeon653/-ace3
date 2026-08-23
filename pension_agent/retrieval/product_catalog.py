@@ -84,6 +84,17 @@ class ProductCatalog:
         primary_code = self._document_aliases.get(normalized, normalized)
         return f"R2_{primary_code}.pdf"
 
+    def select_products(self, product_codes: list[str]) -> tuple[ProductCatalogEntry, ...]:
+        """HCX가 선택한 상품 코드를 검증하고 카탈로그 원본 항목으로 반환한다."""
+
+        normalized_codes = [_normalize_product_code(code) for code in product_codes]
+        if len(normalized_codes) != len(set(normalized_codes)):
+            raise ProductCatalogError("상품 후보 product_code는 중복될 수 없습니다.")
+        try:
+            return tuple(self._products_by_code[code] for code in normalized_codes)
+        except KeyError:
+            raise ProductCatalogError("카탈로그에 없는 상품 코드입니다.") from None
+
     def to_prompt_json(self) -> str:
         """HCX 컨텍스트용 최소 카탈로그 JSON을 반환한다."""
 
