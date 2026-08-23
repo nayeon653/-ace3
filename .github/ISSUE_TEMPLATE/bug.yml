@@ -6,20 +6,42 @@ body:
   - type: markdown
     attributes:
       value: |
-        시크릿, API 키, 개인정보가 로그나 첨부 파일에 포함되지 않도록 확인해 주세요.
+        ### 🔐 작성 전 확인
+
+        - 긴 문단 대신 표, 단계, 짧은 항목으로 작성합니다.
+        - 로그와 첨부 파일에서 시크릿, API 키, 개인정보를 제거합니다.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 🚨 영향도
+      description: 사용자와 시스템에 미치는 가장 높은 영향을 선택해 주세요.
+      options:
+        - critical - 핵심 기능 사용 불가 또는 데이터 손상 위험
+        - high - 주요 기능 실패, 우회 방법 있음
+        - medium - 일부 기능 오동작 또는 품질 저하
+        - low - 경미한 문제 또는 사용성 저하
+    validations:
+      required: true
 
   - type: textarea
     id: symptom
     attributes:
-      label: 증상
-      description: 실제로 관찰한 문제를 설명해 주세요.
+      label: 🐛 증상 요약
+      description: 관찰한 문제를 항목별로 작성해 주세요.
+      value: |
+        | 항목 | 내용 |
+        | --- | --- |
+        | 발생 위치 |  |
+        | 발생 빈도 | 항상 / 간헐적 / 1회 |
+        | 영향 범위 |  |
     validations:
       required: true
 
   - type: textarea
     id: reproduction
     attributes:
-      label: 재현 방법
+      label: 🔁 재현 방법
       description: 최소 재현 절차와 입력값을 순서대로 작성해 주세요.
       value: |
         1.
@@ -29,22 +51,45 @@ body:
       required: true
 
   - type: textarea
-    id: expected
+    id: behavior
     attributes:
-      label: 기대 동작
-      description: 정상이라면 어떤 결과가 나와야 하는지 작성해 주세요.
+      label: ↔️ 실제 동작과 기대 동작
+      description: 실제 결과와 정상일 때의 결과를 나란히 비교해 주세요.
+      value: |
+        | 실제 동작 | 기대 동작 |
+        | --- | --- |
+        |  |  |
     validations:
       required: true
 
   - type: textarea
     id: evidence
     attributes:
-      label: 로그와 증거
-      description: 민감정보를 제거한 오류 메시지, 응답 JSON, 화면 캡처 등을 첨부해 주세요.
-      render: shell
+      label: 📎 로그와 증거
+      description: 민감정보를 제거한 로그, 오류 메시지, 응답 JSON, 화면 캡처 또는 영상을 첨부해 주세요.
+      value: |
+        - 오류 메시지:
+        - 로그·응답:
+        - 화면 캡처·영상:
 
   - type: textarea
     id: environment
     attributes:
-      label: 실행 환경
-      description: 브랜치 또는 커밋, 실행 방법, OS 등 재현에 필요한 환경 정보를 작성해 주세요.
+      label: 💻 실행 환경
+      description: 재현에 필요한 환경 정보를 작성해 주세요.
+      value: |
+        | 항목 | 값 |
+        | --- | --- |
+        | 브랜치·커밋 |  |
+        | OS·실행 환경 |  |
+        | 실행 방법 |  |
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 🩹 임시 해결 방법
+      description: 확인된 우회 방법이 없으면 없음으로 표시해 주세요.
+      value: |
+        -
