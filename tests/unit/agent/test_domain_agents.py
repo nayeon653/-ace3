@@ -637,9 +637,7 @@ async def test_product_agent_returns_verified_ambiguous_candidates_without_docum
 
 
 @pytest.mark.anyio
-async def test_product_agent_returns_deterministic_catalog_result_without_document_search() -> (
-    None
-):
+async def test_product_agent_returns_deterministic_catalog_result_without_document_search() -> None:
     search = FakeSearchService(SearchResult(execution_status="completed"))
     model = ToolCallingFakeModel(
         responses=[
@@ -720,9 +718,7 @@ async def test_product_agent_owns_missing_recommendation_conditions() -> None:
         catalog_query_planner=_catalog_browse_planner(),
     )
 
-    result = await agent(
-        {"question": "미래에셋 상품 추천", "objective": "미래에셋 상품 추천"}
-    )
+    result = await agent({"question": "미래에셋 상품 추천", "objective": "미래에셋 상품 추천"})
 
     assert result["decision"] == {
         "status": "conditional",

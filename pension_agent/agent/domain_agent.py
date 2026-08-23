@@ -610,9 +610,7 @@ def _product_tool_call_is_allowed(
 
     if call["name"] not in allowed_tools:
         return False
-    if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and not state.get(
-        "product_candidate_codes"
-    ):
+    if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and not state.get("product_candidate_codes"):
         return _is_product_conditions_call(call)
     if call["name"] != SEARCH_DOCUMENTS_TOOL_NAME:
         return True
@@ -736,9 +734,7 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
                         "domain_result": result,
                         "messages": [
                             ToolMessage(
-                                content=json.dumps(
-                                    {"status": "accepted"}, ensure_ascii=False
-                                ),
+                                content=json.dumps({"status": "accepted"}, ensure_ascii=False),
                                 tool_call_id=runtime.tool_call_id,
                                 name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                             )

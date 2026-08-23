@@ -72,9 +72,7 @@ def test_catalog_queries_provider_count_and_items_deterministically() -> None:
     assert result.total_count == 25
     assert len(result.items) == 25
     assert [product.product_code for product in result.items] == sorted(
-        product.product_code
-        for product in catalog.products
-        if product.provider == "미래에셋"
+        product.product_code for product in catalog.products if product.provider == "미래에셋"
     )
     assert result.catalog_version == catalog.version
     assert len(result.catalog_version) == 64

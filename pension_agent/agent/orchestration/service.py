@@ -275,9 +275,7 @@ def _stabilize_catalog_answer(
     """LLM 표현과 무관하게 검증된 카탈로그 개수와 목록을 보존한다."""
 
     catalog_results = [
-        result["catalog_result"]
-        for result in domain_results
-        if "catalog_result" in result
+        result["catalog_result"] for result in domain_results if "catalog_result" in result
     ]
     if not catalog_results:
         return answer

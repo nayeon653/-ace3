@@ -119,7 +119,7 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
             '        product_catalog["상품 카탈로그"] --> catalog_hcx',
             '        catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]',
             '        catalog_query --> catalog_execute["Python 정확 조회"]',
-            '        product_catalog --> catalog_execute',
+            "        product_catalog --> catalog_execute",
             '        catalog_execute --> catalog_result["CatalogResult"]',
             "    end",
             f"    {product_node} --> catalog_lookup",

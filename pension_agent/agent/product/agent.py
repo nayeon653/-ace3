@@ -203,9 +203,7 @@ def _catalog_lookup_command(
     if payload is not None:
         message_payload = payload
     elif match is None:
-        message_payload = {
-            "execution_status": result["execution_status"] if result else "failed"
-        }
+        message_payload = {"execution_status": result["execution_status"] if result else "failed"}
     else:
         message_payload = {
             "execution_status": "completed",
@@ -285,8 +283,7 @@ def _catalog_domain_result(result: ProductCatalogResult) -> DomainResult:
                 "source_file_name": "product_catalog.json",
                 "title": "검증된 상품 카탈로그 조회 결과",
                 "locator": (
-                    f"provider={result.provider or 'all'};"
-                    f"catalog_version={result.catalog_version}"
+                    f"provider={result.provider or 'all'};catalog_version={result.catalog_version}"
                 ),
                 "content": evidence_content,
             }
