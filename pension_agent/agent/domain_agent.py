@@ -61,6 +61,7 @@ class DomainAgentState(AgentState):
     question: NotRequired[str]
     objective: NotRequired[str]
     product_candidate_codes: NotRequired[list[str]]
+    product_scoped_search_completed: NotRequired[bool]
     search_result: NotRequired[SearchResult]
     domain_result: NotRequired[DomainResult]
 
@@ -96,8 +97,9 @@ class CompleteDomainResult(AgentMiddleware[Any, Any, Any]):
 class RequireDomainTool(AgentMiddleware[Any, Any, Any]):
     """DomainResult가 제출될 때까지 Function calling을 강제한다."""
 
-    def __init__(self, *, domain: DomainName) -> None:
+    def __init__(self, *, domain: DomainName, max_search_calls: int) -> None:
         self._domain = domain
+        self._max_search_calls = max_search_calls
 
     @hook_config(can_jump_to=["model"])
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
@@ -106,10 +108,14 @@ class RequireDomainTool(AgentMiddleware[Any, Any, Any]):
             return None
         last_message = state.get("messages", [])[-1]
         if isinstance(last_message, AIMessage) and not last_message.tool_calls:
-            if state.get("search_result") is not None:
+            search_result = state.get("search_result")
+            if self._domain == "product":
+                instruction = _product_next_tool_instruction(
+                    state,
+                    max_search_calls=self._max_search_calls,
+                )
+            elif search_result is not None:
                 instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
-            elif self._domain == "product" and not state.get("product_candidate_codes"):
-                instruction = "lookup_product_codes Tool로 상품 코드를 먼저 식별하세요."
             else:
                 instruction = "search_documents Tool로 제공 문서 근거를 검색하세요."
             return {
@@ -158,26 +164,34 @@ class SingleDomainSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
 
 
 class EnforceProductToolSequence(AgentMiddleware[Any, Any, Any]):
-    """Product Agent가 코드 식별, 문서 검색, 결과 제출 순서를 건너뛰지 않게 한다."""
+    """Product Agent의 검색 우선·코드 식별·결과 제출 단계를 안전하게 제한한다."""
 
-    def __init__(self, *, lookup_tool_name: str) -> None:
+    def __init__(self, *, lookup_tool_name: str, max_search_calls: int) -> None:
         self._lookup_tool_name = lookup_tool_name
+        self._max_search_calls = max_search_calls
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
         last_message = state.get("messages", [])[-1]
         if not isinstance(last_message, AIMessage) or state.get("domain_result") is not None:
             return None
-        if state.get("search_result") is not None:
-            expected_tool = SUBMIT_DOMAIN_RESULT_TOOL_NAME
-        elif state.get("product_candidate_codes"):
-            expected_tool = SEARCH_DOCUMENTS_TOOL_NAME
-        else:
-            expected_tool = self._lookup_tool_name
-        expected_calls = [call for call in last_message.tool_calls if call["name"] == expected_tool]
-        if not expected_calls:
+        if not last_message.tool_calls:
             return None
-        kept_call = expected_calls[0]
+        allowed_tools = _allowed_product_tools(
+            state,
+            lookup_tool_name=self._lookup_tool_name,
+            max_search_calls=self._max_search_calls,
+        )
+        allowed_calls = [
+            call
+            for call in last_message.tool_calls
+            if _product_tool_call_is_allowed(call, state=state, allowed_tools=allowed_tools)
+        ]
+        if not allowed_calls:
+            return {
+                "messages": [last_message.model_copy(update={"tool_calls": []})],
+            }
+        kept_call = allowed_calls[0]
         if last_message.tool_calls == [kept_call]:
             return None
         return {
@@ -314,6 +328,7 @@ def create_domain_agent(
             search_service=search_service,
             permission=permission,
             product_code_resolver=product_code_resolver,
+            max_search_calls=config.max_search_calls,
         )
     else:
         search_tool = _create_search_tool(
@@ -336,7 +351,7 @@ def create_domain_agent(
         middleware=(
             *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteDomainResult(),
-            RequireDomainTool(domain=domain),
+            RequireDomainTool(domain=domain, max_search_calls=config.max_search_calls),
             SingleDomainSubmitPerModelCall(),
             DomainModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(
@@ -362,7 +377,12 @@ def create_domain_agent(
             ),
             # after_model hook은 역순 실행되므로 병렬 호출을 Tool 상한 집계보다 먼저 정제한다.
             *(
-                (EnforceProductToolSequence(lookup_tool_name=product_lookup_tool.name),)
+                (
+                    EnforceProductToolSequence(
+                        lookup_tool_name=product_lookup_tool.name,
+                        max_search_calls=config.max_search_calls,
+                    ),
+                )
                 if product_lookup_tool is not None
                 else ()
             ),
@@ -454,10 +474,11 @@ def _create_product_search_tool(
     search_service: SearchRunner,
     permission: Permission,
     product_code_resolver: ProductCodeResolver,
+    max_search_calls: int,
 ) -> Any:
     @tool(
         SEARCH_DOCUMENTS_TOOL_NAME,
-        description="하나의 상품 코드에 해당하는 제공 문서 근거를 검색한다.",
+        description="상품 문서 전체 또는 검증된 단일 상품에서 제공 문서 근거를 검색한다.",
     )
     async def search_documents(
         objective: Annotated[
@@ -466,9 +487,14 @@ def _create_product_search_tool(
         ],
         runtime: ToolRuntime[ExecutionContext, DomainAgentState],
         product_code: Annotated[
-            str,
-            Field(min_length=1, description="상품 카탈로그에서 선택한 단일 상품 코드"),
-        ],
+            str | None,
+            Field(
+                description=(
+                    "lookup_product_codes가 반환한 단일 상품 코드. "
+                    "상품 식별 전 전체 검색에서는 생략"
+                )
+            ),
+        ] = None,
         expand_neighbors: Annotated[
             bool,
             Field(description="기준 청크의 앞뒤 문맥이 필요한지 여부"),
@@ -476,11 +502,19 @@ def _create_product_search_tool(
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("Search Service Tool 호출 ID가 없습니다.")
+        candidate_codes = runtime.state.get("product_candidate_codes", [])
+        scoped_search = bool(candidate_codes)
         try:
-            normalized_code = product_code.strip().upper()
-            if normalized_code not in runtime.state.get("product_candidate_codes", []):
-                raise ValueError("상품 코드 식별 결과에 없는 코드입니다.")
-            source_file_name = product_code_resolver(normalized_code)
+            source_file_name = None
+            if scoped_search:
+                if product_code is None:
+                    raise ValueError("검증된 상품 코드가 필요합니다.")
+                normalized_code = product_code.strip().upper()
+                if normalized_code not in candidate_codes:
+                    raise ValueError("상품 코드 식별 결과에 없는 코드입니다.")
+                source_file_name = product_code_resolver(normalized_code)
+            elif product_code is not None:
+                raise ValueError("상품 식별 전에는 상품 코드를 검색 조건으로 사용할 수 없습니다.")
             request = SearchRequest(
                 objective=objective,
                 source_file_name=source_file_name,
@@ -497,12 +531,23 @@ def _create_product_search_tool(
                 permission=permission,
                 deadline=runtime.context.deadline,
             )
-        terminal_result = _terminal_domain_result_from_search(
-            domain="product",
-            search_result=result,
+        search_call_count = _search_call_count(runtime.state) + 1
+        previous_result = None
+        if scoped_search and runtime.state.get("product_scoped_search_completed"):
+            previous_result = runtime.state.get("search_result")
+        accumulated_result = _merge_completed_search_results(
+            previous_result,
+            result,
         )
+        terminal_result = None
+        if result.execution_status != "completed" or search_call_count >= max_search_calls:
+            terminal_result = _terminal_domain_result_from_search(
+                domain="product",
+                search_result=accumulated_result,
+            )
         update: dict[str, Any] = {
-            "search_result": result,
+            "search_result": accumulated_result,
+            "product_scoped_search_completed": scoped_search,
             "messages": [
                 ToolMessage(
                     content=result.model_dump_json(),
@@ -516,6 +561,105 @@ def _create_product_search_tool(
         return Command(update=update)
 
     return search_documents
+
+
+def _search_call_count(state: Mapping[str, Any]) -> int:
+    """현재 실행에서 완료된 문서 검색 Tool 호출 수를 센다."""
+
+    return sum(
+        isinstance(message, ToolMessage) and message.name == SEARCH_DOCUMENTS_TOOL_NAME
+        for message in state.get("messages", [])
+    )
+
+
+def _allowed_product_tools(
+    state: Mapping[str, Any],
+    *,
+    lookup_tool_name: str,
+    max_search_calls: int,
+) -> tuple[str, ...]:
+    """현재 Product Agent 상태에서 실행 가능한 다음 Tool 이름을 반환한다."""
+
+    search_call_count = _search_call_count(state)
+    if not state.get("product_candidate_codes"):
+        if search_call_count == 0:
+            return (lookup_tool_name, SEARCH_DOCUMENTS_TOOL_NAME)
+        return (lookup_tool_name,)
+    if not state.get("product_scoped_search_completed"):
+        return (SEARCH_DOCUMENTS_TOOL_NAME,)
+    if search_call_count >= max_search_calls:
+        return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
+    search_result = state.get("search_result")
+    if search_result is not None and not search_result.retrieved_chunks:
+        return (SEARCH_DOCUMENTS_TOOL_NAME,)
+    return (SUBMIT_DOMAIN_RESULT_TOOL_NAME, SEARCH_DOCUMENTS_TOOL_NAME)
+
+
+def _product_tool_call_is_allowed(
+    call: ToolCall,
+    *,
+    state: Mapping[str, Any],
+    allowed_tools: tuple[str, ...],
+) -> bool:
+    """상품 식별 전 검색에는 모델이 만든 product_code가 섞이지 않게 한다."""
+
+    if call["name"] not in allowed_tools:
+        return False
+    if call["name"] != SEARCH_DOCUMENTS_TOOL_NAME or state.get("product_candidate_codes"):
+        return True
+    return call["args"].get("product_code") is None
+
+
+def _product_next_tool_instruction(
+    state: Mapping[str, Any],
+    *,
+    max_search_calls: int,
+) -> str:
+    """Product Agent의 현재 단계에 맞는 다음 Tool 안내를 만든다."""
+
+    search_call_count = _search_call_count(state)
+    if not state.get("product_candidate_codes"):
+        if search_call_count == 0:
+            return (
+                "lookup_product_codes Tool로 상품을 식별하거나 product_code 없이 "
+                "search_documents Tool로 상품 문서를 먼저 검색하세요."
+            )
+        return "lookup_product_codes Tool로 검색 대상 상품 코드를 식별하세요."
+    if not state.get("product_scoped_search_completed"):
+        return "검증된 product_code로 search_documents Tool을 호출하세요."
+    search_result = state.get("search_result")
+    if (
+        search_result is not None
+        and not search_result.retrieved_chunks
+        and search_call_count < max_search_calls
+    ):
+        return "검색 목표를 다르게 재작성해 search_documents Tool을 호출하세요."
+    return "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+
+
+def _merge_completed_search_results(
+    previous: SearchResult | None,
+    current: SearchResult,
+) -> SearchResult:
+    """완료된 검색 근거를 청크 ID 기준으로 누적하고 중복을 제거한다."""
+
+    if (
+        previous is None
+        or previous.execution_status != "completed"
+        or current.execution_status != "completed"
+    ):
+        return current
+    chunks_by_id = {
+        chunk.chunk_id: chunk for chunk in (*previous.retrieved_chunks, *current.retrieved_chunks)
+    }
+    limitations = []
+    if not chunks_by_id:
+        limitations = list(dict.fromkeys((*previous.limitations, *current.limitations)))
+    return SearchResult(
+        execution_status="completed",
+        retrieved_chunks=list(chunks_by_id.values()),
+        limitations=limitations,
+    )
 
 
 def _create_domain_result_tool(*, domain: DomainName) -> Any:
@@ -547,6 +691,11 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
         if search_result is None:
             return json.dumps(
                 {"error": "search_documents Tool을 먼저 호출해야 합니다."},
+                ensure_ascii=False,
+            )
+        if domain == "product" and not runtime.state.get("product_scoped_search_completed"):
+            return json.dumps(
+                {"error": "검증된 product_code로 search_documents Tool을 호출해야 합니다."},
                 ensure_ascii=False,
             )
         try:

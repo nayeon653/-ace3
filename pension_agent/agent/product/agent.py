@@ -31,6 +31,7 @@ from pension_agent.retrieval import ProductCatalog, load_product_catalog
 PRODUCT_TOOL_NAME = "analyze_product"
 PRODUCT_TOOL_DESCRIPTION = "연금 상품의 특성, 비용, 위험과 유동성을 판단한다."
 LOOKUP_PRODUCT_CODES_TOOL_NAME = "lookup_product_codes"
+_PRODUCT_MAX_SEARCH_CALLS = 2
 
 
 def load_product_agent_prompt() -> str:
@@ -60,13 +61,14 @@ def create_product_agent(
         catalog=selected_catalog,
         model_concurrency=model_concurrency,
     )
+    product_config = config.model_copy(update={"max_search_calls": _PRODUCT_MAX_SEARCH_CALLS})
     return create_domain_agent(
         domain="product",
         permission=Permission.PRODUCT,
         model=model,
         search_service=search_service,
         system_prompt=load_product_agent_prompt(),
-        config=config,
+        config=product_config,
         model_concurrency=model_concurrency,
         product_code_resolver=selected_catalog.resolve_source_file_name,
         product_lookup_tool=_create_product_code_lookup_tool(selected_matcher),
