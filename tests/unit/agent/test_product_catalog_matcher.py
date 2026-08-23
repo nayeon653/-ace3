@@ -54,9 +54,7 @@ def _selection_response(status: str, product_codes: list[str]) -> AIMessage:
 async def test_hcx_catalog_matcher_returns_only_catalog_backed_entries() -> None:
     catalog = load_product_catalog()
     matcher = HCXProductCatalogMatcher(
-        model=BindingFakeModel(
-            responses=[_selection_response("single", [" kr510902511m "])]
-        ),
+        model=BindingFakeModel(responses=[_selection_response("single", [" kr510902511m "])]),
         catalog=catalog,
     )
 
@@ -74,9 +72,7 @@ async def test_hcx_catalog_matcher_returns_only_catalog_backed_entries() -> None
 @pytest.mark.anyio
 async def test_hcx_catalog_matcher_rejects_generated_unknown_code() -> None:
     matcher = HCXProductCatalogMatcher(
-        model=BindingFakeModel(
-            responses=[_selection_response("single", ["KR9999999999"])]
-        ),
+        model=BindingFakeModel(responses=[_selection_response("single", ["KR9999999999"])]),
         catalog=load_product_catalog(),
     )
 
@@ -92,9 +88,7 @@ async def test_hcx_catalog_matcher_rejects_generated_unknown_code() -> None:
 async def test_hcx_catalog_matcher_collapses_codes_that_share_one_indexed_document() -> None:
     matcher = HCXProductCatalogMatcher(
         model=BindingFakeModel(
-            responses=[
-                _selection_response("ambiguous", ["KR5113420013", "KR5113420015"])
-            ]
+            responses=[_selection_response("ambiguous", ["KR5113420013", "KR5113420015"])]
         ),
         catalog=load_product_catalog(),
     )

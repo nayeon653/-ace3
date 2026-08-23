@@ -201,9 +201,7 @@ def _model(
             ),
         ]
     )
-    return ToolCallingFakeModel(
-        responses=responses
-    )
+    return ToolCallingFakeModel(responses=responses)
 
 
 @pytest.mark.anyio
@@ -461,7 +459,9 @@ async def test_product_agent_rejects_unknown_product_code_before_search_service(
 
 
 @pytest.mark.anyio
-async def test_product_agent_returns_verified_ambiguous_candidates_without_document_search() -> None:
+async def test_product_agent_returns_verified_ambiguous_candidates_without_document_search() -> (
+    None
+):
     search = FakeSearchService(SearchResult(execution_status="completed"))
     model = ToolCallingFakeModel(
         responses=[
@@ -485,9 +485,7 @@ async def test_product_agent_returns_verified_ambiguous_candidates_without_docum
         catalog_matcher=matcher,
     )
 
-    result = await agent(
-        {"question": "미리에셋 상품은 어때?", "objective": "상품 후보 식별"}
-    )
+    result = await agent({"question": "미리에셋 상품은 어때?", "objective": "상품 후보 식별"})
 
     assert result["execution_status"] == "completed"
     assert result["decision"]["status"] == "conditional"
@@ -592,9 +590,7 @@ async def test_product_agent_default_matcher_calls_nested_hcx_before_document_se
                             "conclusion": "검증된 상품 결론",
                             "missing_conditions": [],
                             "warnings": [],
-                            "evidence_chunk_ids": [
-                                "550e8400-e29b-41d4-a716-446655440000"
-                            ],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
                         },
                         "id": "submit-call",
                         "type": "tool_call",
@@ -605,9 +601,7 @@ async def test_product_agent_default_matcher_calls_nested_hcx_before_document_se
     )
     agent = create_product_agent(model=model, search_service=cast(SearchRunner, search))
 
-    result = await agent(
-        {"question": "미리에셋 장기성장 위험은?", "objective": "상품 위험 판단"}
-    )
+    result = await agent({"question": "미리에셋 장기성장 위험은?", "objective": "상품 위험 판단"})
 
     assert result["execution_status"] == "completed"
     assert result["decision"]["conclusion"] == "검증된 상품 결론"
@@ -666,9 +660,7 @@ async def test_product_agent_keeps_lookup_before_parallel_early_search_call() ->
         catalog_matcher=_product_matcher(),
     )
 
-    result = await agent(
-        {"question": "미래에셋 장기성장 위험은?", "objective": "상품 위험 판단"}
-    )
+    result = await agent({"question": "미래에셋 장기성장 위험은?", "objective": "상품 위험 판단"})
 
     assert result["execution_status"] == "completed"
     assert len(search.calls) == 1

@@ -174,9 +174,7 @@ class EnforceProductToolSequence(AgentMiddleware[Any, Any, Any]):
             expected_tool = SEARCH_DOCUMENTS_TOOL_NAME
         else:
             expected_tool = self._lookup_tool_name
-        expected_calls = [
-            call for call in last_message.tool_calls if call["name"] == expected_tool
-        ]
+        expected_calls = [call for call in last_message.tool_calls if call["name"] == expected_tool]
         if not expected_calls:
             return None
         kept_call = expected_calls[0]
