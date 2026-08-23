@@ -36,12 +36,16 @@ flowchart TB
     domain_product --> domain_tools
     domain_product --> search_tools
 
-    subgraph catalog["HCX 상품 후보 식별"]
+    subgraph catalog["HCX 카탈로그 Query 계획 · Python 조회"]
         catalog_lookup["lookup_product_codes"] --> catalog_hcx["HCX-005 model"]
         product_catalog["상품 카탈로그"] --> catalog_hcx
+        catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]
+        catalog_query --> catalog_execute["Python 정확 조회"]
+        product_catalog --> catalog_execute
+        catalog_execute --> catalog_result["CatalogResult"]
     end
     domain_product --> catalog_lookup
-    catalog_lookup --> product_catalog
+    catalog_result --> domain_product
 
     subgraph search["공용 검색 경로"]
         search_tools["search_documents"] --> search_service["SearchService"]

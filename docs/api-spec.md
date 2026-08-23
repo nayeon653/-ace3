@@ -30,7 +30,9 @@ GET {TBD}/answer
 
 `retrieved_context`의 각 객체는 아래 필드를 포함한다. 완료된 도메인 판단 중
 `decision.status`가 `not_applicable`이 아닌 결과에서 최종 답변에 실제 사용한
-근거만 포함한다.
+근거만 포함한다. 상품 카탈로그 개수·목록 조회는 Qdrant 청크 대신 검증된
+`product_catalog.json` 조회 결과를 하나의 결정론적 근거로 포함하며, `content`에
+조회 route, 공식 운용사 조건, 정확한 개수·목록과 `catalog_version`을 기록한다.
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
@@ -42,7 +44,9 @@ GET {TBD}/answer
 
 `think_trace`는 실제 도메인 호출·실행 상태, 판단 결론과 누락 조건을 서버가
 결정론적으로 요약한 문장이다. LLM 내부 사고 과정, 원시 Tool 로그, 원시 예외,
-stack trace, 내부 경로와 모델 내부 메시지는 포함하지 않는다.
+stack trace, 내부 경로와 모델 내부 메시지는 포함하지 않는다. 카탈로그 조회에서는
+검증된 route, 운용사, 반환 방식, 상품 개수와 카탈로그 버전을 요약하고 전체 상품
+목록은 반복하지 않는다.
 
 ```json
 {
