@@ -26,9 +26,12 @@ def test_packaged_catalog_resolves_all_codes_to_indexed_document_names() -> None
 
     assert len(catalog.products) == 100
     assert len({product.product_code for product in catalog.products}) == 100
-    assert len(
-        {catalog.resolve_source_file_name(product.product_code) for product in catalog.products}
-    ) == 92
+    assert (
+        len(
+            {catalog.resolve_source_file_name(product.product_code) for product in catalog.products}
+        )
+        == 92
+    )
     assert catalog.resolve_source_file_name(" kr510902511m ") == "R2_KR510902511M.pdf"
     assert catalog.resolve_source_file_name("KR518102001M") == "R2_KR5153450009.pdf"
 
