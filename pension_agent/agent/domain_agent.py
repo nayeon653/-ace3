@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired, Protocol, cast
 from uuid import UUID
@@ -51,6 +51,7 @@ _CALCULATOR_REQUIRED_CONDITION = "결정론적 계산 Tool 결과"
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
+ProductCodeResolver = Callable[[str], str]
 
 
 class DomainAgentState(AgentState):
@@ -262,14 +263,24 @@ def create_domain_agent(
     system_prompt: str,
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
     model_concurrency: ModelConcurrencyMiddleware | None = None,
+    product_code_resolver: ProductCodeResolver | None = None,
 ) -> DomainAgent:
     """Search Service Tool과 최종 결과 제출 Tool만 가진 Domain Agent를 만든다."""
 
-    search_tool = _create_search_tool(
-        domain=domain,
-        search_service=search_service,
-        permission=permission,
-    )
+    if domain == "product":
+        if product_code_resolver is None:
+            raise ValueError("Product Agent에는 상품 코드 resolver가 필요합니다.")
+        search_tool = _create_product_search_tool(
+            search_service=search_service,
+            permission=permission,
+            product_code_resolver=product_code_resolver,
+        )
+    else:
+        search_tool = _create_search_tool(
+            domain=domain,
+            search_service=search_service,
+            permission=permission,
+        )
     result_tool = _create_domain_result_tool(domain=domain)
     graph = create_agent(
         model=model,
@@ -357,6 +368,72 @@ def _create_search_tool(
             )
         terminal_result = _terminal_domain_result_from_search(
             domain=domain,
+            search_result=result,
+        )
+        update: dict[str, Any] = {
+            "search_result": result,
+            "messages": [
+                ToolMessage(
+                    content=result.model_dump_json(),
+                    tool_call_id=runtime.tool_call_id,
+                    name=SEARCH_DOCUMENTS_TOOL_NAME,
+                )
+            ],
+        }
+        if terminal_result is not None:
+            update["domain_result"] = terminal_result
+        return Command(update=update)
+
+    return search_documents
+
+
+def _create_product_search_tool(
+    *,
+    search_service: SearchRunner,
+    permission: Permission,
+    product_code_resolver: ProductCodeResolver,
+) -> Any:
+    @tool(
+        SEARCH_DOCUMENTS_TOOL_NAME,
+        description="하나의 상품 코드에 해당하는 제공 문서 근거를 검색한다.",
+    )
+    async def search_documents(
+        objective: Annotated[
+            str,
+            Field(min_length=1, description="하나의 구체적인 근거 검색 목표"),
+        ],
+        runtime: ToolRuntime[ExecutionContext, DomainAgentState],
+        product_code: Annotated[
+            str,
+            Field(min_length=1, description="상품 카탈로그에서 선택한 단일 상품 코드"),
+        ],
+        expand_neighbors: Annotated[
+            bool,
+            Field(description="기준 청크의 앞뒤 문맥이 필요한지 여부"),
+        ] = False,
+    ) -> Command:
+        if runtime.tool_call_id is None:
+            raise ValueError("Search Service Tool 호출 ID가 없습니다.")
+        try:
+            source_file_name = product_code_resolver(product_code)
+            request = SearchRequest(
+                objective=objective,
+                source_file_name=source_file_name,
+                expand_neighbors=expand_neighbors,
+            )
+        except (TypeError, ValueError, ValidationError):
+            result = SearchResult(
+                execution_status="failed",
+                error="검색 요청이 올바르지 않습니다.",
+            )
+        else:
+            result = await search_service.search(
+                request,
+                permission=permission,
+                deadline=runtime.context.deadline,
+            )
+        terminal_result = _terminal_domain_result_from_search(
+            domain="product",
             search_result=result,
         )
         update: dict[str, Any] = {

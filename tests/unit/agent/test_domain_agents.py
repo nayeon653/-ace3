@@ -40,6 +40,7 @@ def anyio_backend() -> str:
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
     bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
+    tool_argument_names: ClassVar[dict[str, set[str]]] = {}
     invocation_count: int = 0
 
     def _generate(
@@ -63,6 +64,12 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
         **kwargs: Any,
     ) -> Runnable[Any, AIMessage]:
         self.bindings.append(([tool.name for tool in tools], kwargs))
+        self.tool_argument_names.update(
+            {
+                tool.name: set(tool.tool_call_schema.model_json_schema()["properties"])
+                for tool in tools
+            }
+        )
         return self
 
 
@@ -102,6 +109,7 @@ def _model(
     missing_conditions: list[str] | None = None,
     warnings: list[str] | None = None,
     evidence_chunk_ids: list[str] | None = None,
+    product_code: str | None = None,
 ) -> ToolCallingFakeModel:
     if missing_conditions is None:
         missing_conditions = (
@@ -111,6 +119,9 @@ def _model(
         warnings = []
     if evidence_chunk_ids is None:
         evidence_chunk_ids = ["550e8400-e29b-41d4-a716-446655440000"]
+    search_args = {"objective": "이전 가능 여부의 문서 근거 확인"}
+    if product_code is not None:
+        search_args["product_code"] = product_code
     return ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -118,7 +129,7 @@ def _model(
                 tool_calls=[
                     {
                         "name": "search_documents",
-                        "args": {"objective": "이전 가능 여부의 문서 근거 확인"},
+                        "args": search_args,
                         "id": "search-call",
                         "type": "tool_call",
                     }
@@ -171,7 +182,8 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
             retrieved_chunks=[_chunk(document_type)],
         )
     )
-    model = _model()
+    product_code = "KR510902511M" if domain == "product" else None
+    model = _model(product_code=product_code)
     model.bindings.clear()
     agent = factory(model=model, search_service=cast(SearchRunner, search))
     assert agent.max_concurrency == 3
@@ -192,9 +204,13 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         }
     ]
     assert result["calculations"] == []
+    expected_request = SearchRequest(
+        objective="이전 가능 여부의 문서 근거 확인",
+        source_file_name="R2_KR510902511M.pdf" if domain == "product" else None,
+    )
     assert search.calls == [
         (
-            SearchRequest(objective="이전 가능 여부의 문서 근거 확인"),
+            expected_request,
             permission,
         )
     ]
@@ -205,6 +221,12 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         set(names) == {"search_documents", "submit_domain_result"}
         for names, _kwargs in model.bindings
     )
+    if domain == "product":
+        assert model.tool_argument_names["search_documents"] == {
+            "objective",
+            "product_code",
+            "expand_neighbors",
+        }
 
 
 @pytest.mark.anyio
@@ -341,7 +363,7 @@ async def test_no_evidence_forces_undetermined_result() -> None:
     search = FakeSearchService(
         SearchResult(execution_status="completed", limitations=["근거 없음"])
     )
-    model = _model()
+    model = _model(product_code="KR510902511M")
     agent = create_policy_agent(
         model=model,
         search_service=cast(SearchRunner, search),
@@ -354,6 +376,27 @@ async def test_no_evidence_forces_undetermined_result() -> None:
     )
     assert result["decision"]["missing_conditions"] == ["제공 문서의 관련 근거"]
     assert result["evidence"] == []
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_product_agent_rejects_unknown_product_code_before_search_service() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = _model(product_code="KR9999999999")
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "존재하지 않는 상품을 확인해줘",
+            "objective": "상품 확인",
+        }
+    )
+
+    assert result["execution_status"] == "failed"
+    assert search.calls == []
     assert model.invocation_count == 1
 
 
@@ -405,7 +448,7 @@ async def test_search_failure_is_returned_without_evidence() -> None:
     search = FakeSearchService(
         SearchResult(execution_status="failed", error="검색을 완료하지 못했습니다.")
     )
-    model = _model()
+    model = _model(product_code="KR510902511M")
     agent = create_product_agent(
         model=model,
         search_service=cast(SearchRunner, search),
@@ -831,7 +874,10 @@ def _completed_graph_state() -> dict[str, Any]:
 
 def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() -> None:
     assert "search_documents" in load_policy_agent_prompt()
-    assert "search_documents" in load_product_agent_prompt()
+    product_prompt = load_product_agent_prompt()
+    assert "search_documents" in product_prompt
+    assert '"product_code":"KR510902511M"' in product_prompt
+    assert "{{PRODUCT_CATALOG_JSON}}" not in product_prompt
     tax_prompt = load_tax_payout_agent_prompt()
     assert "확정 세금, 금액, 세율, 한도를 생성하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt

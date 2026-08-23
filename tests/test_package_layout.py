@@ -37,3 +37,6 @@ def test_runtime_resource_directories_are_packaged() -> None:
     assert prompt_root.joinpath("domain", "policy-agent.md").is_file()
     assert prompt_root.joinpath("domain", "tax-payout-agent.md").is_file()
     assert prompt_root.joinpath("domain", "product-agent.md").is_file()
+    retrieval_root = package_root.joinpath("retrieval")
+    assert retrieval_root.joinpath("product_catalog.json").is_file()
+    assert retrieval_root.joinpath("product_document_aliases.json").is_file()
