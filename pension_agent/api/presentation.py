@@ -54,6 +54,15 @@ def build_think_trace(domain_results: list[DomainResult]) -> str:
 
         decision = result["decision"]
         conclusion = _one_line(decision["conclusion"]) or "결론이 기록되지 않음"
+        if "catalog_result" in result:
+            catalog_result = result["catalog_result"]
+            provider = catalog_result["provider"] or "전체"
+            conclusion = (
+                f"검증된 카탈로그 조회(route=browse_catalog, provider={provider}, "
+                f"return_mode={catalog_result['return_mode']}, "
+                f"total_count={catalog_result['total_count']}, "
+                f"catalog_version={catalog_result['catalog_version']})"
+            )
         decisions.append(f"{domain}={_DECISION_LABELS[decision['status']]}: {conclusion}")
         missing_conditions.extend(
             f"{domain}={condition}"

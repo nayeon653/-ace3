@@ -9,7 +9,12 @@ from typing import Any, Protocol, cast
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import TypeAdapter, ValidationError
 
-from pension_agent.agent.contracts import AgentAnswer, DomainResult, validate_domain_result
+from pension_agent.agent.contracts import (
+    AgentAnswer,
+    CatalogResult,
+    DomainResult,
+    validate_domain_result,
+)
 from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.orchestration.state import SupervisorState
 from pension_agent.agent.orchestration.supervisor import build_agent_answer
@@ -142,6 +147,10 @@ class AnswerService:
                                 raise FinalAnswerMissingError(
                                     "Main Supervisor의 최종 자연어 답변이 없습니다."
                                 ) from None
+                            answer = _stabilize_catalog_answer(
+                                answer,
+                                state["domain_results"],
+                            )
                 except TimeoutError:
                     raise AnswerServiceTimeoutError(
                         "Answer Service 요청 전체 실행 시간이 초과됐습니다."
@@ -257,3 +266,39 @@ def _validate_supervisor_state(
     normalized_state["messages"] = list(messages)
     normalized_state["domain_results"] = domain_results
     return cast(SupervisorState, normalized_state)
+
+
+def _stabilize_catalog_answer(
+    answer: AgentAnswer,
+    domain_results: list[DomainResult],
+) -> AgentAnswer:
+    """LLM 표현과 무관하게 검증된 카탈로그 개수와 목록을 보존한다."""
+
+    catalog_results = [
+        result["catalog_result"]
+        for result in domain_results
+        if "catalog_result" in result
+    ]
+    if not catalog_results:
+        return answer
+
+    catalog_text = "\n\n".join(_catalog_answer(result) for result in catalog_results)
+    if len(catalog_results) == len(domain_results):
+        return AgentAnswer(answer=catalog_text)
+    return AgentAnswer(answer=f"{answer.answer.rstrip()}\n\n{catalog_text}")
+
+
+def _catalog_answer(result: CatalogResult) -> str:
+    """CatalogResult의 return_mode에 맞는 결정론적 한국어 답변을 만든다."""
+
+    subject = result["provider"] or "전체"
+    parts: list[str] = []
+    if result["return_mode"] in {"count", "count_and_items"}:
+        parts.append(f"{subject} 상품은 총 {result['total_count']}개입니다.")
+    if result["return_mode"] in {"items", "count_and_items"}:
+        lines = [
+            f"- {item['official_name']} ({item['provider']}, {item['product_code']})"
+            for item in result["items"]
+        ]
+        parts.append(f"{subject} 상품 목록:\n" + "\n".join(lines))
+    return "\n\n".join(parts)
