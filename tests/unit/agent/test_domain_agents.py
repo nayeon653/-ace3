@@ -465,10 +465,79 @@ async def test_no_evidence_forces_undetermined_result() -> None:
     assert model.invocation_count == 1
 
 
+@pytest.mark.parametrize(
+    "invalid_search_args",
+    [
+        {"objective": "상품 위험 근거"},
+        {"objective": "상품 위험 근거", "product_code": "KR9999999999"},
+    ],
+)
 @pytest.mark.anyio
-async def test_product_agent_rejects_unknown_product_code_before_search_service() -> None:
-    search = FakeSearchService(SearchResult(execution_status="completed"))
-    model = _model(product_code="KR9999999999")
+async def test_product_agent_retries_invalid_scoped_product_code(
+    invalid_search_args: dict[str, Any],
+) -> None:
+    chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        source_file_name="R2_KR510902511M.pdf",
+    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": invalid_search_args,
+                        "id": "invalid-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "상품 위험 근거",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "valid-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "검증된 상품 근거입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
     agent = create_product_agent(
         model=model,
         search_service=cast(SearchRunner, search),
@@ -477,14 +546,22 @@ async def test_product_agent_rejects_unknown_product_code_before_search_service(
 
     result = await agent(
         {
-            "question": "존재하지 않는 상품을 확인해줘",
-            "objective": "상품 확인",
+            "question": "미래에셋 장기성장 위험은?",
+            "objective": "상품 위험 판단",
         }
     )
 
-    assert result["execution_status"] == "failed"
-    assert search.calls == []
-    assert model.invocation_count == 2
+    assert result["execution_status"] == "completed"
+    assert search.calls == [
+        (
+            SearchRequest(
+                objective="상품 위험 근거",
+                source_file_name="R2_KR510902511M.pdf",
+            ),
+            Permission.PRODUCT,
+        )
+    ]
+    assert model.invocation_count == 4
 
 
 @pytest.mark.anyio

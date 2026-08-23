@@ -601,13 +601,19 @@ def _product_tool_call_is_allowed(
     state: Mapping[str, Any],
     allowed_tools: tuple[str, ...],
 ) -> bool:
-    """상품 식별 전 검색에는 모델이 만든 product_code가 섞이지 않게 한다."""
+    """상품 식별 단계에 맞는 product_code를 가진 검색 호출만 허용한다."""
 
     if call["name"] not in allowed_tools:
         return False
-    if call["name"] != SEARCH_DOCUMENTS_TOOL_NAME or state.get("product_candidate_codes"):
+    if call["name"] != SEARCH_DOCUMENTS_TOOL_NAME:
         return True
-    return call["args"].get("product_code") is None
+    candidate_codes = state.get("product_candidate_codes", [])
+    product_code = call["args"].get("product_code")
+    if not candidate_codes:
+        return product_code is None
+    if not isinstance(product_code, str):
+        return False
+    return product_code.strip().upper() in candidate_codes
 
 
 def _product_next_tool_instruction(
