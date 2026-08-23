@@ -19,6 +19,8 @@ from pension_agent.agent.contracts import DomainName, Permission, validate_domai
 from pension_agent.agent.domain_agent import DomainAgent
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.product import (
+    BrowseCatalogQuery,
+    CatalogQueryPlan,
     ProductCatalogMatch,
     create_product_agent,
     load_product_agent_prompt,
@@ -132,6 +134,23 @@ class FakeProductCatalogMatcher:
         return self.result
 
 
+@dataclass
+class FakeProductCatalogQueryPlanner:
+    result: CatalogQueryPlan
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    async def plan(
+        self,
+        *,
+        question: str,
+        objective: str,
+        deadline: float,
+    ) -> CatalogQueryPlan:
+        assert deadline > asyncio.get_running_loop().time()
+        self.calls.append((question, objective))
+        return self.result
+
+
 def _product_matcher(
     status: str = "single",
     *product_codes: str,
@@ -140,6 +159,20 @@ def _product_matcher(
     candidates = load_product_catalog().select_products(codes if status != "not_found" else [])
     return FakeProductCatalogMatcher(
         ProductCatalogMatch(status=cast(Any, status), candidates=candidates)
+    )
+
+
+def _catalog_browse_planner(
+    *,
+    provider: str | None = "미래에셋",
+    return_mode: str = "count_and_items",
+) -> FakeProductCatalogQueryPlanner:
+    return FakeProductCatalogQueryPlanner(
+        BrowseCatalogQuery(
+            route="browse_catalog",
+            provider=provider,
+            return_mode=cast(Any, return_mode),
+        )
     )
 
 
@@ -604,6 +637,105 @@ async def test_product_agent_returns_verified_ambiguous_candidates_without_docum
 
 
 @pytest.mark.anyio
+async def test_product_agent_returns_deterministic_catalog_result_without_document_search() -> (
+    None
+):
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "catalog-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    planner = _catalog_browse_planner()
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_query_planner=planner,
+    )
+
+    result = await agent(
+        {
+            "question": "미레에셋 상품은 몇 개고 어떤 것들이 있나요?",
+            "objective": "미래에셋 상품 개수와 목록 조회",
+        }
+    )
+
+    catalog_result = result["catalog_result"]
+    assert result["execution_status"] == "completed"
+    assert result["decision"]["status"] == "determined"
+    assert catalog_result["provider"] == "미래에셋"
+    assert catalog_result["return_mode"] == "count_and_items"
+    assert catalog_result["total_count"] == 25
+    assert len(catalog_result["items"]) == 25
+    assert catalog_result["items"][0]["product_code"] == "KR510902511M"
+    assert result["evidence"][0]["source_file_name"] == "product_catalog.json"
+    assert catalog_result["catalog_version"] in result["evidence"][0]["content"]
+    assert search.calls == []
+    assert planner.calls == [
+        (
+            "미레에셋 상품은 몇 개고 어떤 것들이 있나요?",
+            "미래에셋 상품 개수와 목록 조회",
+        )
+    ]
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_product_agent_owns_missing_recommendation_conditions() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "conditional",
+                            "conclusion": "가장 좋은 상품을 추천합니다.",
+                            "missing_conditions": ["투자 기간", "위험 선호도"],
+                            "warnings": ["모델이 만든 경고"],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "conditions-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_query_planner=_catalog_browse_planner(),
+    )
+
+    result = await agent(
+        {"question": "미래에셋 상품 추천", "objective": "미래에셋 상품 추천"}
+    )
+
+    assert result["decision"] == {
+        "status": "conditional",
+        "conclusion": "상품 추천을 위해 투자 조건을 확인해야 합니다.",
+        "missing_conditions": ["투자 기간", "위험 선호도"],
+    }
+    assert result["evidence"] == []
+    assert result["warnings"] == []
+    assert search.calls == []
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
 async def test_product_agent_returns_undetermined_when_catalog_has_no_candidate() -> None:
     search = FakeSearchService(SearchResult(execution_status="completed"))
     model = ToolCallingFakeModel(
@@ -662,10 +794,13 @@ async def test_product_agent_default_matcher_calls_nested_hcx_before_document_se
                 content="",
                 tool_calls=[
                     {
-                        "name": "return_product_catalog_selection",
+                        "name": "return_product_catalog_query",
                         "args": {
-                            "status": "single",
-                            "product_codes": ["KR510902511M"],
+                            "query": {
+                                "route": "resolve_product",
+                                "provider": "미래에셋",
+                                "product_code": "KR510902511M",
+                            }
                         },
                         "id": "selection-call",
                         "type": "tool_call",
