@@ -93,6 +93,8 @@ make parser-test   # 파서 단위 테스트
 
 - [`notebooks/search/search_service_playground.ipynb`](notebooks/search/search_service_playground.ipynb):
   Search Service의 검색과 라우팅을 단독으로 확인한다.
+- [`notebooks/agent/product_agent_playground.ipynb`](notebooks/agent/product_agent_playground.ipynb):
+  Product Agent의 상품 후보 식별, 상품별 문서 검색과 최종 DomainResult를 확인한다.
 - [`notebooks/agent/main_agent_playground.ipynb`](notebooks/agent/main_agent_playground.ipynb):
   Main Supervisor부터 Domain Agent와 최종 5개 응답 필드까지 전체 경로를 확인한다.
 
