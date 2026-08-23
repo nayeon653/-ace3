@@ -1,0 +1,805 @@
+{
+  "products": [
+    {
+      "product_code": "KR510902511M",
+      "official_name": "미래에셋장기성장포커스증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 장기성장포커스 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR510902773M",
+      "official_name": "미래에셋고배당포커스연금저축증권전환형자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 고배당포커스연금저축 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR510902777M",
+      "official_name": "미래에셋코어밸류연금저축증권전환형자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 코어밸류연금저축 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5110501016",
+      "official_name": "미래에셋프리미엄크레딧알파증권자투자신탁(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 프리미엄크레딧알파 채권"
+      ]
+    },
+    {
+      "product_code": "KR5110601022",
+      "official_name": "미래에셋차세대Fun인덱스증권자투자신탁[주식]",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 차세대Fun인덱스 주식"
+      ]
+    },
+    {
+      "product_code": "KR5111420047",
+      "official_name": "하나파워 e 단기채증권자투자신탁[채권]",
+      "provider": "하나",
+      "aliases": [
+        "하나 파워 e 단기채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5111450067",
+      "official_name": "하나IT코리아증권자투자신탁(제1호)[주식]",
+      "provider": "하나",
+      "aliases": [
+        "하나 IT코리아 제1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5113420012",
+      "official_name": "한국투자 골드플랜 연금 증권 전환형 투자신탁 1호(국공채)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 골드플랜 연금 1호 국공채"
+      ]
+    },
+    {
+      "product_code": "KR5113420013",
+      "official_name": "한국투자 골드플랜 연금 증권 전환형 자투자신탁 1호(채권)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 골드플랜 연금 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5113420015",
+      "official_name": "한국투자 골드플랜 연금 증권 전환형 자투자신탁 1호(채권)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 골드플랜 연금 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5113420069",
+      "official_name": "한국투자 크레딧포커스 ESG 증권 자투자신탁 1호(채권)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 크레딧포커스 ESG 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5113450111",
+      "official_name": "한국투자 골드플랜 연금 증권 전환형 투자신탁 1호(주식)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 골드플랜 연금 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5113450401",
+      "official_name": "한국투자 중소밸류 증권 자투자신탁(주식)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 중소밸류 주식"
+      ]
+    },
+    {
+      "product_code": "KR5113470030",
+      "official_name": "한국투자 인덱스플러스 증권 투자신탁 1호(주식-파생형)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 인덱스플러스 1호 주식-파생형"
+      ]
+    },
+    {
+      "product_code": "KR5113470031",
+      "official_name": "한국투자 인덱스플러스 증권 투자신탁 1호(주식-파생형)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 인덱스플러스 1호 주식-파생형"
+      ]
+    },
+    {
+      "product_code": "KR5114420016",
+      "official_name": "삼성ABF코리아장기채권인덱스증권투자신탁[채권]",
+      "provider": "삼성",
+      "aliases": [
+        "삼성 ABF코리아장기채권인덱스 채권"
+      ]
+    },
+    {
+      "product_code": "KR5114420022",
+      "official_name": "삼성클래식연금증권전환형투자신탁 제1호[채권]",
+      "provider": "삼성",
+      "aliases": [
+        "삼성 클래식연금 제1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5114420027",
+      "official_name": "삼성코리아중기채권증권자투자신탁 제1호[채권]",
+      "provider": "삼성",
+      "aliases": [
+        "삼성 코리아중기채권 제1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5114420046",
+      "official_name": "삼성퇴직연금인덱스12M증권자투자신탁 제1호[채권]",
+      "provider": "삼성",
+      "aliases": [
+        "삼성 퇴직연금인덱스12M 제1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5114450222",
+      "official_name": "삼성클래식연금증권전환형자투자신탁 제1호[주식]",
+      "provider": "삼성",
+      "aliases": [
+        "삼성 클래식연금 제1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5114450270",
+      "official_name": "삼성퇴직연금KOSPI200증권자투자신탁 제1호[주식]",
+      "provider": "삼성",
+      "aliases": [
+        "삼성 퇴직연금KOSPI200 제1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5116501001",
+      "official_name": "브이아이 퇴직연금 증권 자투자신탁 1호[채권]",
+      "provider": "브이아이",
+      "aliases": [
+        "브이아이 퇴직연금 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5117420097",
+      "official_name": "신한초단기채증권투자신탁[채권]",
+      "provider": "신한",
+      "aliases": [
+        "신한 초단기채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5118201004",
+      "official_name": "우리하이플러스채권증권자투자신탁1호(채권)",
+      "provider": "우리",
+      "aliases": [
+        "우리 하이플러스채권 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5118420006",
+      "official_name": "우리나라초단기채권증권투자신탁[채권]",
+      "provider": "우리",
+      "aliases": [
+        "우리나라초단기채권 채권"
+      ]
+    },
+    {
+      "product_code": "KR5118420036",
+      "official_name": "우리나라중단기ESG채권증권자투자신탁1호(채권)",
+      "provider": "우리",
+      "aliases": [
+        "우리나라중단기ESG채권 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5118420062",
+      "official_name": "우리단기채권증권투자신탁(채권)",
+      "provider": "우리",
+      "aliases": [
+        "우리 단기채권 채권"
+      ]
+    },
+    {
+      "product_code": "KR5119450058",
+      "official_name": "신한코리아롱숏증권자투자신탁[주식]",
+      "provider": "신한",
+      "aliases": [
+        "신한 코리아롱숏 주식"
+      ]
+    },
+    {
+      "product_code": "KR5119501001",
+      "official_name": "신한퇴직연금국공채증권자투자신탁[채권]",
+      "provider": "신한",
+      "aliases": [
+        "신한 퇴직연금국공채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5119520012",
+      "official_name": "신한상대가치장기증권자투자신탁[채권]",
+      "provider": "신한",
+      "aliases": [
+        "신한 상대가치장기 채권"
+      ]
+    },
+    {
+      "product_code": "KR5120420039",
+      "official_name": "교보악사 Tomorrow 장기우량 증권투자신탁 K-1호(채권)",
+      "provider": "교보악사",
+      "aliases": [
+        "교보악사 Tomorrow 장기우량 K-1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5120420091",
+      "official_name": "교보악사 내일환매 초단기우량채증권투자신탁[채권]",
+      "provider": "교보악사",
+      "aliases": [
+        "교보악사 내일환매 초단기우량채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5120450015",
+      "official_name": "교보악사 파워인덱스 증권 자투자신탁 1 호 (주식)",
+      "provider": "교보악사",
+      "aliases": [
+        "교보악사 파워인덱스 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5120450018",
+      "official_name": "교보악사 파워인덱스 증권 자투자신탁 1 호 (주식)",
+      "provider": "교보악사",
+      "aliases": [
+        "교보악사 파워인덱스 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5120451001",
+      "official_name": "교보악사 파워인덱스증권자투자신탁 2 호[주식]",
+      "provider": "교보악사",
+      "aliases": [
+        "교보악사 파워인덱스 2호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5122420005",
+      "official_name": "유진챔피언단기채증권자투자신탁(채권)",
+      "provider": "유진",
+      "aliases": [
+        "유진 챔피언단기채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5123365001",
+      "official_name": "키움 연금 증권 자투자신탁 제C1호[국공채]",
+      "provider": "키움",
+      "aliases": [
+        "키움 연금 제C1호 국공채"
+      ]
+    },
+    {
+      "product_code": "KR5123420015",
+      "official_name": "키움 단기 국공채 증권 자투자신탁 제1호[채권]",
+      "provider": "키움",
+      "aliases": [
+        "키움 단기 국공채 제1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5123420039",
+      "official_name": "키움파이어니어ESG증권자투자신탁제1호[채권]",
+      "provider": "키움",
+      "aliases": [
+        "키움 파이어니어ESG 제1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5123420049",
+      "official_name": "키움더드림단기채증권투자신탁[채권]",
+      "provider": "키움",
+      "aliases": [
+        "키움 더드림단기채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5123490013",
+      "official_name": "키움 Smart Investor 분할매수 증권 자투자신탁 제1호[주식혼합-재간접형]",
+      "provider": "키움",
+      "aliases": [
+        "키움 Smart Investor 분할매수 제1호 주식혼합-재간접형"
+      ]
+    },
+    {
+      "product_code": "KR5123490016",
+      "official_name": "키움 Smart Investor 분할매수 증권 자투자신탁 제1호[주식혼합-재간접형]",
+      "provider": "키움",
+      "aliases": [
+        "키움 Smart Investor 분할매수 제1호 주식혼합-재간접형"
+      ]
+    },
+    {
+      "product_code": "KR5123490017",
+      "official_name": "키움 Smart Investor 분할매수 증권 자투자신탁 제1호[주식혼합-재간접형]",
+      "provider": "키움",
+      "aliases": [
+        "키움 Smart Investor 분할매수 제1호 주식혼합-재간접형"
+      ]
+    },
+    {
+      "product_code": "KR5125450023",
+      "official_name": "신영밸류고배당증권자투자신탁(주식)",
+      "provider": "신영",
+      "aliases": [
+        "신영 밸류고배당 주식"
+      ]
+    },
+    {
+      "product_code": "KR5125450070",
+      "official_name": "신영마라톤증권자투자신탁(주식)",
+      "provider": "신영",
+      "aliases": [
+        "신영 마라톤 주식"
+      ]
+    },
+    {
+      "product_code": "KR5127420034",
+      "official_name": "KB스타 중기 국공채 증권 자투자신탁(채권)",
+      "provider": "KB",
+      "aliases": [
+        "KB스타 중기 국공채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5127420039",
+      "official_name": "KB스타 중기 국공채 증권 자투자신탁(채권)",
+      "provider": "KB",
+      "aliases": [
+        "KB스타 중기 국공채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5127420045",
+      "official_name": "KB스타 단기 국공채 증권 자투자신탁(채권)",
+      "provider": "KB",
+      "aliases": [
+        "KB스타 단기 국공채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5127420083",
+      "official_name": "KB 장기국채 플러스 증권 자투자신탁(채권)",
+      "provider": "KB",
+      "aliases": [
+        "KB 장기국채 플러스 채권"
+      ]
+    },
+    {
+      "product_code": "KR5127450117",
+      "official_name": "KB 그로스 포커스 증권 자투자신탁(주식)",
+      "provider": "KB",
+      "aliases": [
+        "KB 그로스 포커스 주식"
+      ]
+    },
+    {
+      "product_code": "KR5127450215",
+      "official_name": "KB스타 코스닥150 인덱스 증권 자투자신탁(주식-파생형)",
+      "provider": "KB",
+      "aliases": [
+        "KB스타 코스닥150 인덱스 주식-파생형"
+      ]
+    },
+    {
+      "product_code": "KR5127450217",
+      "official_name": "KB스타 코스닥150 인덱스 증권 자투자신탁(주식-파생형)",
+      "provider": "KB",
+      "aliases": [
+        "KB스타 코스닥150 인덱스 주식-파생형"
+      ]
+    },
+    {
+      "product_code": "KR5127450473",
+      "official_name": "KB 코리아 밸류업 액티브 증권 자투자신탁(주식)",
+      "provider": "KB",
+      "aliases": [
+        "KB 코리아 밸류업 액티브 주식"
+      ]
+    },
+    {
+      "product_code": "KR5129420025",
+      "official_name": "한화내일받는단기국공채증권 자투자신탁(채권)",
+      "provider": "한화",
+      "aliases": [
+        "한화 내일받는단기국공채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5129420031",
+      "official_name": "한화코리아밸류채권증권 자투자신탁(채권)",
+      "provider": "한화",
+      "aliases": [
+        "한화 코리아밸류채권 채권"
+      ]
+    },
+    {
+      "product_code": "KR5131420007",
+      "official_name": "DB정통크레딧증권자투자신탁[채권]",
+      "provider": "DB",
+      "aliases": [
+        "DB 정통크레딧 채권"
+      ]
+    },
+    {
+      "product_code": "KR5131420025",
+      "official_name": "DB다같이장기채권증권투자신탁[채권]",
+      "provider": "DB",
+      "aliases": [
+        "DB 다같이장기채권 채권"
+      ]
+    },
+    {
+      "product_code": "KR5139420015",
+      "official_name": "흥국멀티크레딧증권자투자신탁[채권]",
+      "provider": "흥국",
+      "aliases": [
+        "흥국 멀티크레딧 채권"
+      ]
+    },
+    {
+      "product_code": "KR5139420020",
+      "official_name": "흥국퇴직연금멀티크레딧증권자투자신탁[채권]",
+      "provider": "흥국",
+      "aliases": [
+        "흥국 퇴직연금멀티크레딧 채권"
+      ]
+    },
+    {
+      "product_code": "KR5144420020",
+      "official_name": "NH-Amundi 국채 10 년 인덱스 증권자투자신탁[채권]",
+      "provider": "NH-Amundi",
+      "aliases": [
+        "NH-Amundi 국채 10년 인덱스 채권"
+      ]
+    },
+    {
+      "product_code": "KR5144420081",
+      "official_name": "NH-Amundi USD 초단기채권 증권자투자신탁(UH)[채권]",
+      "provider": "NH-Amundi",
+      "aliases": [
+        "NH-Amundi USD 초단기채권 UH 채권"
+      ]
+    },
+    {
+      "product_code": "KR5144420091",
+      "official_name": "NH-Amundi 하나로 단기채 증권투자신탁[채권]",
+      "provider": "NH-Amundi",
+      "aliases": [
+        "NH-Amundi 하나로 단기채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5144450095",
+      "official_name": "NH-Amundi 필승 코리아 증권투자신탁 [주식]",
+      "provider": "NH-Amundi",
+      "aliases": [
+        "NH-Amundi 필승 코리아 주식"
+      ]
+    },
+    {
+      "product_code": "KR5147430065",
+      "official_name": "KCGI코리아목표전환형증권투자신탁4호[채권혼합](운용전환일 이후) KCGI코리아목표전환형증권투자신탁4호[채권]",
+      "provider": "KCGI",
+      "aliases": [
+        "KCGI 코리아목표전환형 4호 채권혼합",
+        "KCGI 코리아목표전환형 4호 채권"
+      ]
+    },
+    {
+      "product_code": "KR514X450008",
+      "official_name": "VIP한국형가치투자증권자투자신탁[주식]",
+      "provider": "브이아이피",
+      "aliases": [
+        "VIP 한국형가치투자 주식"
+      ]
+    },
+    {
+      "product_code": "KR5152420028",
+      "official_name": "다올전단채증권투자신탁[채권]",
+      "provider": "다올",
+      "aliases": [
+        "다올 전단채 채권"
+      ]
+    },
+    {
+      "product_code": "KR515302022M",
+      "official_name": "KCGI 코리아증권투자신탁 1호[주식]",
+      "provider": "KCGI",
+      "aliases": [
+        "KCGI 코리아 주식 1호"
+      ]
+    },
+    {
+      "product_code": "KR5153420022",
+      "official_name": "미래에셋라이프사이클7090연금증권전환형자투자신탁1호(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 라이프사이클7090연금 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5153420063",
+      "official_name": "미래에셋솔로몬단기국공채증권자투자신탁1호(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 솔로몬단기국공채 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5153420079",
+      "official_name": "미래에셋솔로몬중장기국공채증권자투자신탁1호(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 솔로몬중장기국공채 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5153420105",
+      "official_name": "미래에셋솔로몬장기국공채증권자투자신탁1호(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 솔로몬장기국공채 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5153420318",
+      "official_name": "미래에셋AI퀀트미국투자등급회사채증권자투자신탁(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 AI퀀트미국투자등급회사채 채권"
+      ]
+    },
+    {
+      "product_code": "KR5153420339",
+      "official_name": "미래에셋프리미엄크레딧초단기증권투자신탁(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 프리미엄크레딧초단기 채권"
+      ]
+    },
+    {
+      "product_code": "KR5153450009",
+      "official_name": "미래에셋퇴직플랜증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 퇴직플랜 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450112",
+      "official_name": "미래에셋라이프사이클2030연금증권전환형자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 라이프사이클2030연금 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450209",
+      "official_name": "미래에셋퇴직연금코어밸류증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 퇴직연금코어밸류 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450250",
+      "official_name": "미래에셋퇴직연금고배당포커스증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 퇴직연금고배당포커스 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450268",
+      "official_name": "미래에셋스마트롱숏70증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 스마트롱숏70 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450431",
+      "official_name": "미래에셋인덱스플러스연금증권전환형자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 인덱스플러스연금 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450658",
+      "official_name": "미래에셋솔로몬초단기국공채증권자투자신탁2호(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 솔로몬초단기국공채 2호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5153450772",
+      "official_name": "미래에셋그린뉴딜인덱스증권자투자신탁(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 그린뉴딜인덱스 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450785",
+      "official_name": "미래에셋코어테크증권자투자신탁(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 코어테크 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153450791",
+      "official_name": "미래에셋퇴직플랜KRX100인덱스증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 퇴직플랜KRX100인덱스 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153451009",
+      "official_name": "미래에셋연금아시아퍼시픽소비성장증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 연금아시아퍼시픽소비성장 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5153520012",
+      "official_name": "미래에셋퇴직플랜증권자투자신탁1호(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 퇴직플랜 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5156450026",
+      "official_name": "베어링 고배당 증권자투자신탁(주식)",
+      "provider": "베어링",
+      "aliases": [
+        "베어링 고배당 자투자신탁 주식"
+      ]
+    },
+    {
+      "product_code": "KR5157420003",
+      "official_name": "마이다스 우량채권 증권 자투자신탁 제1호(채권)",
+      "provider": "마이다스",
+      "aliases": [
+        "마이다스 우량채권 제1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR5157450017",
+      "official_name": "마이다스 책임투자 증권 투자신탁(주식)",
+      "provider": "마이다스",
+      "aliases": [
+        "마이다스 책임투자 주식"
+      ]
+    },
+    {
+      "product_code": "KR5157450090",
+      "official_name": "마이다스 거북이 90 증권 자투자신탁 1호(주식)",
+      "provider": "마이다스",
+      "aliases": [
+        "마이다스 거북이 90 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5160420009",
+      "official_name": "코레이트셀렉트단기채증권투자신탁[채권]",
+      "provider": "코레이트",
+      "aliases": [
+        "코레이트 셀렉트단기채 채권"
+      ]
+    },
+    {
+      "product_code": "KR516702010M",
+      "official_name": "에셋플러스 코리아 리치투게더 연금 증권 자투자신탁 1 호(주식)",
+      "provider": "에셋플러스",
+      "aliases": [
+        "에셋플러스 코리아 리치투게더 연금 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5169950018",
+      "official_name": "디에스Maestro증권자투자신탁[주식]",
+      "provider": "디에스",
+      "aliases": [
+        "디에스 Maestro 주식"
+      ]
+    },
+    {
+      "product_code": "KR5172450019",
+      "official_name": "트러스톤칭기스칸증권투자신탁[주식]",
+      "provider": "트러스톤",
+      "aliases": [
+        "트러스톤 칭기스칸 주식"
+      ]
+    },
+    {
+      "product_code": "KR5174420011",
+      "official_name": "한국밸류 10년투자 연금 증권전환형자투자신탁 1호(채권)",
+      "provider": "한국투자밸류",
+      "aliases": [
+        "한국밸류 10년투자 연금 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR518101002M",
+      "official_name": "미래에셋퇴직플랜단기증권자투자신탁1호(채권)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 퇴직플랜단기 1호 채권"
+      ]
+    },
+    {
+      "product_code": "KR518101012M",
+      "official_name": "한국투자 퇴직연금 증권 자투자신탁 1호(국공채)",
+      "provider": "한국투자",
+      "aliases": [
+        "한국투자 퇴직연금 1호 국공채"
+      ]
+    },
+    {
+      "product_code": "KR518102001M",
+      "official_name": "미래에셋퇴직플랜증권자투자신탁1호(주식)",
+      "provider": "미래에셋",
+      "aliases": [
+        "미래에셋 퇴직플랜 1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5185450009",
+      "official_name": "키움 차세대모빌리티 증권 자투자신탁 제1호[주식]",
+      "provider": "키움",
+      "aliases": [
+        "키움 차세대모빌리티 제1호 주식"
+      ]
+    },
+    {
+      "product_code": "KR5194450018",
+      "official_name": "스팍스한국엄선투자증권자투자신탁[주식]",
+      "provider": "스팍스",
+      "aliases": [
+        "스팍스 한국엄선투자 주식"
+      ]
+    },
+    {
+      "product_code": "KR555202013M",
+      "official_name": "베어링 고배당 증권 투자회사(주식)",
+      "provider": "베어링",
+      "aliases": [
+        "베어링 고배당 투자회사 주식"
+      ]
+    }
+  ]
+}

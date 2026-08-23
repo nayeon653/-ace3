@@ -9,7 +9,7 @@ class DomainAgentConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     max_model_calls: int = Field(default=5, ge=2, le=8)
-    max_search_calls: int = Field(default=1, ge=1, le=1)
+    max_search_calls: int = Field(default=1, ge=1, le=2)
     max_submit_calls: int = Field(default=2, ge=1, le=3)
     max_concurrency: int = Field(default=3, ge=1, le=16)
     timeout_seconds: float = Field(default=75.0, gt=0, le=300)

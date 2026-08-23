@@ -18,7 +18,11 @@ from langsmith import RunTree, get_current_run_tree, tracing_context
 from pension_agent.agent.contracts import DomainName, Permission, validate_domain_result
 from pension_agent.agent.domain_agent import DomainAgent
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
-from pension_agent.agent.product import create_product_agent, load_product_agent_prompt
+from pension_agent.agent.product import (
+    ProductCatalogMatch,
+    create_product_agent,
+    load_product_agent_prompt,
+)
 from pension_agent.agent.search import (
     SearchChunkPayload,
     SearchRequest,
@@ -31,6 +35,7 @@ from pension_agent.agent.tax_payout import (
 )
 from pension_agent.config import DomainAgentConfig
 from pension_agent.core import DocumentType
+from pension_agent.retrieval import load_product_catalog
 
 
 @pytest.fixture
@@ -40,6 +45,8 @@ def anyio_backend() -> str:
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
     bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
+    tool_argument_names: ClassVar[dict[str, set[str]]] = {}
+    tool_required_argument_names: ClassVar[dict[str, set[str]]] = {}
     invocation_count: int = 0
 
     def _generate(
@@ -63,6 +70,13 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
         **kwargs: Any,
     ) -> Runnable[Any, AIMessage]:
         self.bindings.append(([tool.name for tool in tools], kwargs))
+        schemas = {tool.name: tool.tool_call_schema.model_json_schema() for tool in tools}
+        self.tool_argument_names.update(
+            {name: set(schema["properties"]) for name, schema in schemas.items()}
+        )
+        self.tool_required_argument_names.update(
+            {name: set(schema.get("required", [])) for name, schema in schemas.items()}
+        )
         return self
 
 
@@ -83,15 +97,68 @@ class FakeSearchService:
         return self.result
 
 
-def _chunk(document_type: DocumentType) -> SearchChunkPayload:
+@dataclass
+class ScriptedSearchService:
+    results: list[SearchResult]
+    calls: list[tuple[SearchRequest, Permission]] = field(default_factory=list)
+
+    async def search(
+        self,
+        request: SearchRequest,
+        *,
+        permission: Permission,
+        deadline: float | None = None,
+    ) -> SearchResult:
+        assert deadline is not None
+        result = self.results[len(self.calls)]
+        self.calls.append((request, permission))
+        return result
+
+
+@dataclass
+class FakeProductCatalogMatcher:
+    result: ProductCatalogMatch
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    async def match(
+        self,
+        *,
+        question: str,
+        objective: str,
+        deadline: float,
+    ) -> ProductCatalogMatch:
+        assert deadline > asyncio.get_running_loop().time()
+        self.calls.append((question, objective))
+        return self.result
+
+
+def _product_matcher(
+    status: str = "single",
+    *product_codes: str,
+) -> FakeProductCatalogMatcher:
+    codes = list(product_codes or ("KR510902511M",))
+    candidates = load_product_catalog().select_products(codes if status != "not_found" else [])
+    return FakeProductCatalogMatcher(
+        ProductCatalogMatch(status=cast(Any, status), candidates=candidates)
+    )
+
+
+def _chunk(
+    document_type: DocumentType,
+    *,
+    chunk_id: str = "550e8400-e29b-41d4-a716-446655440000",
+    source_file_name: str = "guide.pdf",
+    title: str = "이전 절차",
+    content: str = "가입 유형에 따라 이전 절차가 달라집니다.",
+) -> SearchChunkPayload:
     return SearchChunkPayload(
-        chunk_id="550e8400-e29b-41d4-a716-446655440000",
-        source_file_name="guide.pdf",
+        chunk_id=chunk_id,
+        source_file_name=source_file_name,
         document_type=document_type,
         chunk_index=2,
-        title="이전 절차",
+        title=title,
         locator="3페이지",
-        content="가입 유형에 따라 이전 절차가 달라집니다.",
+        content=content,
     )
 
 
@@ -102,6 +169,7 @@ def _model(
     missing_conditions: list[str] | None = None,
     warnings: list[str] | None = None,
     evidence_chunk_ids: list[str] | None = None,
+    product_code: str | None = None,
 ) -> ToolCallingFakeModel:
     if missing_conditions is None:
         missing_conditions = (
@@ -111,14 +179,31 @@ def _model(
         warnings = []
     if evidence_chunk_ids is None:
         evidence_chunk_ids = ["550e8400-e29b-41d4-a716-446655440000"]
-    return ToolCallingFakeModel(
-        responses=[
+    search_args = {"objective": "이전 가능 여부의 문서 근거 확인"}
+    responses: list[AIMessage] = []
+    if product_code is not None:
+        responses.append(
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        )
+        search_args["product_code"] = product_code
+    responses.extend(
+        [
             AIMessage(
                 content="",
                 tool_calls=[
                     {
                         "name": "search_documents",
-                        "args": {"objective": "이전 가능 여부의 문서 근거 확인"},
+                        "args": search_args,
                         "id": "search-call",
                         "type": "tool_call",
                     }
@@ -143,6 +228,7 @@ def _model(
             ),
         ]
     )
+    return ToolCallingFakeModel(responses=responses)
 
 
 @pytest.mark.anyio
@@ -171,10 +257,15 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
             retrieved_chunks=[_chunk(document_type)],
         )
     )
-    model = _model()
+    product_code = "KR510902511M" if domain == "product" else None
+    model = _model(product_code=product_code)
     model.bindings.clear()
-    agent = factory(model=model, search_service=cast(SearchRunner, search))
+    factory_kwargs: dict[str, Any] = {}
+    if domain == "product":
+        factory_kwargs["catalog_matcher"] = _product_matcher()
+    agent = factory(model=model, search_service=cast(SearchRunner, search), **factory_kwargs)
     assert agent.max_concurrency == 3
+    assert agent.config.max_search_calls == (2 if domain == "product" else 1)
     result = await agent(
         {"question": "연금계좌를 이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
     )
@@ -192,9 +283,13 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         }
     ]
     assert result["calculations"] == []
+    expected_request = SearchRequest(
+        objective="이전 가능 여부의 문서 근거 확인",
+        source_file_name="R2_KR510902511M.pdf" if domain == "product" else None,
+    )
     assert search.calls == [
         (
-            SearchRequest(objective="이전 가능 여부의 문서 근거 확인"),
+            expected_request,
             permission,
         )
     ]
@@ -202,9 +297,22 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         chunk.chunk_id for chunk in search.result.retrieved_chunks
     }
     assert all(
-        set(names) == {"search_documents", "submit_domain_result"}
+        set(names)
+        == (
+            {"lookup_product_codes", "search_documents", "submit_domain_result"}
+            if domain == "product"
+            else {"search_documents", "submit_domain_result"}
+        )
         for names, _kwargs in model.bindings
     )
+    if domain == "product":
+        assert model.tool_argument_names["lookup_product_codes"] == set()
+        assert model.tool_argument_names["search_documents"] == {
+            "objective",
+            "product_code",
+            "expand_neighbors",
+        }
+        assert model.tool_required_argument_names["search_documents"] == {"objective"}
 
 
 @pytest.mark.anyio
@@ -357,6 +465,794 @@ async def test_no_evidence_forces_undetermined_result() -> None:
     assert model.invocation_count == 1
 
 
+@pytest.mark.parametrize(
+    "invalid_search_args",
+    [
+        {"objective": "상품 위험 근거"},
+        {"objective": "상품 위험 근거", "product_code": "KR9999999999"},
+    ],
+)
+@pytest.mark.anyio
+async def test_product_agent_retries_invalid_scoped_product_code(
+    invalid_search_args: dict[str, Any],
+) -> None:
+    chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        source_file_name="R2_KR510902511M.pdf",
+    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": invalid_search_args,
+                        "id": "invalid-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "상품 위험 근거",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "valid-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "검증된 상품 근거입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 위험은?",
+            "objective": "상품 위험 판단",
+        }
+    )
+
+    assert result["execution_status"] == "completed"
+    assert search.calls == [
+        (
+            SearchRequest(
+                objective="상품 위험 근거",
+                source_file_name="R2_KR510902511M.pdf",
+            ),
+            Permission.PRODUCT,
+        )
+    ]
+    assert model.invocation_count == 4
+
+
+@pytest.mark.anyio
+async def test_product_agent_returns_verified_ambiguous_candidates_without_document_search() -> (
+    None
+):
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    matcher = _product_matcher("ambiguous", "KR510902511M", "KR510902773M")
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=matcher,
+    )
+
+    result = await agent({"question": "미리에셋 상품은 어때?", "objective": "상품 후보 식별"})
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"]["status"] == "conditional"
+    assert "KR510902511M" in result["decision"]["conclusion"]
+    assert "KR510902773M" in result["decision"]["conclusion"]
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert matcher.calls == [("미리에셋 상품은 어때?", "상품 후보 식별")]
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_product_agent_returns_undetermined_when_catalog_has_no_candidate() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher("not_found"),
+    )
+
+    result = await agent({"question": "없는 상품", "objective": "상품 후보 식별"})
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"]["status"] == "undetermined"
+    assert result["decision"]["missing_conditions"]
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_product_agent_default_matcher_calls_nested_hcx_before_document_search() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.FUND_PROSPECTUS)],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "return_product_catalog_selection",
+                        "args": {
+                            "status": "single",
+                            "product_codes": ["KR510902511M"],
+                        },
+                        "id": "selection-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "상품 위험 근거 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "검증된 상품 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": "미리에셋 장기성장 위험은?", "objective": "상품 위험 판단"})
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"]["conclusion"] == "검증된 상품 결론"
+    assert search.calls[0][0].source_file_name == "R2_KR510902511M.pdf"
+    assert model.invocation_count == 4
+
+
+@pytest.mark.anyio
+async def test_product_agent_can_search_globally_before_catalog_lookup() -> None:
+    global_chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        source_file_name="R2_KR510902773M.pdf",
+        title="상품 비용 용어",
+        content="상품 비용은 총보수와 수수료 항목에서 확인합니다.",
+    )
+    scoped_chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        chunk_id="123e4567-e89b-12d3-a456-426614174000",
+        source_file_name="R2_KR510902511M.pdf",
+        title="해당 상품의 보수",
+        content="이 상품의 보수와 수수료는 투자설명서에 기재됩니다.",
+    )
+    search = ScriptedSearchService(
+        results=[
+            SearchResult(execution_status="completed", retrieved_chunks=[global_chunk]),
+            SearchResult(execution_status="completed", retrieved_chunks=[scoped_chunk]),
+        ]
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "상품 비용을 설명하는 문서 용어 탐색"},
+                        "id": "global-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "전체 검색 결과를 특정 상품 결론으로 제출합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [global_chunk.chunk_id],
+                        },
+                        "id": "premature-submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "총보수와 수수료의 문서 근거",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "scoped-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "해당 상품의 보수와 수수료는 투자설명서에 기재됩니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [scoped_chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    matcher = _product_matcher()
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=matcher,
+    )
+
+    result = await agent(
+        {"question": "미래에셋 장기성장 상품은 비싸?", "objective": "상품 비용 판단"}
+    )
+
+    assert [request for request, _permission in search.calls] == [
+        SearchRequest(objective="상품 비용을 설명하는 문서 용어 탐색"),
+        SearchRequest(
+            objective="총보수와 수수료의 문서 근거",
+            source_file_name="R2_KR510902511M.pdf",
+        ),
+    ]
+    assert matcher.calls == [("미래에셋 장기성장 상품은 비싸?", "상품 비용 판단")]
+    assert [evidence["chunk_id"] for evidence in result["evidence"]] == [scoped_chunk.chunk_id]
+    assert global_chunk.chunk_id not in {evidence["chunk_id"] for evidence in result["evidence"]}
+    assert model.invocation_count == 5
+
+
+@pytest.mark.anyio
+async def test_product_agent_discards_unverified_code_from_search_before_lookup() -> None:
+    chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        source_file_name="R2_KR510902511M.pdf",
+    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "검증 전 상품 검색",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "unverified-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "검증 후 상품 검색",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "verified-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "검증된 상품 근거입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent({"question": "미래에셋 장기성장 위험은?", "objective": "상품 위험 판단"})
+
+    assert search.calls == [
+        (
+            SearchRequest(
+                objective="검증 후 상품 검색",
+                source_file_name="R2_KR510902511M.pdf",
+            ),
+            Permission.PRODUCT,
+        )
+    ]
+    assert result["execution_status"] == "completed"
+    assert model.invocation_count == 4
+
+
+@pytest.mark.anyio
+async def test_product_agent_rewrites_query_after_empty_search() -> None:
+    chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        title="보수와 수수료",
+        content="총보수와 운용보수는 투자설명서의 비용 항목에 기재됩니다.",
+    )
+    search = ScriptedSearchService(
+        results=[
+            SearchResult(execution_status="completed", limitations=["근거 없음"]),
+            SearchResult(execution_status="completed", retrieved_chunks=[chunk]),
+        ]
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "미리에셋 이거 비싼지 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "first-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "총보수, 운용보수와 판매수수료의 문서 근거",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "second-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "비용은 투자설명서의 보수와 수수료 항목으로 판단합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent({"question": "미리에셋 이거 비싸?", "objective": "상품 비용 판단"})
+
+    assert agent.config.max_search_calls == 2
+    assert [request.objective for request, _permission in search.calls] == [
+        "미리에셋 이거 비싼지 확인",
+        "총보수, 운용보수와 판매수수료의 문서 근거",
+    ]
+    assert [evidence["chunk_id"] for evidence in result["evidence"]] == [chunk.chunk_id]
+    assert "근거 없음" not in result["warnings"]
+
+
+@pytest.mark.anyio
+async def test_product_agent_ends_safely_after_two_empty_searches() -> None:
+    search = ScriptedSearchService(
+        results=[
+            SearchResult(execution_status="completed", limitations=["첫 검색 근거 없음"]),
+            SearchResult(execution_status="completed", limitations=["재검색 근거 없음"]),
+        ]
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "상품 비용 근거",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "first-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "총보수와 수수료 항목",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "second-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent({"question": "상품 비용은?", "objective": "상품 비용 판단"})
+
+    assert len(search.calls) == 2
+    assert result["decision"]["status"] == "undetermined"
+    assert result["warnings"] == [
+        "첫 검색 근거 없음",
+        "재검색 근거 없음",
+        "제공 문서에서 관련 근거를 확인하지 못했습니다.",
+    ]
+    assert model.invocation_count == 3
+
+
+@pytest.mark.anyio
+async def test_product_agent_caps_searches_and_keeps_deduplicated_evidence() -> None:
+    first_chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        title="위험등급",
+        content="이 상품의 위험등급을 확인해야 합니다.",
+    )
+    second_chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        chunk_id="123e4567-e89b-12d3-a456-426614174000",
+        title="환매와 유동성",
+        content="환매 조건과 지급 시기를 확인해야 합니다.",
+    )
+    search = ScriptedSearchService(
+        results=[
+            SearchResult(execution_status="completed", retrieved_chunks=[first_chunk]),
+            SearchResult(
+                execution_status="completed",
+                retrieved_chunks=[first_chunk, second_chunk],
+            ),
+        ]
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "위험등급의 문서 근거",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "first-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "환매 조건과 지급 시기의 문서 근거",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "second-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "차단되어야 하는 추가 검색",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "blocked-search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "위험등급과 환매 조건을 함께 확인해야 합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [first_chunk.chunk_id, second_chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {"question": "미래에셋 장기성장 위험과 환매는?", "objective": "위험과 유동성 판단"}
+    )
+
+    assert len(search.calls) == 2
+    assert [evidence["chunk_id"] for evidence in result["evidence"]] == [
+        first_chunk.chunk_id,
+        second_chunk.chunk_id,
+    ]
+    assert model.invocation_count == 5
+
+
+@pytest.mark.anyio
+async def test_product_agent_keeps_lookup_before_parallel_early_search_call() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.FUND_PROSPECTUS)],
+        )
+    )
+    first_response = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "lookup_product_codes",
+                "args": {},
+                "id": "lookup-call",
+                "type": "tool_call",
+            },
+            {
+                "name": "search_documents",
+                "args": {
+                    "objective": "상품 위험 근거 확인",
+                    "product_code": "KR510902511M",
+                },
+                "id": "early-search-call",
+                "type": "tool_call",
+            },
+        ],
+    )
+    remaining = _model(product_code=None).responses
+    remaining[0] = remaining[0].model_copy(
+        update={
+            "tool_calls": [
+                {
+                    "name": "search_documents",
+                    "args": {
+                        "objective": "상품 위험 근거 확인",
+                        "product_code": "KR510902511M",
+                    },
+                    "id": "search-call",
+                    "type": "tool_call",
+                }
+            ]
+        }
+    )
+    model = ToolCallingFakeModel(responses=[first_response, *remaining])
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent({"question": "미래에셋 장기성장 위험은?", "objective": "상품 위험 판단"})
+
+    assert result["execution_status"] == "completed"
+    assert len(search.calls) == 1
+    assert model.invocation_count == 3
+
+
 @pytest.mark.anyio
 async def test_no_evidence_discards_ungrounded_model_conclusion_and_conditions() -> None:
     search = FakeSearchService(
@@ -405,10 +1301,11 @@ async def test_search_failure_is_returned_without_evidence() -> None:
     search = FakeSearchService(
         SearchResult(execution_status="failed", error="검색을 완료하지 못했습니다.")
     )
-    model = _model()
+    model = _model(product_code="KR510902511M")
     agent = create_product_agent(
         model=model,
         search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
     )
     result = await agent({"question": "상품 위험은?", "objective": "상품 위험 판단"})
 
@@ -416,7 +1313,7 @@ async def test_search_failure_is_returned_without_evidence() -> None:
     assert result["evidence"] == []
     assert result["calculations"] == []
     assert "provider" not in result["error"].lower()
-    assert model.invocation_count == 1
+    assert model.invocation_count == 2
 
 
 @pytest.mark.anyio
@@ -831,7 +1728,18 @@ def _completed_graph_state() -> dict[str, Any]:
 
 def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() -> None:
     assert "search_documents" in load_policy_agent_prompt()
-    assert "search_documents" in load_product_agent_prompt()
+    product_prompt = load_product_agent_prompt()
+    assert "search_documents" in product_prompt
+    assert "lookup_product_codes" in product_prompt
+    assert "`product_code` 없이 `search_documents`" in product_prompt
+    assert "전체 검색을 먼저 했다면 다음 단계에서 반드시 `lookup_product_codes`" in product_prompt
+    assert "특정 상품의 최종 근거로 바로 제출하지 않는다" in product_prompt
+    assert "문서 근거 검색에 적합한 구체적인 `objective`로 재작성한다" in product_prompt
+    assert "누락된 판단 기준과 다른 문서 용어" in product_prompt
+    assert "2회" not in product_prompt
+    assert "두 번" not in product_prompt
+    assert '"product_code":"KR510902511M"' not in product_prompt
+    assert "{{PRODUCT_CATALOG_JSON}}" not in product_prompt
     tax_prompt = load_tax_payout_agent_prompt()
     assert "확정 세금, 금액, 세율, 한도를 생성하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt

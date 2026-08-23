@@ -36,6 +36,13 @@ flowchart TB
     domain_product --> domain_tools
     domain_product --> search_tools
 
+    subgraph catalog["HCX 상품 후보 식별"]
+        catalog_lookup["lookup_product_codes"] --> catalog_hcx["HCX-005 model"]
+        product_catalog["상품 카탈로그"] --> catalog_hcx
+    end
+    domain_product --> catalog_lookup
+    catalog_lookup --> product_catalog
+
     subgraph search["공용 검색 경로"]
         search_tools["search_documents"] --> search_service["SearchService"]
         search_service --> embedding["CLOVA bge-m3 query embedding"]
@@ -210,23 +217,28 @@ graph TD;
 	DomainModelCallLimit\2ebefore_model("DomainModelCallLimit.before_model")
 	DomainModelCallLimit\2eafter_model("DomainModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
+	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model("ToolCallLimitMiddleware[lookup_product_codes].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
+	EnforceProductToolSequence\2eafter_model("EnforceProductToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
 	CompleteDomainResult\2ebefore_model -.-> DomainModelCallLimit\2ebefore_model;
 	CompleteDomainResult\2ebefore_model -.-> __end__;
 	DomainModelCallLimit\2eafter_model --> SingleDomainSubmitPerModelCall\2eafter_model;
 	DomainModelCallLimit\2ebefore_model -.-> __end__;
 	DomainModelCallLimit\2ebefore_model -.-> model;
+	EnforceProductToolSequence\2eafter_model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
 	RequireDomainTool\2eafter_model -.-> CompleteDomainResult\2ebefore_model;
 	RequireDomainTool\2eafter_model -.-> __end__;
 	RequireDomainTool\2eafter_model -.-> tools;
 	SingleDomainSubmitPerModelCall\2eafter_model --> RequireDomainTool\2eafter_model;
+	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
+	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> DomainModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
 	__start__ --> CompleteDomainResult\2ebefore_model;
-	model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
+	model --> EnforceProductToolSequence\2eafter_model;
 	tools -.-> CompleteDomainResult\2ebefore_model;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0

@@ -12,6 +12,12 @@ from pension_agent.retrieval.factory import (
     create_qdrant_client,
     create_qdrant_retriever,
 )
+from pension_agent.retrieval.product_catalog import (
+    ProductCatalog,
+    ProductCatalogEntry,
+    ProductCatalogError,
+    load_product_catalog,
+)
 from pension_agent.retrieval.qdrant_retriever import (
     AsyncQdrantChunkRetriever,
     QdrantChunkRetriever,
@@ -25,6 +31,9 @@ __all__ = [
     "AsyncQdrantChunkRetriever",
     "ClovaDocumentEmbedder",
     "ClovaEmbeddingFactoryError",
+    "ProductCatalog",
+    "ProductCatalogEntry",
+    "ProductCatalogError",
     "QdrantChunkRetriever",
     "async_to_bm25_text",
     "create_async_qdrant_client",
@@ -33,6 +42,7 @@ __all__ = [
     "create_clova_query_embedder",
     "create_qdrant_client",
     "create_qdrant_retriever",
+    "load_product_catalog",
     "make_locator",
     "prewarm_kiwi",
     "to_bm25_text",

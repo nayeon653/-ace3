@@ -106,3 +106,33 @@ async def test_model_middleware_limits_hcx_calls_shared_by_multiple_graphs() -> 
     await asyncio.gather(*(middleware.awrap_model_call(object(), handler) for _ in range(5)))
 
     assert max_active == 2
+
+
+@pytest.mark.anyio
+async def test_model_middleware_shares_limit_with_tool_internal_hcx_calls() -> None:
+    middleware = ModelConcurrencyMiddleware(AsyncConcurrencyLimiter(1))
+    graph_started = asyncio.Event()
+    release_graph = asyncio.Event()
+    tool_started = asyncio.Event()
+
+    async def graph_handler(request: object) -> object:
+        del request
+        graph_started.set()
+        await release_graph.wait()
+        return object()
+
+    async def tool_operation() -> object:
+        tool_started.set()
+        return object()
+
+    graph_call = asyncio.create_task(middleware.awrap_model_call(object(), graph_handler))
+    await graph_started.wait()
+    tool_call = asyncio.create_task(middleware.arun(tool_operation))
+    await asyncio.sleep(0)
+    assert not tool_started.is_set()
+
+    release_graph.set()
+    await graph_call
+    await tool_call
+
+    assert tool_started.is_set()
