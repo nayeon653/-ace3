@@ -24,6 +24,7 @@ from pension_agent.retrieval import (
 PRODUCT_CATALOG_QUERY_TOOL_NAME = "return_product_catalog_query"
 _PRODUCT_CATALOG_MARKER = "{{PRODUCT_CATALOG_JSON}}"
 ProductResolutionStatus = Literal["single", "not_found", "ambiguous"]
+ProviderResolutionStatus = Literal["registered", "not_found"]
 
 
 class CatalogQueryPlanError(RuntimeError):
@@ -59,11 +60,19 @@ class ResolveProductQuery(_CatalogQueryBase):
 
 
 class BrowseCatalogQuery(_CatalogQueryBase):
-    """공식 운용사 조건으로 상품 개수나 목록을 조회하는 계획."""
+    """운용사 등록 상태와 상품 개수·목록 조회 계획."""
 
     route: Literal["browse_catalog"]
+    provider_status: ProviderResolutionStatus
     provider: str | None = None
     return_mode: CatalogReturnMode
+
+    def model_post_init(self, context: object, /) -> None:
+        """미등록 운용사 상태에는 확인할 이름을 강제한다."""
+
+        del context
+        if self.provider_status == "not_found" and self.provider is None:
+            raise ValueError("미등록 운용사 조회에는 운용사명이 필요합니다.")
 
 
 CatalogQueryPlan = Annotated[
@@ -188,11 +197,19 @@ class HCXProductCatalogQueryPlanner:
 
     def _validate_query(self, query: CatalogQueryPlan) -> CatalogQueryPlan:
         if isinstance(query, BrowseCatalogQuery):
+            if query.provider_status == "not_found":
+                if query.provider is None:
+                    raise ProductCatalogError("미등록 운용사명이 필요합니다.")
+                if self._catalog.has_provider(query.provider):
+                    raise ProductCatalogError("등록된 운용사를 미등록으로 처리할 수 없습니다.")
+                return query
             result = self._catalog.query(
                 provider=query.provider,
                 return_mode=query.return_mode,
             )
-            return query.model_copy(update={"provider": result.provider})
+            return query.model_copy(
+                update={"provider_status": "registered", "provider": result.provider}
+            )
         if query.resolution_status != "single":
             normalized_provider = None
             if query.provider is not None:

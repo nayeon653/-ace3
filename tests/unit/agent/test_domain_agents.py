@@ -171,6 +171,7 @@ def _catalog_browse_planner(
     return FakeProductCatalogQueryPlanner(
         BrowseCatalogQuery(
             route="browse_catalog",
+            provider_status="registered",
             provider=provider,
             return_mode=cast(Any, return_mode),
         )
@@ -918,6 +919,92 @@ async def test_product_agent_ends_unresolved_query_without_document_search(
     assert search.calls == []
     assert planner.calls == [("식별하기 어려운 상품", "상품 식별")]
     assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("question", "query", "execution_status", "decision_status"),
+    [
+        (
+            "메리츠 상품은 몇 개가 등록돼 있어?",
+            {
+                "route": "browse_catalog",
+                "provider_status": "not_found",
+                "provider": "메리츠",
+                "return_mode": "count",
+            },
+            "completed",
+            "undetermined",
+        ),
+        (
+            "새봄 연금펀드의 위험과 수수료를 알려줘.",
+            {
+                "route": "resolve_product",
+                "resolution_status": "not_found",
+            },
+            "completed",
+            "undetermined",
+        ),
+        (
+            "새봄 연금펀드의 위험과 수수료를 알려줘.",
+            {
+                "route": "resolve_product",
+                "resolution_status": "single",
+                "product_code": None,
+            },
+            "failed",
+            None,
+        ),
+    ],
+)
+async def test_product_agent_handles_unregistered_and_invalid_hcx_queries_without_search(
+    question: str,
+    query: dict[str, Any],
+    execution_status: str,
+    decision_status: str | None,
+) -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "return_product_catalog_query",
+                        "args": {"query": query},
+                        "id": "query-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": question, "objective": "상품 카탈로그 확인"})
+
+    assert result["execution_status"] == execution_status
+    if decision_status is None:
+        assert "decision" not in result
+        assert "계획을 확정하지 못했습니다" in result["error"]
+    else:
+        assert result["decision"]["status"] == decision_status
+        assert result["decision"]["missing_conditions"]
+        assert "카탈로그에 등록" in result["decision"]["conclusion"]
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert model.invocation_count == 2
 
 
 @pytest.mark.anyio

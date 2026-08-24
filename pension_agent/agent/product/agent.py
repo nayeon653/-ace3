@@ -131,6 +131,13 @@ def _create_product_catalog_query_tool(
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
 
         if isinstance(query, BrowseCatalogQuery):
+            if query.provider_status == "not_found":
+                result = _terminal_unregistered_provider_result(query)
+                return _catalog_lookup_command(
+                    runtime.tool_call_id,
+                    payload={"query": query.model_dump()},
+                    result=result,
+                )
             catalog_result = catalog.query(
                 provider=query.provider,
                 return_mode=query.return_mode,
@@ -331,12 +338,31 @@ def _terminal_product_resolution_result(query: ResolveProductQuery) -> DomainRes
         "execution_status": "completed",
         "decision": {
             "status": "undetermined",
-            "conclusion": "질문에서 카탈로그에 등록된 상품을 식별하지 못했습니다.",
+            "conclusion": "질문의 상품은 검증된 상품 카탈로그에 등록되어 있지 않습니다.",
             "missing_conditions": ["카탈로그에 등록된 정확한 상품명 또는 product_code"],
         },
         "evidence": [],
         "calculations": [],
-        "warnings": ["상품 후보를 식별하지 못해 상품 문서를 검색하지 않았습니다."],
+        "warnings": ["미등록 상품이므로 상품 문서를 검색하지 않았습니다."],
+    }
+
+
+def _terminal_unregistered_provider_result(query: BrowseCatalogQuery) -> DomainResult:
+    """미등록 운용사 조회를 문서 검색 없이 종료한다."""
+
+    if query.provider is None:
+        raise ValueError("미등록 운용사명이 없습니다.")
+    return {
+        "domain": "product",
+        "execution_status": "completed",
+        "decision": {
+            "status": "undetermined",
+            "conclusion": f"'{query.provider}' 운용사는 검증된 상품 카탈로그에 등록되어 있지 않습니다.",
+            "missing_conditions": ["카탈로그에 등록된 정확한 운용사명 또는 product_code"],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": ["미등록 운용사이므로 상품 문서를 검색하지 않았습니다."],
     }
 
 

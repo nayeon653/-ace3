@@ -102,6 +102,15 @@ def test_catalog_query_rejects_unknown_provider_and_return_mode() -> None:
         catalog.query(provider="미래에셋", return_mode="all")  # type: ignore[arg-type]
 
 
+def test_catalog_checks_provider_registration_in_the_same_snapshot() -> None:
+    catalog = load_product_catalog()
+
+    assert catalog.has_provider(" 미래에셋 ") is True
+    assert catalog.has_provider("메리츠") is False
+    with pytest.raises(ProductCatalogError):
+        catalog.has_provider(" ")
+
+
 def test_catalog_version_changes_with_validated_catalog_content() -> None:
     first = ProductCatalog.from_payloads(
         _catalog_payload("KR510902511M"),

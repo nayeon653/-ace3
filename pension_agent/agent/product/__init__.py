@@ -22,6 +22,7 @@ from pension_agent.agent.product.catalog_query import (
     HCXProductCatalogQueryPlanner,
     ProductCatalogQueryPlanner,
     ProductResolutionStatus,
+    ProviderResolutionStatus,
     ResolveProductQuery,
     load_product_catalog_query_prompt,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "ProductCatalogMatcher",
     "ProductCatalogQueryPlanner",
     "ProductResolutionStatus",
+    "ProviderResolutionStatus",
     "ResolveProductQuery",
     "create_product_agent",
     "load_product_agent_prompt",
