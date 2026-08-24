@@ -23,6 +23,7 @@ from pension_agent.retrieval import (
 
 PRODUCT_CATALOG_QUERY_TOOL_NAME = "return_product_catalog_query"
 _PRODUCT_CATALOG_MARKER = "{{PRODUCT_CATALOG_JSON}}"
+ProductResolutionStatus = Literal["single", "not_found", "ambiguous"]
 
 
 class CatalogQueryPlanError(RuntimeError):
@@ -34,14 +35,27 @@ class _CatalogQueryBase(BaseModel):
 
 
 class ResolveProductQuery(_CatalogQueryBase):
-    """오타와 별칭을 검증된 단일 상품 코드로 정규화한 조회."""
+    """특정 상품을 단일 코드로 식별하거나 안전한 미식별 상태로 정규화한 조회."""
 
     route: Literal["resolve_product"]
+    resolution_status: ProductResolutionStatus
     provider: str | None = None
-    product_code: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, min_length=1, to_upper=True),
-    ]
+    product_code: (
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, min_length=1, to_upper=True),
+        ]
+        | None
+    ) = None
+
+    def model_post_init(self, context: object, /) -> None:
+        """식별 상태와 상품 코드의 허용 조합을 제한한다."""
+
+        del context
+        if self.resolution_status == "single" and self.product_code is None:
+            raise ValueError("single 상품 식별에는 상품 코드 하나가 필요합니다.")
+        if self.resolution_status != "single" and self.product_code is not None:
+            raise ValueError("미식별 상품 조회에는 상품 코드를 포함할 수 없습니다.")
 
 
 class BrowseCatalogQuery(_CatalogQueryBase):
@@ -179,11 +193,22 @@ class HCXProductCatalogQueryPlanner:
                 return_mode=query.return_mode,
             )
             return query.model_copy(update={"provider": result.provider})
+        if query.resolution_status != "single":
+            normalized_provider = None
+            if query.provider is not None:
+                normalized_provider = self._catalog.query(
+                    provider=query.provider,
+                    return_mode="count",
+                ).provider
+            return query.model_copy(update={"provider": normalized_provider})
+        if query.product_code is None:
+            raise ProductCatalogError("단일 상품 식별에는 상품 코드가 필요합니다.")
         product = self._catalog.select_products([query.product_code])[0]
         if query.provider is not None and query.provider != product.provider:
             raise ProductCatalogError("상품 코드와 운용사가 일치하지 않습니다.")
         return ResolveProductQuery(
             route="resolve_product",
+            resolution_status="single",
             provider=product.provider,
             product_code=product.product_code,
         )

@@ -22,6 +22,7 @@ from pension_agent.agent.product import (
     BrowseCatalogQuery,
     CatalogQueryPlan,
     ProductCatalogMatch,
+    ResolveProductQuery,
     create_product_agent,
     load_product_agent_prompt,
 )
@@ -837,6 +838,54 @@ async def test_product_agent_returns_undetermined_when_catalog_has_no_candidate(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("resolution_status", "decision_status"),
+    [("not_found", "undetermined"), ("ambiguous", "conditional")],
+)
+async def test_product_agent_ends_unresolved_query_without_document_search(
+    resolution_status: str,
+    decision_status: str,
+) -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    planner = FakeProductCatalogQueryPlanner(
+        ResolveProductQuery(
+            route="resolve_product",
+            resolution_status=cast(Any, resolution_status),
+        )
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_query_planner=planner,
+    )
+
+    result = await agent({"question": "식별하기 어려운 상품", "objective": "상품 식별"})
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"]["status"] == decision_status
+    assert result["decision"]["missing_conditions"]
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert planner.calls == [("식별하기 어려운 상품", "상품 식별")]
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
 async def test_product_agent_default_matcher_calls_nested_hcx_before_document_search() -> None:
     search = FakeSearchService(
         SearchResult(
@@ -865,6 +914,7 @@ async def test_product_agent_default_matcher_calls_nested_hcx_before_document_se
                         "args": {
                             "query": {
                                 "route": "resolve_product",
+                                "resolution_status": "single",
                                 "provider": "미래에셋",
                                 "product_code": "KR510902511M",
                             }

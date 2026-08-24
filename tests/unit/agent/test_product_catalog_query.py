@@ -101,6 +101,7 @@ async def test_query_planner_resolves_one_catalog_product() -> None:
                 _query_response(
                     {
                         "route": "resolve_product",
+                        "resolution_status": "single",
                         "provider": "미래에셋",
                         "product_code": "kr510902511m",
                     }
@@ -118,8 +119,42 @@ async def test_query_planner_resolves_one_catalog_product() -> None:
 
     assert query == ResolveProductQuery(
         route="resolve_product",
+        resolution_status="single",
         provider="미래에셋",
         product_code="KR510902511M",
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("resolution_status", ["not_found", "ambiguous"])
+async def test_query_planner_preserves_safe_unresolved_status(
+    resolution_status: str,
+) -> None:
+    planner = HCXProductCatalogQueryPlanner(
+        model=BindingFakeModel(
+            responses=[
+                _query_response(
+                    {
+                        "route": "resolve_product",
+                        "resolution_status": resolution_status,
+                        "provider": "미래에셋",
+                    }
+                )
+            ]
+        ),
+        catalog=load_product_catalog(),
+    )
+
+    query = await planner.plan(
+        question="상품을 식별하기 어려운 질문",
+        objective="특정 상품 식별",
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+
+    assert query == ResolveProductQuery(
+        route="resolve_product",
+        resolution_status=resolution_status,
+        provider="미래에셋",
     )
 
 
@@ -134,12 +169,29 @@ async def test_query_planner_resolves_one_catalog_product() -> None:
         },
         {
             "route": "resolve_product",
+            "resolution_status": "single",
             "provider": "미래에셋",
             "product_code": "KR9999999999",
         },
         {
             "route": "resolve_product",
+            "resolution_status": "single",
             "provider": "하나",
+            "product_code": "KR510902511M",
+        },
+        {
+            "route": "resolve_product",
+            "resolution_status": "single",
+            "provider": "미래에셋",
+        },
+        {
+            "route": "resolve_product",
+            "resolution_status": "not_found",
+            "product_code": "KR510902511M",
+        },
+        {
+            "route": "resolve_product",
+            "resolution_status": "ambiguous",
             "product_code": "KR510902511M",
         },
         {
@@ -188,3 +240,5 @@ def test_query_planner_prompt_contains_the_full_catalog_only_once() -> None:
     assert '"product_code":"KR518102001M"' in prompt
     assert "{{PRODUCT_CATALOG_JSON}}" not in prompt
     assert "상품 목록, 상품 개수" in prompt
+    assert "resolution_status=not_found" in prompt
+    assert "resolution_status=ambiguous" in prompt

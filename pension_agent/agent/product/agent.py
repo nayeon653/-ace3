@@ -31,6 +31,7 @@ from pension_agent.agent.product.catalog_query import (
     CatalogQueryPlanError,
     HCXProductCatalogQueryPlanner,
     ProductCatalogQueryPlanner,
+    ResolveProductQuery,
 )
 from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
@@ -140,6 +141,15 @@ def _create_product_catalog_query_tool(
                 payload={"query": query.model_dump(), "catalog_result": result["catalog_result"]},
                 pending_catalog_result=result,
             )
+        if query.resolution_status != "single":
+            result = _terminal_product_resolution_result(query)
+            return _catalog_lookup_command(
+                runtime.tool_call_id,
+                payload={"query": query.model_dump()},
+                result=result,
+            )
+        if query.product_code is None:
+            raise ValueError("단일 상품 식별 결과에 상품 코드가 없습니다.")
         return _catalog_lookup_command(
             runtime.tool_call_id,
             payload={"query": query.model_dump()},
@@ -298,6 +308,36 @@ def _catalog_domain_result(result: ProductCatalogResult) -> DomainResult:
     }
     validate_domain_result(domain_result)
     return domain_result
+
+
+def _terminal_product_resolution_result(query: ResolveProductQuery) -> DomainResult:
+    """단일 상품을 확정하지 못한 Query를 문서 검색 없이 종료한다."""
+
+    if query.resolution_status == "ambiguous":
+        return {
+            "domain": "product",
+            "execution_status": "completed",
+            "decision": {
+                "status": "conditional",
+                "conclusion": "질문에서 분석할 상품을 하나로 식별할 수 없습니다.",
+                "missing_conditions": ["분석할 하나의 정확한 상품명 또는 product_code"],
+            },
+            "evidence": [],
+            "calculations": [],
+            "warnings": ["상품이 모호해 상품 문서를 검색하지 않았습니다."],
+        }
+    return {
+        "domain": "product",
+        "execution_status": "completed",
+        "decision": {
+            "status": "undetermined",
+            "conclusion": "질문에서 카탈로그에 등록된 상품을 식별하지 못했습니다.",
+            "missing_conditions": ["카탈로그에 등록된 정확한 상품명 또는 product_code"],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": ["상품 후보를 식별하지 못해 상품 문서를 검색하지 않았습니다."],
+    }
 
 
 def _terminal_product_match_result(match: ProductCatalogMatch) -> DomainResult:
