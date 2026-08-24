@@ -27,11 +27,14 @@ from pension_agent.agent.product.catalog_matcher import (
     ProductCatalogMatchError,
 )
 from pension_agent.agent.product.catalog_query import (
-    BrowseCatalogQuery,
+    BrowseAllCatalogQuery,
+    BrowseProviderCatalogQuery,
     CatalogQueryPlanError,
     HCXProductCatalogQueryPlanner,
     ProductCatalogQueryPlanner,
-    ResolveProductQuery,
+    SingleProductQuery,
+    UnregisteredProviderQuery,
+    UnresolvedProductQuery,
 )
 from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
@@ -130,9 +133,17 @@ def _create_product_catalog_query_tool(
             result = _failed_product_result("상품 카탈로그 조회 계획을 확정하지 못했습니다.")
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
 
-        if isinstance(query, BrowseCatalogQuery):
+        if isinstance(query, UnregisteredProviderQuery):
+            result = _terminal_unregistered_provider_result(query)
+            return _catalog_lookup_command(
+                runtime.tool_call_id,
+                payload={"query": query.model_dump()},
+                result=result,
+            )
+        if isinstance(query, (BrowseAllCatalogQuery, BrowseProviderCatalogQuery)):
+            provider = query.provider if isinstance(query, BrowseProviderCatalogQuery) else None
             catalog_result = catalog.query(
-                provider=query.provider,
+                provider=provider,
                 return_mode=query.return_mode,
             )
             result = _catalog_domain_result(catalog_result)
@@ -141,15 +152,13 @@ def _create_product_catalog_query_tool(
                 payload={"query": query.model_dump(), "catalog_result": result["catalog_result"]},
                 pending_catalog_result=result,
             )
-        if query.resolution_status != "single":
+        if not isinstance(query, SingleProductQuery):
             result = _terminal_product_resolution_result(query)
             return _catalog_lookup_command(
                 runtime.tool_call_id,
                 payload={"query": query.model_dump()},
                 result=result,
             )
-        if query.product_code is None:
-            raise ValueError("단일 상품 식별 결과에 상품 코드가 없습니다.")
         return _catalog_lookup_command(
             runtime.tool_call_id,
             payload={"query": query.model_dump()},
@@ -310,7 +319,7 @@ def _catalog_domain_result(result: ProductCatalogResult) -> DomainResult:
     return domain_result
 
 
-def _terminal_product_resolution_result(query: ResolveProductQuery) -> DomainResult:
+def _terminal_product_resolution_result(query: UnresolvedProductQuery) -> DomainResult:
     """단일 상품을 확정하지 못한 Query를 문서 검색 없이 종료한다."""
 
     if query.resolution_status == "ambiguous":
@@ -331,12 +340,29 @@ def _terminal_product_resolution_result(query: ResolveProductQuery) -> DomainRes
         "execution_status": "completed",
         "decision": {
             "status": "undetermined",
-            "conclusion": "질문에서 카탈로그에 등록된 상품을 식별하지 못했습니다.",
+            "conclusion": "질문의 상품은 검증된 상품 카탈로그에 등록되어 있지 않습니다.",
             "missing_conditions": ["카탈로그에 등록된 정확한 상품명 또는 product_code"],
         },
         "evidence": [],
         "calculations": [],
-        "warnings": ["상품 후보를 식별하지 못해 상품 문서를 검색하지 않았습니다."],
+        "warnings": ["미등록 상품이므로 상품 문서를 검색하지 않았습니다."],
+    }
+
+
+def _terminal_unregistered_provider_result(query: UnregisteredProviderQuery) -> DomainResult:
+    """미등록 운용사 조회를 문서 검색 없이 종료한다."""
+
+    return {
+        "domain": "product",
+        "execution_status": "completed",
+        "decision": {
+            "status": "undetermined",
+            "conclusion": f"'{query.provider}' 운용사는 검증된 상품 카탈로그에 등록되어 있지 않습니다.",
+            "missing_conditions": ["카탈로그에 등록된 정확한 운용사명 또는 product_code"],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": ["미등록 운용사이므로 상품 문서를 검색하지 않았습니다."],
     }
 
 

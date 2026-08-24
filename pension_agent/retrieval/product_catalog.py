@@ -120,6 +120,12 @@ class ProductCatalog:
         except KeyError:
             raise ProductCatalogError("카탈로그에 없는 상품 코드입니다.") from None
 
+    def has_provider(self, provider: str) -> bool:
+        """운용사가 현재 카탈로그 스냅샷에 등록되었는지 확인한다."""
+
+        normalized_provider = _require_text(provider, label="provider")
+        return normalized_provider in self._products_by_provider
+
     def query(
         self,
         *,

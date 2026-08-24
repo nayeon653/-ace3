@@ -11,12 +11,17 @@ from langchain_core.runnables import Runnable
 
 from pension_agent.agent.product import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
-    BrowseCatalogQuery,
+    AmbiguousProductQuery,
+    BrowseAllCatalogQuery,
+    BrowseProviderCatalogQuery,
     CatalogQueryPlanError,
     HCXProductCatalogQueryPlanner,
-    ResolveProductQuery,
+    NotFoundProductQuery,
+    SingleProductQuery,
+    UnregisteredProviderQuery,
     load_product_catalog_query_prompt,
 )
+from pension_agent.agent.product.catalog_query import _return_product_catalog_query
 from pension_agent.retrieval import load_product_catalog
 
 
@@ -63,6 +68,26 @@ def test_query_planner_forces_one_structured_tool() -> None:
     assert model.bindings == [{"tool_choice": PRODUCT_CATALOG_QUERY_TOOL_NAME}]
 
 
+def test_query_tool_schema_requires_code_only_for_single_product() -> None:
+    schema = _return_product_catalog_query.tool_call_schema.model_json_schema()
+    definitions = schema["$defs"]
+
+    assert "product_code" in definitions["SingleProductQuery"]["required"]
+    assert "product_code" not in definitions["NotFoundProductQuery"]["properties"]
+    assert "product_code" not in definitions["AmbiguousProductQuery"]["properties"]
+    assert schema["properties"]["query"]["anyOf"] == [
+        {"$ref": "#/$defs/SingleProductQuery"},
+        {"$ref": "#/$defs/NotFoundProductQuery"},
+        {"$ref": "#/$defs/AmbiguousProductQuery"},
+        {"$ref": "#/$defs/BrowseAllCatalogQuery"},
+        {"$ref": "#/$defs/BrowseProviderCatalogQuery"},
+        {"$ref": "#/$defs/UnregisteredProviderQuery"},
+    ]
+    assert "provider" not in definitions["BrowseAllCatalogQuery"]["properties"]
+    assert "provider" in definitions["BrowseProviderCatalogQuery"]["required"]
+    assert "provider" in definitions["UnregisteredProviderQuery"]["required"]
+
+
 @pytest.mark.anyio
 async def test_query_planner_normalizes_provider_for_catalog_browse() -> None:
     planner = HCXProductCatalogQueryPlanner(
@@ -70,7 +95,7 @@ async def test_query_planner_normalizes_provider_for_catalog_browse() -> None:
             responses=[
                 _query_response(
                     {
-                        "route": "browse_catalog",
+                        "route": "browse_provider_catalog",
                         "provider": "미래에셋",
                         "return_mode": "count_and_items",
                     }
@@ -86,10 +111,47 @@ async def test_query_planner_normalizes_provider_for_catalog_browse() -> None:
         deadline=asyncio.get_running_loop().time() + 5,
     )
 
-    assert query == BrowseCatalogQuery(
-        route="browse_catalog",
+    assert query == BrowseProviderCatalogQuery(
+        route="browse_provider_catalog",
         provider="미래에셋",
         return_mode="count_and_items",
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "전체 상품은 몇 개야?",
+        "등록된 상품은 몇 개야?",
+        "상품 카탈로그 개수를 알려줘.",
+        "현재 등록 상품 목록을 보여줘.",
+    ],
+)
+async def test_query_planner_preserves_all_catalog_browse(question: str) -> None:
+    planner = HCXProductCatalogQueryPlanner(
+        model=BindingFakeModel(
+            responses=[
+                _query_response(
+                    {
+                        "route": "browse_all_catalog",
+                        "return_mode": "count",
+                    }
+                )
+            ]
+        ),
+        catalog=load_product_catalog(),
+    )
+
+    query = await planner.plan(
+        question=question,
+        objective="전체 상품 개수 조회",
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+
+    assert query == BrowseAllCatalogQuery(
+        route="browse_all_catalog",
+        return_mode="count",
     )
 
 
@@ -117,7 +179,7 @@ async def test_query_planner_resolves_one_catalog_product() -> None:
         deadline=asyncio.get_running_loop().time() + 5,
     )
 
-    assert query == ResolveProductQuery(
+    assert query == SingleProductQuery(
         route="resolve_product",
         resolution_status="single",
         provider="미래에셋",
@@ -130,12 +192,13 @@ async def test_query_planner_resolves_one_catalog_product() -> None:
 async def test_query_planner_preserves_safe_unresolved_status(
     resolution_status: str,
 ) -> None:
+    route = "product_not_found" if resolution_status == "not_found" else "product_ambiguous"
     planner = HCXProductCatalogQueryPlanner(
         model=BindingFakeModel(
             responses=[
                 _query_response(
                     {
-                        "route": "resolve_product",
+                        "route": route,
                         "resolution_status": resolution_status,
                         "provider": "미래에셋",
                     }
@@ -151,10 +214,76 @@ async def test_query_planner_preserves_safe_unresolved_status(
         deadline=asyncio.get_running_loop().time() + 5,
     )
 
-    assert query == ResolveProductQuery(
-        route="resolve_product",
+    expected_type = (
+        NotFoundProductQuery if resolution_status == "not_found" else AmbiguousProductQuery
+    )
+    expected_route = (
+        "product_not_found" if resolution_status == "not_found" else "product_ambiguous"
+    )
+    assert query == expected_type(
+        route=expected_route,
         resolution_status=resolution_status,
         provider="미래에셋",
+    )
+
+
+@pytest.mark.anyio
+async def test_query_planner_verifies_unregistered_provider_status() -> None:
+    planner = HCXProductCatalogQueryPlanner(
+        model=BindingFakeModel(
+            responses=[
+                _query_response(
+                    {
+                        "route": "provider_not_found",
+                        "provider": "메리츠",
+                        "return_mode": "count",
+                    }
+                )
+            ]
+        ),
+        catalog=load_product_catalog(),
+    )
+
+    query = await planner.plan(
+        question="메리츠 상품은 몇 개가 등록돼 있어?",
+        objective="운용사 상품 개수 조회",
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+
+    assert query == UnregisteredProviderQuery(
+        route="provider_not_found",
+        provider="메리츠",
+        return_mode="count",
+    )
+
+
+@pytest.mark.anyio
+async def test_query_planner_normalizes_unknown_provider_browse_to_not_found() -> None:
+    planner = HCXProductCatalogQueryPlanner(
+        model=BindingFakeModel(
+            responses=[
+                _query_response(
+                    {
+                        "route": "browse_provider_catalog",
+                        "provider": "메리츠",
+                        "return_mode": "count",
+                    }
+                )
+            ]
+        ),
+        catalog=load_product_catalog(),
+    )
+
+    query = await planner.plan(
+        question="메리츠 상품은 몇 개가 등록돼 있어?",
+        objective="운용사 상품 개수 조회",
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+
+    assert query == UnregisteredProviderQuery(
+        route="provider_not_found",
+        provider="메리츠",
+        return_mode="count",
     )
 
 
@@ -163,8 +292,8 @@ async def test_query_planner_preserves_safe_unresolved_status(
     "query",
     [
         {
-            "route": "browse_catalog",
-            "provider": "없는운용사",
+            "route": "provider_not_found",
+            "provider": "미래에셋",
             "return_mode": "count",
         },
         {
@@ -185,17 +314,35 @@ async def test_query_planner_preserves_safe_unresolved_status(
             "provider": "미래에셋",
         },
         {
-            "route": "resolve_product",
+            "route": "product_not_found",
             "resolution_status": "not_found",
             "product_code": "KR510902511M",
         },
         {
-            "route": "resolve_product",
+            "route": "product_ambiguous",
             "resolution_status": "ambiguous",
             "product_code": "KR510902511M",
         },
         {
             "route": "browse_catalog",
+            "provider_status": "registered",
+            "return_mode": "count",
+        },
+        {
+            "route": "browse_provider_catalog",
+            "return_mode": "count",
+        },
+        {
+            "route": "provider_not_found",
+            "return_mode": "count",
+        },
+        {
+            "route": "browse_all_catalog",
+            "provider": "미래에셋",
+            "return_mode": "count",
+        },
+        {
+            "route": "browse_provider_catalog",
             "provider": "미래에셋",
             "return_mode": "count",
             "product_codes": ["KR510902511M"],
@@ -242,3 +389,6 @@ def test_query_planner_prompt_contains_the_full_catalog_only_once() -> None:
     assert "상품 목록, 상품 개수" in prompt
     assert "resolution_status=not_found" in prompt
     assert "resolution_status=ambiguous" in prompt
+    assert "browse_all_catalog" in prompt
+    assert "browse_provider_catalog" in prompt
+    assert "provider_not_found" in prompt
