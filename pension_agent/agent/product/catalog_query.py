@@ -7,7 +7,7 @@ import json
 from importlib import resources
 from typing import Annotated, Any, Literal, Protocol
 
-from langchain.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain.messages import AIMessage, HumanMessage, SystemMessage
 from langchain.tools import tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
@@ -23,22 +23,11 @@ from pension_agent.retrieval import (
 
 PRODUCT_CATALOG_QUERY_TOOL_NAME = "return_product_catalog_query"
 _PRODUCT_CATALOG_MARKER = "{{PRODUCT_CATALOG_JSON}}"
-_ALL_CATALOG_SCOPE_PREFIXES = (
-    "전체 상품",
-    "모든 상품",
-    "전체 카탈로그",
-    "모든 운용사",
-    "전 운용사",
-)
 ProductResolutionStatus = Literal["single", "not_found", "ambiguous"]
 
 
 class CatalogQueryPlanError(RuntimeError):
     """HCX의 카탈로그 조회 계획을 안전하게 사용할 수 없는 경우."""
-
-
-class _CatalogQueryCorrectionRequired(ProductCatalogError):
-    """HCX가 누락한 조회 범위를 한 번 교정해야 하는 경우."""
 
 
 class _CatalogQueryBase(BaseModel):
@@ -201,31 +190,7 @@ class HCXProductCatalogQueryPlanner:
         try:
             async with asyncio.timeout_at(deadline):
                 response = await invoke()
-                try:
-                    query = self._parse_and_validate_response(response, question=question)
-                except _CatalogQueryCorrectionRequired:
-                    tool_call = response.tool_calls[0]
-                    messages.extend(
-                        [
-                            response,
-                            ToolMessage(
-                                content=(
-                                    "질문에 명시적인 전체 카탈로그 범위가 없습니다. "
-                                    "운용사명을 포함한 올바른 운용사 route로 교정하세요."
-                                ),
-                                tool_call_id=tool_call["id"],
-                                name=PRODUCT_CATALOG_QUERY_TOOL_NAME,
-                            ),
-                            HumanMessage(
-                                content=(
-                                    "browse_all_catalog를 사용하지 말고 질문의 운용사명을 "
-                                    "포함해 조회 계획을 다시 반환하세요."
-                                )
-                            ),
-                        ]
-                    )
-                    response = await invoke()
-                    query = self._parse_and_validate_response(response, question=question)
+                query = self._parse_and_validate_response(response)
         except TimeoutError:
             raise
         except CatalogQueryPlanError:
@@ -246,8 +211,6 @@ class HCXProductCatalogQueryPlanner:
     def _parse_and_validate_response(
         self,
         response: AIMessage,
-        *,
-        question: str,
     ) -> CatalogQueryPlan:
         calls = [
             call for call in response.tool_calls if call["name"] == PRODUCT_CATALOG_QUERY_TOOL_NAME
@@ -255,23 +218,14 @@ class HCXProductCatalogQueryPlanner:
         if len(calls) != 1 or len(response.tool_calls) != 1:
             raise CatalogQueryPlanError("HCX 카탈로그 Query 응답이 올바르지 않습니다.")
         query = CatalogQueryEnvelope.model_validate(calls[0]["args"]).query
-        return self._validate_query(query, question=question)
+        return self._validate_query(query)
 
-    def _validate_query(
-        self,
-        query: CatalogQueryPlan,
-        *,
-        question: str,
-    ) -> CatalogQueryPlan:
+    def _validate_query(self, query: CatalogQueryPlan) -> CatalogQueryPlan:
         if isinstance(query, UnregisteredProviderQuery):
             if self._catalog.has_provider(query.provider):
                 raise ProductCatalogError("등록된 운용사를 미등록으로 처리할 수 없습니다.")
             return query
         if isinstance(query, BrowseAllCatalogQuery):
-            if not question.strip().startswith(_ALL_CATALOG_SCOPE_PREFIXES):
-                raise _CatalogQueryCorrectionRequired(
-                    "전체 카탈로그 범위가 명시되지 않은 질문입니다."
-                )
             self._catalog.query(provider=None, return_mode=query.return_mode)
             return query
         if isinstance(query, BrowseProviderCatalogQuery):

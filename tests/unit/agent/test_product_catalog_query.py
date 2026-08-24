@@ -119,7 +119,16 @@ async def test_query_planner_normalizes_provider_for_catalog_browse() -> None:
 
 
 @pytest.mark.anyio
-async def test_query_planner_preserves_explicit_all_catalog_browse() -> None:
+@pytest.mark.parametrize(
+    "question",
+    [
+        "전체 상품은 몇 개야?",
+        "등록된 상품은 몇 개야?",
+        "상품 카탈로그 개수를 알려줘.",
+        "현재 등록 상품 목록을 보여줘.",
+    ],
+)
+async def test_query_planner_preserves_all_catalog_browse(question: str) -> None:
     planner = HCXProductCatalogQueryPlanner(
         model=BindingFakeModel(
             responses=[
@@ -135,7 +144,7 @@ async def test_query_planner_preserves_explicit_all_catalog_browse() -> None:
     )
 
     query = await planner.plan(
-        question="전체 상품은 몇 개야?",
+        question=question,
         objective="전체 상품 개수 조회",
         deadline=asyncio.get_running_loop().time() + 5,
     )
@@ -260,42 +269,6 @@ async def test_query_planner_normalizes_unknown_provider_browse_to_not_found() -
                         "return_mode": "count",
                     }
                 )
-            ]
-        ),
-        catalog=load_product_catalog(),
-    )
-
-    query = await planner.plan(
-        question="메리츠 상품은 몇 개가 등록돼 있어?",
-        objective="운용사 상품 개수 조회",
-        deadline=asyncio.get_running_loop().time() + 5,
-    )
-
-    assert query == UnregisteredProviderQuery(
-        route="provider_not_found",
-        provider="메리츠",
-        return_mode="count",
-    )
-
-
-@pytest.mark.anyio
-async def test_query_planner_corrects_provider_question_misrouted_to_all_catalog() -> None:
-    planner = HCXProductCatalogQueryPlanner(
-        model=BindingFakeModel(
-            responses=[
-                _query_response(
-                    {
-                        "route": "browse_all_catalog",
-                        "return_mode": "count",
-                    }
-                ),
-                _query_response(
-                    {
-                        "route": "browse_provider_catalog",
-                        "provider": "메리츠",
-                        "return_mode": "count",
-                    }
-                ),
             ]
         ),
         catalog=load_product_catalog(),
