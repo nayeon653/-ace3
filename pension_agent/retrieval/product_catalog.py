@@ -7,11 +7,13 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
+from hashlib import sha256
 from importlib import resources
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 _PRODUCT_CODE_PATTERN = re.compile(r"KR[A-Z0-9]{10}\Z")
+CatalogReturnMode = Literal["count", "items", "count_and_items"]
 
 
 class ProductCatalogError(ValueError):
@@ -39,12 +41,25 @@ class ProductCatalogEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class ProductCatalogResult:
+    """결정론적 카탈로그 조회 결과와 원본 버전."""
+
+    provider: str | None
+    return_mode: CatalogReturnMode
+    total_count: int
+    items: tuple[ProductCatalogEntry, ...]
+    catalog_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class ProductCatalog:
     """검증된 상품 코드와 색인 문서 alias를 보관한다."""
 
     products: tuple[ProductCatalogEntry, ...]
     _products_by_code: Mapping[str, ProductCatalogEntry]
+    _products_by_provider: Mapping[str, tuple[ProductCatalogEntry, ...]]
     _document_aliases: Mapping[str, str]
+    version: str
 
     @classmethod
     def from_payloads(
@@ -63,6 +78,9 @@ class ProductCatalog:
         products_by_code = {product.product_code: product for product in products}
         if len(products_by_code) != len(products):
             raise ProductCatalogError("상품 카탈로그 product_code는 중복될 수 없습니다.")
+        products_by_provider: dict[str, list[ProductCatalogEntry]] = {}
+        for product in products:
+            products_by_provider.setdefault(product.provider, []).append(product)
 
         alias_object = _require_object(alias_payload, label="상품 문서 alias")
         raw_aliases = alias_object.get("aliases")
@@ -72,7 +90,14 @@ class ProductCatalog:
         return cls(
             products=products,
             _products_by_code=MappingProxyType(products_by_code),
+            _products_by_provider=MappingProxyType(
+                {
+                    provider: tuple(provider_products)
+                    for provider, provider_products in products_by_provider.items()
+                }
+            ),
             _document_aliases=MappingProxyType(document_aliases),
+            version=_catalog_version(products, document_aliases),
         )
 
     def resolve_source_file_name(self, product_code: str) -> str:
@@ -94,6 +119,35 @@ class ProductCatalog:
             return tuple(self._products_by_code[code] for code in normalized_codes)
         except KeyError:
             raise ProductCatalogError("카탈로그에 없는 상품 코드입니다.") from None
+
+    def query(
+        self,
+        *,
+        provider: str | None,
+        return_mode: CatalogReturnMode,
+    ) -> ProductCatalogResult:
+        """검증된 공식 운용사 조건으로 상품 개수와 목록을 조회한다."""
+
+        if return_mode not in {"count", "items", "count_and_items"}:
+            raise ProductCatalogError("카탈로그 반환 방식이 올바르지 않습니다.")
+        normalized_provider = None
+        if provider is None:
+            matched = self.products
+        else:
+            normalized_provider = _require_text(provider, label="provider")
+            try:
+                matched = self._products_by_provider[normalized_provider]
+            except KeyError:
+                raise ProductCatalogError("카탈로그에 없는 운용사입니다.") from None
+        ordered = tuple(sorted(matched, key=lambda product: product.product_code))
+        items = () if return_mode == "count" else ordered
+        return ProductCatalogResult(
+            provider=normalized_provider,
+            return_mode=return_mode,
+            total_count=len(ordered),
+            items=items,
+            catalog_version=self.version,
+        )
 
     def to_prompt_json(self) -> str:
         """HCX 컨텍스트용 최소 카탈로그 JSON을 반환한다."""
@@ -159,6 +213,24 @@ def _validate_document_aliases(
     if any(primary in aliases for primary in aliases.values()):
         raise ProductCatalogError("상품 문서 alias는 다른 alias를 대표 코드로 참조할 수 없습니다.")
     return aliases
+
+
+def _catalog_version(
+    products: tuple[ProductCatalogEntry, ...],
+    document_aliases: Mapping[str, str],
+) -> str:
+    """검증된 상품과 문서 alias의 결정론적 SHA-256을 반환한다."""
+
+    canonical = json.dumps(
+        {
+            "products": [product.to_dict() for product in products],
+            "document_aliases": dict(sorted(document_aliases.items())),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _normalize_product_code(value: object) -> str:

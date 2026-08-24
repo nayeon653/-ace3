@@ -83,6 +83,48 @@ def _failed_result() -> DomainResult:
     }
 
 
+def _catalog_result() -> DomainResult:
+    return {
+        "domain": "product",
+        "execution_status": "completed",
+        "decision": {
+            "status": "determined",
+            "conclusion": "미래에셋 상품 카탈로그에서 2개를 조회했습니다.",
+            "missing_conditions": [],
+        },
+        "evidence": [
+            {
+                "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+                "source_file_name": "product_catalog.json",
+                "title": "검증된 상품 카탈로그 조회 결과",
+                "locator": "provider=미래에셋;catalog_version=v1",
+                "content": "결정론적 카탈로그 결과",
+            }
+        ],
+        "calculations": [],
+        "warnings": [],
+        "catalog_result": {
+            "route": "browse_catalog",
+            "provider": "미래에셋",
+            "return_mode": "count_and_items",
+            "total_count": 2,
+            "items": [
+                {
+                    "product_code": "KR510902511M",
+                    "official_name": "미래에셋장기성장포커스",
+                    "provider": "미래에셋",
+                },
+                {
+                    "product_code": "KR510902773M",
+                    "official_name": "미래에셋고배당포커스",
+                    "provider": "미래에셋",
+                },
+            ],
+            "catalog_version": "v1",
+        },
+    }
+
+
 def _state(*, messages: list[Any], domain_results: list[DomainResult]) -> dict[str, Any]:
     return {
         "messages": messages,
@@ -133,6 +175,28 @@ async def test_answer_service_preserves_tool_failure_as_valid_execution_state() 
     assert result.answer.answer == "상품 분석을 완료하지 못해 판단할 수 없습니다."
     assert result.state["domain_results"][0]["execution_status"] == "failed"
     assert result.state["domain_results"][0]["error"] == "도메인 분석을 완료하지 못했습니다."
+
+
+async def test_answer_service_replaces_catalog_only_answer_with_verified_values() -> None:
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="미래에셋 상품은 99개입니다.")],
+            domain_results=[_catalog_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001",
+        question="연금계좌를 이전할 수 있나요?",
+    )
+
+    assert result.answer.answer == (
+        "미래에셋 상품은 총 2개입니다.\n\n"
+        "미래에셋 상품 목록:\n"
+        "- 미래에셋장기성장포커스 (미래에셋, KR510902511M)\n"
+        "- 미래에셋고배당포커스 (미래에셋, KR510902773M)"
+    )
+    assert "99" not in result.answer.answer
 
 
 async def test_answer_service_normalizes_supervisor_execution_failure() -> None:

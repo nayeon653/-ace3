@@ -47,6 +47,8 @@ def build_domain_tool_result(result: DomainResult) -> DomainToolResult:
     }
     if "decision" in result:
         tool_result["decision"] = result["decision"]
+    if "catalog_result" in result:
+        tool_result["catalog_result"] = result["catalog_result"]
     if "error" in result:
         tool_result["error"] = result["error"]
     return tool_result

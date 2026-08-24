@@ -13,6 +13,7 @@ DecisionStatus = Literal[
     "undetermined",
     "not_applicable",
 ]
+CatalogReturnMode = Literal["count", "items", "count_and_items"]
 
 
 class DomainRequest(TypedDict):
@@ -55,6 +56,25 @@ class DomainDecision(TypedDict):
     missing_conditions: list[str]
 
 
+class CatalogItem(TypedDict):
+    """결정론적 상품 카탈로그 조회가 반환한 최소 상품 항목."""
+
+    product_code: str
+    official_name: str
+    provider: str
+
+
+class CatalogResult(TypedDict):
+    """Main Agent가 그대로 사용할 검증된 상품 카탈로그 조회 결과."""
+
+    route: Literal["browse_catalog"]
+    provider: str | None
+    return_mode: CatalogReturnMode
+    total_count: int
+    items: list[CatalogItem]
+    catalog_version: str
+
+
 class DomainResult(TypedDict):
     """State와 API 조립에 사용하는 전체 도메인 실행 결과."""
 
@@ -64,6 +84,7 @@ class DomainResult(TypedDict):
     evidence: list[EvidenceChunk]
     calculations: list[CalculationResult]
     warnings: list[str]
+    catalog_result: NotRequired[CatalogResult]
     error: NotRequired[str]
 
 
@@ -74,6 +95,7 @@ class DomainToolResult(TypedDict):
     execution_status: ExecutionStatus
     decision: NotRequired[DomainDecision]
     warnings: list[str]
+    catalog_result: NotRequired[CatalogResult]
     error: NotRequired[str]
 
 
@@ -83,6 +105,7 @@ def validate_domain_result(result: DomainResult) -> None:
     execution_status = result["execution_status"]
     has_decision = "decision" in result
     has_error = "error" in result
+    has_catalog_result = "catalog_result" in result
 
     if execution_status == "completed":
         if not has_decision:
@@ -96,6 +119,8 @@ def validate_domain_result(result: DomainResult) -> None:
             raise ValueError("실패한 결과에는 정제된 error가 필요합니다.")
         if result["evidence"] or result["calculations"]:
             raise ValueError("실패한 결과의 근거와 계산 기록은 비어 있어야 합니다.")
+        if has_catalog_result:
+            raise ValueError("실패한 결과에는 카탈로그 조회 결과를 포함할 수 없습니다.")
 
     if not has_decision:
         return
@@ -107,3 +132,41 @@ def validate_domain_result(result: DomainResult) -> None:
             raise ValueError("확정되거나 적용되지 않는 판단에는 누락 조건이 없어야 합니다.")
     elif not missing_conditions:
         raise ValueError("조건부이거나 미확정인 판단에는 누락 조건이 필요합니다.")
+
+    if has_catalog_result:
+        _validate_catalog_result(result)
+
+
+def _validate_catalog_result(result: DomainResult) -> None:
+    """카탈로그 결과의 도메인·개수·목록 일관성을 검증한다."""
+
+    if result["domain"] != "product":
+        raise ValueError("카탈로그 조회 결과는 product 도메인에만 포함할 수 있습니다.")
+    if result["decision"]["status"] != "determined":
+        raise ValueError("카탈로그 조회 결과는 확정 판단이어야 합니다.")
+    if result["calculations"]:
+        raise ValueError("카탈로그 조회 결과에는 계산 기록을 포함할 수 없습니다.")
+    if not result["evidence"]:
+        raise ValueError("카탈로그 조회 결과에는 검증된 조회 근거가 필요합니다.")
+
+    catalog_result = result["catalog_result"]
+    if catalog_result["route"] != "browse_catalog":
+        raise ValueError("카탈로그 조회 route가 올바르지 않습니다.")
+    if catalog_result["total_count"] < 0:
+        raise ValueError("카탈로그 상품 개수는 음수일 수 없습니다.")
+    if not catalog_result["catalog_version"].strip():
+        raise ValueError("카탈로그 버전이 필요합니다.")
+
+    items = catalog_result["items"]
+    if catalog_result["return_mode"] == "count":
+        if items:
+            raise ValueError("count 결과에는 상품 목록을 포함할 수 없습니다.")
+    elif len(items) != catalog_result["total_count"]:
+        raise ValueError("카탈로그 상품 개수와 목록 길이가 일치하지 않습니다.")
+
+    codes = [item["product_code"] for item in items]
+    if len(codes) != len(set(codes)):
+        raise ValueError("카탈로그 상품 코드는 중복될 수 없습니다.")
+    provider = catalog_result["provider"]
+    if provider is not None and any(item["provider"] != provider for item in items):
+        raise ValueError("카탈로그 상품의 운용사가 조회 조건과 일치하지 않습니다.")

@@ -3,6 +3,9 @@
 from pension_agent.agent.contracts.answer import AgentAnswer
 from pension_agent.agent.contracts.domain import (
     CalculationResult,
+    CatalogItem,
+    CatalogResult,
+    CatalogReturnMode,
     DecisionStatus,
     DomainDecision,
     DomainName,
@@ -22,6 +25,9 @@ from pension_agent.agent.contracts.permissions import (
 __all__ = [
     "AgentAnswer",
     "CalculationResult",
+    "CatalogItem",
+    "CatalogResult",
+    "CatalogReturnMode",
     "DecisionStatus",
     "DomainDecision",
     "DomainName",

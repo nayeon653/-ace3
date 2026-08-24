@@ -62,6 +62,7 @@ class DomainAgentState(AgentState):
     objective: NotRequired[str]
     product_candidate_codes: NotRequired[list[str]]
     product_scoped_search_completed: NotRequired[bool]
+    product_catalog_result: NotRequired[DomainResult]
     search_result: NotRequired[SearchResult]
     domain_result: NotRequired[DomainResult]
 
@@ -581,6 +582,8 @@ def _allowed_product_tools(
     """현재 Product Agent 상태에서 실행 가능한 다음 Tool 이름을 반환한다."""
 
     search_call_count = _search_call_count(state)
+    if state.get("product_catalog_result") is not None:
+        return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
     if not state.get("product_candidate_codes"):
         if search_call_count == 0:
             return (lookup_tool_name, SEARCH_DOCUMENTS_TOOL_NAME)
@@ -605,6 +608,10 @@ def _product_tool_call_is_allowed(
 
     if call["name"] not in allowed_tools:
         return False
+    if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and not state.get("product_candidate_codes"):
+        if state.get("product_catalog_result") is not None:
+            return _is_product_catalog_submit_call(call)
+        return False
     if call["name"] != SEARCH_DOCUMENTS_TOOL_NAME:
         return True
     candidate_codes = state.get("product_candidate_codes", [])
@@ -616,6 +623,17 @@ def _product_tool_call_is_allowed(
     return product_code.strip().upper() in candidate_codes
 
 
+def _is_product_catalog_submit_call(call: ToolCall) -> bool:
+    """카탈로그 조회 후에는 검증값을 보존하는 확정 제출만 허용한다."""
+
+    args = call["args"]
+    return (
+        args.get("status") == "determined"
+        and args.get("missing_conditions") == []
+        and args.get("evidence_chunk_ids") == []
+    )
+
+
 def _product_next_tool_instruction(
     state: Mapping[str, Any],
     *,
@@ -624,6 +642,8 @@ def _product_next_tool_instruction(
     """Product Agent의 현재 단계에 맞는 다음 Tool 안내를 만든다."""
 
     search_call_count = _search_call_count(state)
+    if state.get("product_catalog_result") is not None:
+        return "검증된 상품 개수·목록을 determined로 최종 결과 제출 Tool에 제출하세요."
     if not state.get("product_candidate_codes"):
         if search_call_count == 0:
             return (
@@ -695,6 +715,34 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
     ) -> Command | str:
         search_result = runtime.state.get("search_result")
         if search_result is None:
+            if domain == "product":
+                try:
+                    catalog_result = runtime.state.get("product_catalog_result")
+                    if catalog_result is None:
+                        raise ValueError("검증된 카탈로그 결과가 없습니다.")
+                    if status != "determined" or missing_conditions or evidence_chunk_ids:
+                        raise ValueError("확정 카탈로그 결과의 제출 인자가 올바르지 않습니다.")
+                    result = catalog_result
+                    validate_domain_result(result)
+                except (TypeError, ValueError):
+                    return json.dumps(
+                        {"error": "상품 카탈로그 결과가 공통 계약을 위반했습니다."},
+                        ensure_ascii=False,
+                    )
+                if runtime.tool_call_id is None:
+                    raise ValueError("최종 Domain Agent 결과 제출 Tool 호출 ID가 없습니다.")
+                return Command(
+                    update={
+                        "domain_result": result,
+                        "messages": [
+                            ToolMessage(
+                                content=json.dumps({"status": "accepted"}, ensure_ascii=False),
+                                tool_call_id=runtime.tool_call_id,
+                                name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                            )
+                        ],
+                    }
+                )
             return json.dumps(
                 {"error": "search_documents Tool을 먼저 호출해야 합니다."},
                 ensure_ascii=False,

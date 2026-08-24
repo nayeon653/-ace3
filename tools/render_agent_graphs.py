@@ -111,15 +111,19 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
     lines.extend(
         (
             "",
-            '    subgraph catalog["HCX 상품 후보 식별"]',
+            '    subgraph catalog["HCX 카탈로그 Query 계획 · Python 조회"]',
             (
                 '        catalog_lookup["lookup_product_codes"] --> '
                 f'catalog_hcx["{MAIN_SUPERVISOR_HCX_CONFIG.model} model"]'
             ),
             '        product_catalog["상품 카탈로그"] --> catalog_hcx',
+            '        catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]',
+            '        catalog_query --> catalog_execute["Python 정확 조회"]',
+            "        product_catalog --> catalog_execute",
+            '        catalog_execute --> catalog_result["CatalogResult"]',
             "    end",
             f"    {product_node} --> catalog_lookup",
-            "    catalog_lookup --> product_catalog",
+            f"    catalog_result --> {product_node}",
         )
     )
     lines.extend(

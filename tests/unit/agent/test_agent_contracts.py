@@ -61,6 +61,48 @@ def test_domain_tool_result_excludes_evidence_and_calculations() -> None:
     assert tool_result["decision"]["conclusion"] == "이전할 수 있습니다."
 
 
+def test_domain_tool_result_includes_verified_catalog_result() -> None:
+    result: DomainResult = {
+        "domain": "product",
+        "execution_status": "completed",
+        "decision": {
+            "status": "determined",
+            "conclusion": "미래에셋 상품 1개를 조회했습니다.",
+            "missing_conditions": [],
+        },
+        "evidence": [
+            {
+                "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+                "source_file_name": "product_catalog.json",
+                "title": "검증된 상품 카탈로그 조회 결과",
+                "locator": "provider=미래에셋;catalog_version=v1",
+                "content": "결정론적 카탈로그 결과",
+            }
+        ],
+        "calculations": [],
+        "warnings": [],
+        "catalog_result": {
+            "route": "browse_catalog",
+            "provider": "미래에셋",
+            "return_mode": "count_and_items",
+            "total_count": 1,
+            "items": [
+                {
+                    "product_code": "KR510902511M",
+                    "official_name": "미래에셋장기성장포커스",
+                    "provider": "미래에셋",
+                }
+            ],
+            "catalog_version": "v1",
+        },
+    }
+
+    tool_result = build_domain_tool_result(result)
+
+    assert tool_result["catalog_result"] == result["catalog_result"]
+    assert "evidence" not in tool_result
+
+
 def test_invalid_domain_result_combinations_raise() -> None:
     missing_decision = _completed_result()
     del missing_decision["decision"]
