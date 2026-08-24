@@ -9,7 +9,12 @@ import pytest
 from pension_agent.agent import runtime
 from pension_agent.agent.orchestration.service import SupervisorRunner
 from pension_agent.agent.search import LimitedChunkRetriever, LimitedQueryEmbedder
-from pension_agent.config import AgentRuntimeConfig
+from pension_agent.config import (
+    DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+    MAIN_SUPERVISOR_HCX_CONFIG,
+    PRODUCT_REACT_HCX_CONFIG,
+    AgentRuntimeConfig,
+)
 
 
 @dataclass
@@ -61,7 +66,9 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
 ) -> None:
     closed: list[str] = []
     created: dict[str, Any] = {}
-    model = object()
+    supervisor_model = object()
+    default_domain_model = object()
+    product_react_model = object()
     embedder = object()
     qdrant_client = AsyncClosable("qdrant", closed)
     retriever = object()
@@ -72,8 +79,15 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
         created["kiwi_prewarmed"] = True
 
     def create_model(**kwargs: Any) -> object:
-        created["model_factory"] = kwargs
-        return model
+        created.setdefault("model_factories", []).append(kwargs)
+        config = kwargs["config"]
+        if config is MAIN_SUPERVISOR_HCX_CONFIG:
+            return supervisor_model
+        if config is DEFAULT_DOMAIN_AGENT_HCX_CONFIG:
+            return default_domain_model
+        if config is PRODUCT_REACT_HCX_CONFIG:
+            return product_react_model
+        raise AssertionError("알 수 없는 HCX 역할 설정")
 
     def create_embedder(**kwargs: Any) -> object:
         created["embedder_factory"] = kwargs
@@ -136,8 +150,15 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     embedding_http = created["embedding-http"]
     assert created["kiwi_prewarmed"] is True
     assert created["http_limits"] == [2, 3]
-    assert created["model_factory"]["http_client"] is model_http.sync
-    assert created["model_factory"]["http_async_client"] is model_http.async_
+    assert [call["config"] for call in created["model_factories"]] == [
+        MAIN_SUPERVISOR_HCX_CONFIG,
+        DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+        PRODUCT_REACT_HCX_CONFIG,
+    ]
+    assert all(call["http_client"] is model_http.sync for call in created["model_factories"])
+    assert all(
+        call["http_async_client"] is model_http.async_ for call in created["model_factories"]
+    )
     assert created["embedder_factory"]["http_client"] is embedding_http.sync
     assert created["embedder_factory"]["http_async_client"] is embedding_http.async_
     assert created["qdrant_pool_size"] == 5
@@ -158,6 +179,11 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     assert created["tax_payout"]["model_concurrency"] is shared_model_limit
     assert created["product"]["model_concurrency"] is shared_model_limit
     assert created["supervisor"]["model_concurrency"] is shared_model_limit
+    assert created["policy"]["model"] is default_domain_model
+    assert created["tax_payout"]["model"] is default_domain_model
+    assert created["product"]["model"] is product_react_model
+    assert created["product"]["catalog_planner_model"] is default_domain_model
+    assert created["supervisor"]["model"] is supervisor_model
     assert [tool.name for tool in created["supervisor"]["tools"]] == [
         "analyze_policy",
         "analyze_tax_payout",

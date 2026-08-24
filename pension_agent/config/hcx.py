@@ -1,5 +1,7 @@
 """HyperCLOVA X 모델 동작과 연결 설정."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +16,7 @@ class ChatClovaXConfig(BaseModel):
     temperature: float = Field(ge=0, le=1)
     timeout_seconds: float = Field(gt=0)
     max_retries: int = Field(ge=0)
+    thinking_effort: Literal["none", "low", "mid", "high"] | None = None
 
 
 class ClovaEmbeddingConfig(BaseModel):
@@ -43,8 +46,26 @@ class ClovaStudioConnection(BaseSettings):
     api_base_url: str = ""
 
 
-# 실연결 검증 전 임의로 정한 초기값이며 후속 검증은 이 상수의 변경으로 반영한다.
+# 역할별 모델 선택과 생성 설정은 코드 리뷰와 Git 이력에서 함께 관리한다.
 MAIN_SUPERVISOR_HCX_CONFIG = ChatClovaXConfig(
+    model="HCX-007",
+    max_tokens=1024,
+    temperature=0.1,
+    timeout_seconds=30.0,
+    max_retries=2,
+    thinking_effort="none",
+)
+
+PRODUCT_REACT_HCX_CONFIG = ChatClovaXConfig(
+    model="HCX-007",
+    max_tokens=1024,
+    temperature=0.1,
+    timeout_seconds=30.0,
+    max_retries=2,
+    thinking_effort="none",
+)
+
+DEFAULT_DOMAIN_AGENT_HCX_CONFIG = ChatClovaXConfig(
     model="HCX-005",
     max_tokens=1024,
     temperature=0.1,

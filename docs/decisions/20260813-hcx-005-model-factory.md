@@ -1,11 +1,12 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-13
 type: architecture
 related:
   - 20260813-main-supervisor-domain-agent-tools.md
 supersedes: []
-superseded-by: []
+superseded-by:
+  - 20260824-96-selective-hcx-007-models.md
 ---
 
 # HCX-005 단일 모델과 ChatClovaX Factory를 채택

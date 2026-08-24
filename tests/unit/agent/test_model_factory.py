@@ -12,10 +12,14 @@ from pension_agent.agent.model_factory import (
     create_chat_clovax,
 )
 from pension_agent.agent.orchestration import create_main_supervisor
-from pension_agent.config import MAIN_SUPERVISOR_HCX_CONFIG, ClovaStudioConnection
+from pension_agent.config import (
+    DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+    MAIN_SUPERVISOR_HCX_CONFIG,
+    ClovaStudioConnection,
+)
 
 
-def test_factory_creates_configured_hcx_005_without_network_call() -> None:
+def test_factory_creates_configured_hcx_007_without_network_call() -> None:
     connection = ClovaStudioConnection(
         api_key=SecretStr("test-secret-key"),
         api_base_url="https://example.test/v1/openai",
@@ -27,16 +31,34 @@ def test_factory_creates_configured_hcx_005_without_network_call() -> None:
     )
 
     assert isinstance(model, ChatClovaX)
-    assert model.model_name == "HCX-005"
+    assert model.model_name == "HCX-007"
     assert model.max_tokens == 1024
     assert model.temperature == 0.1
     assert model.request_timeout == 30.0
     assert model.max_retries == 2
+    assert model.reasoning_effort == "none"
+    assert model.thinking == {"effort": "none"}
     assert "test-secret-key" not in repr(model)
 
     supervisor = create_main_supervisor(model=model, tools=[])
 
     assert supervisor.name == "main_supervisor"
+
+
+def test_factory_omits_thinking_for_hcx_005_domain_model() -> None:
+    connection = ClovaStudioConnection(
+        api_key=SecretStr("test-secret-key"),
+        api_base_url="https://example.test/v1/openai",
+    )
+
+    model = create_chat_clovax(
+        config=DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+        connection=connection,
+    )
+
+    assert model.model_name == "HCX-005"
+    assert model.reasoning_effort is None
+    assert model.thinking is None
 
 
 def test_factory_reports_missing_api_key_without_secret_or_network() -> None:

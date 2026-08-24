@@ -6,7 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from pension_agent.config import (
+    DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
+    PRODUCT_REACT_HCX_CONFIG,
     ChatClovaXConfig,
     ClovaStudioConnection,
 )
@@ -14,15 +16,23 @@ from pension_agent.config import (
 
 def test_main_supervisor_config_is_versioned_and_immutable() -> None:
     assert MAIN_SUPERVISOR_HCX_CONFIG == ChatClovaXConfig(
-        model="HCX-005",
+        model="HCX-007",
         max_tokens=1024,
         temperature=0.1,
         timeout_seconds=30.0,
         max_retries=2,
+        thinking_effort="none",
     )
 
     with pytest.raises(ValidationError, match="frozen"):
         MAIN_SUPERVISOR_HCX_CONFIG.model = "HCX-DASH-002"  # type: ignore[misc]
+
+
+def test_role_configs_limit_hcx_007_to_supervisor_and_product_react() -> None:
+    assert PRODUCT_REACT_HCX_CONFIG.model == "HCX-007"
+    assert PRODUCT_REACT_HCX_CONFIG.thinking_effort == "none"
+    assert DEFAULT_DOMAIN_AGENT_HCX_CONFIG.model == "HCX-005"
+    assert DEFAULT_DOMAIN_AGENT_HCX_CONFIG.thinking_effort is None
 
 
 def test_function_calling_config_requires_at_least_1024_tokens() -> None:
@@ -48,7 +58,7 @@ def test_connection_reads_only_authentication_and_endpoint_from_environment(
     assert connection.api_key is not None
     assert connection.api_key.get_secret_value() == "test-secret-key"
     assert connection.api_base_url == "https://example.test/v1/openai"
-    assert MAIN_SUPERVISOR_HCX_CONFIG.model == "HCX-005"
+    assert MAIN_SUPERVISOR_HCX_CONFIG.model == "HCX-007"
     assert "test-secret-key" not in repr(connection)
 
 
