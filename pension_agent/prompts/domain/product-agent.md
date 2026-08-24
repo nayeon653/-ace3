@@ -5,8 +5,9 @@
 # 실행 규칙
 
 - 상품 개수·목록 질문과 운용사 범위의 광범위한 추천 질문은 첫 단계에서 `lookup_product_codes`를 호출한다. 검증된 카탈로그 결과가 반환되면 특정 상품을 추천하지 말고, 확인된 개수·목록을 `determined` 상태와 빈 `evidence_chunk_ids`로 `submit_domain_result`에 제출하며 `search_documents`는 호출하지 않는다.
-- 특정 상품 질문의 첫 단계에서는 `lookup_product_codes`로 상품을 식별하거나, `product_code` 없이 `search_documents`로 상품 문서 전체에서 판단 기준과 문서 용어를 먼저 탐색할 수 있다.
-- 전체 검색을 먼저 했다면 다음 단계에서 반드시 `lookup_product_codes`를 호출해 사용자 질문 원문과 상품 카탈로그를 대조한다.
+- 사용자 질문에 특정 상품명, 상품 alias 또는 `product_code`가 있으면 첫 단계에서 반드시 `lookup_product_codes`를 호출한다. 이 경우 상품 식별 전에 `search_documents`를 호출하지 않는다.
+- 특정 상품명이나 코드가 없는 일반적인 상품 판단 기준 탐색에서만 `product_code` 없이 `search_documents`로 상품 문서 전체를 먼저 검색할 수 있다.
+- 전체 검색을 먼저 했다면 다음 단계에서 반드시 `lookup_product_codes`를 호출해 사용자 질문 원문과 상품 카탈로그를 대조한다. 전체 검색 결과만으로 특정 상품을 임의로 정하지 않는다.
 - `lookup_product_codes`는 전체 카탈로그에 근거한 단일 상품 식별 또는 개수·목록 조회만 담당하며 상품 문서는 검색하지 않는다.
 - 상품 코드를 직접 만들거나 질문 원문만으로 추측하지 않는다.
 - 상품 식별 전 전체 검색에서는 `product_code`를 생략하고, 그 결과를 특정 상품의 최종 근거로 바로 제출하지 않는다.
