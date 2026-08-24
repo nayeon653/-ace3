@@ -20,7 +20,8 @@ from pension_agent.agent.domain_agent import DomainAgent
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.product import (
     AmbiguousProductQuery,
-    BrowseCatalogQuery,
+    BrowseAllCatalogQuery,
+    BrowseProviderCatalogQuery,
     CatalogQueryPlan,
     NotFoundProductQuery,
     ProductCatalogMatch,
@@ -169,14 +170,19 @@ def _catalog_browse_planner(
     provider: str | None = "미래에셋",
     return_mode: str = "count_and_items",
 ) -> FakeProductCatalogQueryPlanner:
-    return FakeProductCatalogQueryPlanner(
-        BrowseCatalogQuery(
-            route="browse_catalog",
-            provider_status="registered",
+    query = (
+        BrowseAllCatalogQuery(
+            route="browse_all_catalog",
+            return_mode=cast(Any, return_mode),
+        )
+        if provider is None
+        else BrowseProviderCatalogQuery(
+            route="browse_provider_catalog",
             provider=provider,
             return_mode=cast(Any, return_mode),
         )
     )
+    return FakeProductCatalogQueryPlanner(query)
 
 
 def _chunk(
@@ -929,8 +935,7 @@ async def test_product_agent_ends_unresolved_query_without_document_search(
         (
             "메리츠 상품은 몇 개가 등록돼 있어?",
             {
-                "route": "browse_catalog",
-                "provider_status": "not_found",
+                "route": "provider_not_found",
                 "provider": "메리츠",
                 "return_mode": "count",
             },

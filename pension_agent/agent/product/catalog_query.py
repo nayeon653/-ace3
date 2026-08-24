@@ -7,7 +7,7 @@ import json
 from importlib import resources
 from typing import Annotated, Any, Literal, Protocol
 
-from langchain.messages import AIMessage, HumanMessage, SystemMessage
+from langchain.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain.tools import tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
@@ -23,12 +23,22 @@ from pension_agent.retrieval import (
 
 PRODUCT_CATALOG_QUERY_TOOL_NAME = "return_product_catalog_query"
 _PRODUCT_CATALOG_MARKER = "{{PRODUCT_CATALOG_JSON}}"
+_ALL_CATALOG_SCOPE_PREFIXES = (
+    "전체 상품",
+    "모든 상품",
+    "전체 카탈로그",
+    "모든 운용사",
+    "전 운용사",
+)
 ProductResolutionStatus = Literal["single", "not_found", "ambiguous"]
-ProviderResolutionStatus = Literal["registered", "not_found"]
 
 
 class CatalogQueryPlanError(RuntimeError):
     """HCX의 카탈로그 조회 계획을 안전하게 사용할 수 없는 경우."""
+
+
+class _CatalogQueryCorrectionRequired(ProductCatalogError):
+    """HCX가 누락한 조회 범위를 한 번 교정해야 하는 경우."""
 
 
 class _CatalogQueryBase(BaseModel):
@@ -67,24 +77,39 @@ UnresolvedProductQuery = NotFoundProductQuery | AmbiguousProductQuery
 ResolveProductQuery = SingleProductQuery | UnresolvedProductQuery
 
 
-class BrowseCatalogQuery(_CatalogQueryBase):
-    """운용사 등록 상태와 상품 개수·목록 조회 계획."""
+class BrowseAllCatalogQuery(_CatalogQueryBase):
+    """운용사 조건 없이 전체 상품 개수·목록을 조회하는 계획."""
 
-    route: Literal["browse_catalog"]
-    provider_status: ProviderResolutionStatus
-    provider: str | None = None
+    route: Literal["browse_all_catalog"]
     return_mode: CatalogReturnMode
 
-    def model_post_init(self, context: object, /) -> None:
-        """미등록 운용사 상태에는 확인할 이름을 강제한다."""
 
-        del context
-        if self.provider_status == "not_found" and self.provider is None:
-            raise ValueError("미등록 운용사 조회에는 운용사명이 필요합니다.")
+class BrowseProviderCatalogQuery(_CatalogQueryBase):
+    """등록된 공식 운용사의 상품 개수·목록을 조회하는 계획."""
+
+    route: Literal["browse_provider_catalog"]
+    provider: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    return_mode: CatalogReturnMode
+
+
+class UnregisteredProviderQuery(_CatalogQueryBase):
+    """카탈로그에 없는 운용사 조회를 검색 없이 종료하는 계획."""
+
+    route: Literal["provider_not_found"]
+    provider: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    return_mode: CatalogReturnMode
+
+
+BrowseCatalogQuery = BrowseAllCatalogQuery | BrowseProviderCatalogQuery | UnregisteredProviderQuery
 
 
 CatalogQueryPlan = Annotated[
-    SingleProductQuery | NotFoundProductQuery | AmbiguousProductQuery | BrowseCatalogQuery,
+    SingleProductQuery
+    | NotFoundProductQuery
+    | AmbiguousProductQuery
+    | BrowseAllCatalogQuery
+    | BrowseProviderCatalogQuery
+    | UnregisteredProviderQuery,
     Field(discriminator="route"),
 ]
 
@@ -169,23 +194,38 @@ class HCXProductCatalogQueryPlanner:
         ]
 
         async def invoke() -> AIMessage:
-            return await self._model.ainvoke(messages)
+            if self._model_concurrency is None:
+                return await self._model.ainvoke(messages)
+            return await self._model_concurrency.arun(lambda: self._model.ainvoke(messages))
 
         try:
             async with asyncio.timeout_at(deadline):
-                if self._model_concurrency is None:
+                response = await invoke()
+                try:
+                    query = self._parse_and_validate_response(response, question=question)
+                except _CatalogQueryCorrectionRequired:
+                    tool_call = response.tool_calls[0]
+                    messages.extend(
+                        [
+                            response,
+                            ToolMessage(
+                                content=(
+                                    "질문에 명시적인 전체 카탈로그 범위가 없습니다. "
+                                    "운용사명을 포함한 올바른 운용사 route로 교정하세요."
+                                ),
+                                tool_call_id=tool_call["id"],
+                                name=PRODUCT_CATALOG_QUERY_TOOL_NAME,
+                            ),
+                            HumanMessage(
+                                content=(
+                                    "browse_all_catalog를 사용하지 말고 질문의 운용사명을 "
+                                    "포함해 조회 계획을 다시 반환하세요."
+                                )
+                            ),
+                        ]
+                    )
                     response = await invoke()
-                else:
-                    response = await self._model_concurrency.arun(invoke)
-            calls = [
-                call
-                for call in response.tool_calls
-                if call["name"] == PRODUCT_CATALOG_QUERY_TOOL_NAME
-            ]
-            if len(calls) != 1 or len(response.tool_calls) != 1:
-                raise CatalogQueryPlanError("HCX 카탈로그 Query 응답이 올바르지 않습니다.")
-            query = CatalogQueryEnvelope.model_validate(calls[0]["args"]).query
-            query = self._validate_query(query)
+                    query = self._parse_and_validate_response(response, question=question)
         except TimeoutError:
             raise
         except CatalogQueryPlanError:
@@ -203,21 +243,52 @@ class HCXProductCatalogQueryPlanner:
             raise CatalogQueryPlanError("HCX 카탈로그 Query 응답이 올바르지 않습니다.") from None
         return query
 
-    def _validate_query(self, query: CatalogQueryPlan) -> CatalogQueryPlan:
-        if isinstance(query, BrowseCatalogQuery):
-            if query.provider_status == "not_found":
-                if query.provider is None:
-                    raise ProductCatalogError("미등록 운용사명이 필요합니다.")
-                if self._catalog.has_provider(query.provider):
-                    raise ProductCatalogError("등록된 운용사를 미등록으로 처리할 수 없습니다.")
-                return query
-            result = self._catalog.query(
-                provider=query.provider,
-                return_mode=query.return_mode,
-            )
-            return query.model_copy(
-                update={"provider_status": "registered", "provider": result.provider}
-            )
+    def _parse_and_validate_response(
+        self,
+        response: AIMessage,
+        *,
+        question: str,
+    ) -> CatalogQueryPlan:
+        calls = [
+            call for call in response.tool_calls if call["name"] == PRODUCT_CATALOG_QUERY_TOOL_NAME
+        ]
+        if len(calls) != 1 or len(response.tool_calls) != 1:
+            raise CatalogQueryPlanError("HCX 카탈로그 Query 응답이 올바르지 않습니다.")
+        query = CatalogQueryEnvelope.model_validate(calls[0]["args"]).query
+        return self._validate_query(query, question=question)
+
+    def _validate_query(
+        self,
+        query: CatalogQueryPlan,
+        *,
+        question: str,
+    ) -> CatalogQueryPlan:
+        if isinstance(query, UnregisteredProviderQuery):
+            if self._catalog.has_provider(query.provider):
+                raise ProductCatalogError("등록된 운용사를 미등록으로 처리할 수 없습니다.")
+            return query
+        if isinstance(query, BrowseAllCatalogQuery):
+            if not question.strip().startswith(_ALL_CATALOG_SCOPE_PREFIXES):
+                raise _CatalogQueryCorrectionRequired(
+                    "전체 카탈로그 범위가 명시되지 않은 질문입니다."
+                )
+            self._catalog.query(provider=None, return_mode=query.return_mode)
+            return query
+        if isinstance(query, BrowseProviderCatalogQuery):
+            try:
+                result = self._catalog.query(
+                    provider=query.provider,
+                    return_mode=query.return_mode,
+                )
+            except ProductCatalogError:
+                return UnregisteredProviderQuery(
+                    route="provider_not_found",
+                    provider=query.provider,
+                    return_mode=query.return_mode,
+                )
+            if result.provider is None:
+                raise ProductCatalogError("등록 운용사 조회에 운용사명이 없습니다.")
+            return query.model_copy(update={"provider": result.provider})
         if isinstance(query, (NotFoundProductQuery, AmbiguousProductQuery)):
             normalized_provider = None
             if query.provider is not None:

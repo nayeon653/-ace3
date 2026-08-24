@@ -27,11 +27,13 @@ from pension_agent.agent.product.catalog_matcher import (
     ProductCatalogMatchError,
 )
 from pension_agent.agent.product.catalog_query import (
-    BrowseCatalogQuery,
+    BrowseAllCatalogQuery,
+    BrowseProviderCatalogQuery,
     CatalogQueryPlanError,
     HCXProductCatalogQueryPlanner,
     ProductCatalogQueryPlanner,
     SingleProductQuery,
+    UnregisteredProviderQuery,
     UnresolvedProductQuery,
 )
 from pension_agent.agent.search import SearchRunner
@@ -131,16 +133,17 @@ def _create_product_catalog_query_tool(
             result = _failed_product_result("상품 카탈로그 조회 계획을 확정하지 못했습니다.")
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
 
-        if isinstance(query, BrowseCatalogQuery):
-            if query.provider_status == "not_found":
-                result = _terminal_unregistered_provider_result(query)
-                return _catalog_lookup_command(
-                    runtime.tool_call_id,
-                    payload={"query": query.model_dump()},
-                    result=result,
-                )
+        if isinstance(query, UnregisteredProviderQuery):
+            result = _terminal_unregistered_provider_result(query)
+            return _catalog_lookup_command(
+                runtime.tool_call_id,
+                payload={"query": query.model_dump()},
+                result=result,
+            )
+        if isinstance(query, (BrowseAllCatalogQuery, BrowseProviderCatalogQuery)):
+            provider = query.provider if isinstance(query, BrowseProviderCatalogQuery) else None
             catalog_result = catalog.query(
-                provider=query.provider,
+                provider=provider,
                 return_mode=query.return_mode,
             )
             result = _catalog_domain_result(catalog_result)
@@ -346,11 +349,9 @@ def _terminal_product_resolution_result(query: UnresolvedProductQuery) -> Domain
     }
 
 
-def _terminal_unregistered_provider_result(query: BrowseCatalogQuery) -> DomainResult:
+def _terminal_unregistered_provider_result(query: UnregisteredProviderQuery) -> DomainResult:
     """미등록 운용사 조회를 문서 검색 없이 종료한다."""
 
-    if query.provider is None:
-        raise ValueError("미등록 운용사명이 없습니다.")
     return {
         "domain": "product",
         "execution_status": "completed",
