@@ -11,12 +11,15 @@ from langchain_core.runnables import Runnable
 
 from pension_agent.agent.product import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
+    AmbiguousProductQuery,
     BrowseCatalogQuery,
     CatalogQueryPlanError,
     HCXProductCatalogQueryPlanner,
-    ResolveProductQuery,
+    NotFoundProductQuery,
+    SingleProductQuery,
     load_product_catalog_query_prompt,
 )
+from pension_agent.agent.product.catalog_query import _return_product_catalog_query
 from pension_agent.retrieval import load_product_catalog
 
 
@@ -61,6 +64,21 @@ def test_query_planner_forces_one_structured_tool() -> None:
     HCXProductCatalogQueryPlanner(model=model, catalog=load_product_catalog())
 
     assert model.bindings == [{"tool_choice": PRODUCT_CATALOG_QUERY_TOOL_NAME}]
+
+
+def test_query_tool_schema_requires_code_only_for_single_product() -> None:
+    schema = _return_product_catalog_query.tool_call_schema.model_json_schema()
+    definitions = schema["$defs"]
+
+    assert "product_code" in definitions["SingleProductQuery"]["required"]
+    assert "product_code" not in definitions["NotFoundProductQuery"]["properties"]
+    assert "product_code" not in definitions["AmbiguousProductQuery"]["properties"]
+    assert schema["properties"]["query"]["anyOf"] == [
+        {"$ref": "#/$defs/SingleProductQuery"},
+        {"$ref": "#/$defs/NotFoundProductQuery"},
+        {"$ref": "#/$defs/AmbiguousProductQuery"},
+        {"$ref": "#/$defs/BrowseCatalogQuery"},
+    ]
 
 
 @pytest.mark.anyio
@@ -119,7 +137,7 @@ async def test_query_planner_resolves_one_catalog_product() -> None:
         deadline=asyncio.get_running_loop().time() + 5,
     )
 
-    assert query == ResolveProductQuery(
+    assert query == SingleProductQuery(
         route="resolve_product",
         resolution_status="single",
         provider="미래에셋",
@@ -132,12 +150,13 @@ async def test_query_planner_resolves_one_catalog_product() -> None:
 async def test_query_planner_preserves_safe_unresolved_status(
     resolution_status: str,
 ) -> None:
+    route = "product_not_found" if resolution_status == "not_found" else "product_ambiguous"
     planner = HCXProductCatalogQueryPlanner(
         model=BindingFakeModel(
             responses=[
                 _query_response(
                     {
-                        "route": "resolve_product",
+                        "route": route,
                         "resolution_status": resolution_status,
                         "provider": "미래에셋",
                     }
@@ -153,8 +172,14 @@ async def test_query_planner_preserves_safe_unresolved_status(
         deadline=asyncio.get_running_loop().time() + 5,
     )
 
-    assert query == ResolveProductQuery(
-        route="resolve_product",
+    expected_type = (
+        NotFoundProductQuery if resolution_status == "not_found" else AmbiguousProductQuery
+    )
+    expected_route = (
+        "product_not_found" if resolution_status == "not_found" else "product_ambiguous"
+    )
+    assert query == expected_type(
+        route=expected_route,
         resolution_status=resolution_status,
         provider="미래에셋",
     )
@@ -226,12 +251,12 @@ async def test_query_planner_verifies_unregistered_provider_status() -> None:
             "provider": "미래에셋",
         },
         {
-            "route": "resolve_product",
+            "route": "product_not_found",
             "resolution_status": "not_found",
             "product_code": "KR510902511M",
         },
         {
-            "route": "resolve_product",
+            "route": "product_ambiguous",
             "resolution_status": "ambiguous",
             "product_code": "KR510902511M",
         },

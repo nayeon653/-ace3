@@ -35,28 +35,36 @@ class _CatalogQueryBase(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
 
 
-class ResolveProductQuery(_CatalogQueryBase):
-    """특정 상품을 단일 코드로 식별하거나 안전한 미식별 상태로 정규화한 조회."""
+class SingleProductQuery(_CatalogQueryBase):
+    """카탈로그의 단일 상품 코드로 식별한 조회."""
 
     route: Literal["resolve_product"]
-    resolution_status: ProductResolutionStatus
+    resolution_status: Literal["single"]
     provider: str | None = None
-    product_code: (
-        Annotated[
-            str,
-            StringConstraints(strip_whitespace=True, min_length=1, to_upper=True),
-        ]
-        | None
-    ) = None
+    product_code: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, to_upper=True),
+    ]
 
-    def model_post_init(self, context: object, /) -> None:
-        """식별 상태와 상품 코드의 허용 조합을 제한한다."""
 
-        del context
-        if self.resolution_status == "single" and self.product_code is None:
-            raise ValueError("single 상품 식별에는 상품 코드 하나가 필요합니다.")
-        if self.resolution_status != "single" and self.product_code is not None:
-            raise ValueError("미식별 상품 조회에는 상품 코드를 포함할 수 없습니다.")
+class NotFoundProductQuery(_CatalogQueryBase):
+    """카탈로그에 없는 특정 상품을 코드 없이 종료하는 조회."""
+
+    route: Literal["product_not_found"]
+    resolution_status: Literal["not_found"]
+    provider: str | None = None
+
+
+class AmbiguousProductQuery(_CatalogQueryBase):
+    """후보가 여러 개인 특정 상품을 코드 없이 종료하는 조회."""
+
+    route: Literal["product_ambiguous"]
+    resolution_status: Literal["ambiguous"]
+    provider: str | None = None
+
+
+UnresolvedProductQuery = NotFoundProductQuery | AmbiguousProductQuery
+ResolveProductQuery = SingleProductQuery | UnresolvedProductQuery
 
 
 class BrowseCatalogQuery(_CatalogQueryBase):
@@ -76,7 +84,7 @@ class BrowseCatalogQuery(_CatalogQueryBase):
 
 
 CatalogQueryPlan = Annotated[
-    ResolveProductQuery | BrowseCatalogQuery,
+    SingleProductQuery | NotFoundProductQuery | AmbiguousProductQuery | BrowseCatalogQuery,
     Field(discriminator="route"),
 ]
 
@@ -88,7 +96,7 @@ class CatalogQueryEnvelope(_CatalogQueryBase):
 
 
 @tool(PRODUCT_CATALOG_QUERY_TOOL_NAME, args_schema=CatalogQueryEnvelope)
-def _return_product_catalog_query(query: dict[str, Any]) -> str:
+def _return_product_catalog_query(query: CatalogQueryPlan) -> str:
     """상품 카탈로그 조회 계획을 구조화해 반환한다."""
 
     del query
@@ -210,7 +218,7 @@ class HCXProductCatalogQueryPlanner:
             return query.model_copy(
                 update={"provider_status": "registered", "provider": result.provider}
             )
-        if query.resolution_status != "single":
+        if isinstance(query, (NotFoundProductQuery, AmbiguousProductQuery)):
             normalized_provider = None
             if query.provider is not None:
                 normalized_provider = self._catalog.query(
@@ -218,12 +226,10 @@ class HCXProductCatalogQueryPlanner:
                     return_mode="count",
                 ).provider
             return query.model_copy(update={"provider": normalized_provider})
-        if query.product_code is None:
-            raise ProductCatalogError("단일 상품 식별에는 상품 코드가 필요합니다.")
         product = self._catalog.select_products([query.product_code])[0]
         if query.provider is not None and query.provider != product.provider:
             raise ProductCatalogError("상품 코드와 운용사가 일치하지 않습니다.")
-        return ResolveProductQuery(
+        return SingleProductQuery(
             route="resolve_product",
             resolution_status="single",
             provider=product.provider,

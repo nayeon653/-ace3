@@ -31,7 +31,8 @@ from pension_agent.agent.product.catalog_query import (
     CatalogQueryPlanError,
     HCXProductCatalogQueryPlanner,
     ProductCatalogQueryPlanner,
-    ResolveProductQuery,
+    SingleProductQuery,
+    UnresolvedProductQuery,
 )
 from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
@@ -148,15 +149,13 @@ def _create_product_catalog_query_tool(
                 payload={"query": query.model_dump(), "catalog_result": result["catalog_result"]},
                 pending_catalog_result=result,
             )
-        if query.resolution_status != "single":
+        if not isinstance(query, SingleProductQuery):
             result = _terminal_product_resolution_result(query)
             return _catalog_lookup_command(
                 runtime.tool_call_id,
                 payload={"query": query.model_dump()},
                 result=result,
             )
-        if query.product_code is None:
-            raise ValueError("단일 상품 식별 결과에 상품 코드가 없습니다.")
         return _catalog_lookup_command(
             runtime.tool_call_id,
             payload={"query": query.model_dump()},
@@ -317,7 +316,7 @@ def _catalog_domain_result(result: ProductCatalogResult) -> DomainResult:
     return domain_result
 
 
-def _terminal_product_resolution_result(query: ResolveProductQuery) -> DomainResult:
+def _terminal_product_resolution_result(query: UnresolvedProductQuery) -> DomainResult:
     """단일 상품을 확정하지 못한 Query를 문서 검색 없이 종료한다."""
 
     if query.resolution_status == "ambiguous":

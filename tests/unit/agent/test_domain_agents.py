@@ -19,10 +19,11 @@ from pension_agent.agent.contracts import DomainName, Permission, validate_domai
 from pension_agent.agent.domain_agent import DomainAgent
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.product import (
+    AmbiguousProductQuery,
     BrowseCatalogQuery,
     CatalogQueryPlan,
+    NotFoundProductQuery,
     ProductCatalogMatch,
-    ResolveProductQuery,
     create_product_agent,
     load_product_agent_prompt,
 )
@@ -898,12 +899,12 @@ async def test_product_agent_ends_unresolved_query_without_document_search(
             )
         ]
     )
-    planner = FakeProductCatalogQueryPlanner(
-        ResolveProductQuery(
-            route="resolve_product",
-            resolution_status=cast(Any, resolution_status),
-        )
+    query = (
+        NotFoundProductQuery(route="product_not_found", resolution_status="not_found")
+        if resolution_status == "not_found"
+        else AmbiguousProductQuery(route="product_ambiguous", resolution_status="ambiguous")
     )
+    planner = FakeProductCatalogQueryPlanner(query)
     agent = create_product_agent(
         model=model,
         search_service=cast(SearchRunner, search),
@@ -939,7 +940,7 @@ async def test_product_agent_ends_unresolved_query_without_document_search(
         (
             "새봄 연금펀드의 위험과 수수료를 알려줘.",
             {
-                "route": "resolve_product",
+                "route": "product_not_found",
                 "resolution_status": "not_found",
             },
             "completed",
