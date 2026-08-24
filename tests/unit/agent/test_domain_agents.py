@@ -707,50 +707,17 @@ async def test_product_agent_returns_deterministic_catalog_result_without_docume
 
 
 @pytest.mark.anyio
-async def test_product_agent_owns_missing_recommendation_conditions() -> None:
-    search = FakeSearchService(SearchResult(execution_status="completed"))
-    model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "conditional",
-                            "conclusion": "가장 좋은 상품을 추천합니다.",
-                            "missing_conditions": ["투자 기간", "위험 선호도"],
-                            "warnings": ["모델이 만든 경고"],
-                            "evidence_chunk_ids": [],
-                        },
-                        "id": "conditions-call",
-                        "type": "tool_call",
-                    }
-                ],
-            )
-        ]
-    )
-    agent = create_product_agent(
-        model=model,
-        search_service=cast(SearchRunner, search),
-        catalog_query_planner=_catalog_browse_planner(),
-    )
-
-    result = await agent({"question": "미래에셋 상품 추천", "objective": "미래에셋 상품 추천"})
-
-    assert result["decision"] == {
-        "status": "conditional",
-        "conclusion": "상품 추천을 위해 투자 조건을 확인해야 합니다.",
-        "missing_conditions": ["투자 기간", "위험 선호도"],
-    }
-    assert result["evidence"] == []
-    assert result["warnings"] == []
-    assert search.calls == []
-    assert model.invocation_count == 1
-
-
-@pytest.mark.anyio
-async def test_product_agent_overrides_determined_catalog_for_recommendation() -> None:
+@pytest.mark.parametrize(
+    ("question", "objective"),
+    [
+        ("미래에셋 상품 추천", "미래에셋 상품 추천"),
+        ("추천은 하지 말고 미래에셋 상품 목록만 알려줘", "미래에셋 상품 목록 조회"),
+    ],
+)
+async def test_product_agent_preserves_catalog_for_broad_product_requests(
+    question: str,
+    objective: str,
+) -> None:
     search = FakeSearchService(SearchResult(execution_status="completed"))
     model = ToolCallingFakeModel(
         responses=[
@@ -772,12 +739,12 @@ async def test_product_agent_overrides_determined_catalog_for_recommendation() -
                         "name": "submit_domain_result",
                         "args": {
                             "status": "determined",
-                            "conclusion": "상품 목록 중 하나를 추천합니다.",
+                            "conclusion": "검증된 카탈로그 상품 목록입니다.",
                             "missing_conditions": [],
                             "warnings": [],
                             "evidence_chunk_ids": [],
                         },
-                        "id": "conditions-call",
+                        "id": "catalog-submit",
                         "type": "tool_call",
                     }
                 ],
@@ -787,20 +754,88 @@ async def test_product_agent_overrides_determined_catalog_for_recommendation() -
     agent = create_product_agent(
         model=model,
         search_service=cast(SearchRunner, search),
-        catalog_query_planner=_catalog_browse_planner(),
+        catalog_query_planner=(planner := _catalog_browse_planner()),
+    )
+
+    result = await agent({"question": question, "objective": objective})
+
+    catalog_result = result["catalog_result"]
+    assert result["decision"]["status"] == "determined"
+    assert catalog_result["provider"] == "미래에셋"
+    assert catalog_result["total_count"] == 25
+    assert len(catalog_result["items"]) == 25
+    assert result["evidence"][0]["source_file_name"] == "product_catalog.json"
+    assert search.calls == []
+    assert planner.calls == [(question, objective)]
+    assert model.invocation_count == 2
+
+
+@pytest.mark.anyio
+async def test_product_agent_rejects_initial_conditional_submit_before_catalog_lookup() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "conditional",
+                            "conclusion": "추천 조건이 필요합니다.",
+                            "missing_conditions": ["투자 기간"],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "early-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "catalog-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "검증된 카탈로그 상품 목록입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "catalog-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    planner = _catalog_browse_planner()
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_query_planner=planner,
     )
 
     result = await agent({"question": "미래에셋 상품 추천", "objective": "미래에셋 상품 추천"})
 
-    assert result["decision"] == {
-        "status": "conditional",
-        "conclusion": "상품 추천을 위해 투자 조건을 확인해야 합니다.",
-        "missing_conditions": ["투자 기간", "위험 선호도", "유동성 필요", "비용 선호"],
-    }
-    assert "catalog_result" not in result
-    assert result["evidence"] == []
+    assert result["decision"]["status"] == "determined"
+    assert result["catalog_result"]["total_count"] == 25
+    assert planner.calls == [("미래에셋 상품 추천", "미래에셋 상품 추천")]
     assert search.calls == []
-    assert model.invocation_count == 2
+    assert model.invocation_count == 3
 
 
 @pytest.mark.anyio

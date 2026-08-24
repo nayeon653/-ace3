@@ -52,16 +52,6 @@ _CALCULATOR_REQUIRED_CONDITION = "결정론적 계산 Tool 결과"
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
-_PRODUCT_CONDITIONS_CONCLUSION = "상품 추천을 위해 투자 조건을 확인해야 합니다."
-_PRODUCT_RECOMMENDATION_PATTERN = re.compile(
-    r"(?:추천|골라\s*줘|선택해\s*줘|뭐가\s*좋|무엇이\s*좋|어떤\s*상품이\s*좋)"
-)
-_DEFAULT_PRODUCT_RECOMMENDATION_CONDITIONS = [
-    "투자 기간",
-    "위험 선호도",
-    "유동성 필요",
-    "비용 선호",
-]
 ProductCodeResolver = Callable[[str], str]
 
 
@@ -596,11 +586,7 @@ def _allowed_product_tools(
         return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
     if not state.get("product_candidate_codes"):
         if search_call_count == 0:
-            return (
-                lookup_tool_name,
-                SEARCH_DOCUMENTS_TOOL_NAME,
-                SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-            )
+            return (lookup_tool_name, SEARCH_DOCUMENTS_TOOL_NAME)
         return (lookup_tool_name,)
     if not state.get("product_scoped_search_completed"):
         return (SEARCH_DOCUMENTS_TOOL_NAME,)
@@ -625,7 +611,7 @@ def _product_tool_call_is_allowed(
     if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and not state.get("product_candidate_codes"):
         if state.get("product_catalog_result") is not None:
             return _is_product_catalog_submit_call(call)
-        return _is_product_conditions_call(call)
+        return False
     if call["name"] != SEARCH_DOCUMENTS_TOOL_NAME:
         return True
     candidate_codes = state.get("product_candidate_codes", [])
@@ -637,27 +623,15 @@ def _product_tool_call_is_allowed(
     return product_code.strip().upper() in candidate_codes
 
 
-def _is_product_conditions_call(call: ToolCall) -> bool:
-    """검색 전 제출은 추천 조건 부족을 알리는 조건부 판단만 허용한다."""
+def _is_product_catalog_submit_call(call: ToolCall) -> bool:
+    """카탈로그 조회 후에는 검증값을 보존하는 확정 제출만 허용한다."""
 
     args = call["args"]
     return (
-        args.get("status") == "conditional"
-        and isinstance(args.get("missing_conditions"), list)
-        and bool(args["missing_conditions"])
+        args.get("status") == "determined"
+        and args.get("missing_conditions") == []
         and args.get("evidence_chunk_ids") == []
     )
-
-
-def _is_product_catalog_submit_call(call: ToolCall) -> bool:
-    """카탈로그 조회 후에는 확정 조회 또는 추천 조건부 판단만 허용한다."""
-
-    args = call["args"]
-    if args.get("evidence_chunk_ids") != []:
-        return False
-    if args.get("status") == "determined":
-        return args.get("missing_conditions") == []
-    return _is_product_conditions_call(call)
 
 
 def _product_next_tool_instruction(
@@ -669,16 +643,12 @@ def _product_next_tool_instruction(
 
     search_call_count = _search_call_count(state)
     if state.get("product_catalog_result") is not None:
-        return (
-            "상품 개수·목록 조회라면 determined로, 추천에 필요한 사용자 조건이 "
-            "없다면 conditional로 최종 결과 제출 Tool을 호출하세요."
-        )
+        return "검증된 상품 개수·목록을 determined로 최종 결과 제출 Tool에 제출하세요."
     if not state.get("product_candidate_codes"):
         if search_call_count == 0:
             return (
                 "lookup_product_codes Tool로 상품을 식별하거나 product_code 없이 "
-                "search_documents Tool로 상품 문서를 먼저 검색하세요. 추천에 필요한 "
-                "사용자 조건이 없으면 conditional 상태로 최종 결과를 제출하세요."
+                "search_documents Tool로 상품 문서를 먼저 검색하세요."
             )
         return "lookup_product_codes Tool로 검색 대상 상품 코드를 식별하세요."
     if not state.get("product_scoped_search_completed"):
@@ -748,30 +718,15 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
             if domain == "product":
                 try:
                     catalog_result = runtime.state.get("product_catalog_result")
-                    if catalog_result is not None and _is_product_recommendation_request(
-                        runtime.state
-                    ):
-                        result = _build_product_conditions_result(
-                            status="conditional",
-                            missing_conditions=(
-                                missing_conditions
-                                if status == "conditional"
-                                else _DEFAULT_PRODUCT_RECOMMENDATION_CONDITIONS
-                            ),
-                        )
-                    elif catalog_result is not None and status == "determined":
-                        if missing_conditions or evidence_chunk_ids:
-                            raise ValueError("확정 카탈로그 결과의 제출 인자가 올바르지 않습니다.")
-                        result = catalog_result
-                    else:
-                        result = _build_product_conditions_result(
-                            status=status,
-                            missing_conditions=missing_conditions,
-                        )
+                    if catalog_result is None:
+                        raise ValueError("검증된 카탈로그 결과가 없습니다.")
+                    if status != "determined" or missing_conditions or evidence_chunk_ids:
+                        raise ValueError("확정 카탈로그 결과의 제출 인자가 올바르지 않습니다.")
+                    result = catalog_result
                     validate_domain_result(result)
                 except (TypeError, ValueError):
                     return json.dumps(
-                        {"error": "상품 추천 조건 결과가 공통 계약을 위반했습니다."},
+                        {"error": "상품 카탈로그 결과가 공통 계약을 위반했습니다."},
                         ensure_ascii=False,
                     )
                 if runtime.tool_call_id is None:
@@ -829,37 +784,6 @@ def _create_domain_result_tool(*, domain: DomainName) -> Any:
         )
 
     return submit_domain_result
-
-
-def _is_product_recommendation_request(state: DomainAgentState) -> bool:
-    """카탈로그 목록 조회와 상품 추천 요청을 안전하게 구분한다."""
-
-    text = f"{state.get('question', '')}\n{state.get('objective', '')}"
-    return _PRODUCT_RECOMMENDATION_PATTERN.search(text) is not None
-
-
-def _build_product_conditions_result(
-    *,
-    status: DecisionStatus,
-    missing_conditions: list[str],
-) -> DomainResult:
-    """문서 사실을 만들지 않고 추천에 필요한 사용자 조건만 요청한다."""
-
-    normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
-    if status != "conditional" or not normalized_missing:
-        raise ValueError("추천 조건 결과는 누락 조건이 있는 conditional 상태여야 합니다.")
-    return {
-        "domain": "product",
-        "execution_status": "completed",
-        "decision": {
-            "status": "conditional",
-            "conclusion": _PRODUCT_CONDITIONS_CONCLUSION,
-            "missing_conditions": list(dict.fromkeys(normalized_missing)),
-        },
-        "evidence": [],
-        "calculations": [],
-        "warnings": [],
-    }
 
 
 def _build_domain_result(
