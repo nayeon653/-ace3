@@ -1,8 +1,11 @@
 # Docling Parser
 
 `-ace3`의 문서 파싱 단계에서 사용하는 저장소 내부 오프라인 Python 도구입니다.
-PDF, DOCX, PPTX, XLSX를 고정 로컬 EasyOCR 또는 NAVER CLOVA General OCR V2
-프로필로 파싱해 Markdown, HTML, Docling JSON, manifest와 이미지 assets를 생성합니다.
+PDF, DOCX, PPTX, XLSX를 고정 무OCR 수식 보강, 로컬 EasyOCR 또는 NAVER CLOVA
+General OCR V2 프로필로 파싱해 Markdown, HTML, Docling JSON, manifest와 이미지
+assets를 생성합니다.
+사용자가 그림 속 계산식만 OCR하도록 허용하면 Docling 수식 분류를 통과한 그림에만
+로컬 EasyOCR을 적용하는 별도 후보 추출 단계도 제공합니다.
 NAVER 프로필의 manifest에는 실제 API 호출, 캐시 hit/miss와 재시도 횟수도 기록합니다.
 
 평가 API의 런타임 패키지가 아닙니다. Docling, PyTorch와 NumPy 1.x 의존성이 API

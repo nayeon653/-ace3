@@ -1,7 +1,7 @@
 [project]
 name = "mirae-docling-cli-parser"
 version = "0.1.0"
-description = "Script-first Docling parser with fixed local and NAVER CLOVA OCR profiles"
+description = "Script-first Docling parser with fixed no-OCR, local, and NAVER CLOVA OCR profiles"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [

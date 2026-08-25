@@ -113,6 +113,7 @@ def parse_document(
     ocr_provider: str | OcrProvider,
     *,
     confirm_external_transfer: bool = False,
+    engine: DoclingEngine | None = None,
 ) -> ArtifactBundle:
     """문서 하나를 파싱하고 완성된 bundle을 원자적으로 게시한다."""
 
@@ -145,6 +146,11 @@ def parse_document(
         )
 
     profile = profile_for_provider(provider)
+    if engine is not None and engine.profile.digest != profile.digest:
+        raise ParserError(
+            "ENGINE_PROFILE_MISMATCH",
+            "재사용 엔진의 프로필이 요청한 파싱 프로필과 일치하지 않습니다.",
+        )
     try:
         source_sha256 = sha256_file(source)
         source_size = source.stat().st_size
@@ -177,8 +183,11 @@ def parse_document(
     try:
         from docling_core.types.doc import ImageRefMode
 
+        exported_image_mode = (
+            ImageRefMode.REFERENCED if profile.export_images else ImageRefMode.PLACEHOLDER
+        )
         bundle_id = str(uuid.uuid4())
-        result = DoclingEngine(profile).convert(source)
+        result = (engine or DoclingEngine(profile)).convert(source)
         if sha256_file(source) != source_sha256:
             raise ParserError(
                 "SOURCE_CHANGED_DURING_PARSE",
@@ -194,14 +203,16 @@ def parse_document(
         result.document.save_as_markdown(
             markdown_path,
             artifacts_dir=Path("assets"),
-            image_mode=ImageRefMode.REFERENCED,
+            image_mode=exported_image_mode,
             traverse_pictures=profile.traverse_pictures,
             compact_tables=False,
         )
         normalize_markdown_file(markdown_path)
         result.document.save_as_html(
             html_path,
-            image_mode=ImageRefMode.EMBEDDED,
+            image_mode=(
+                ImageRefMode.EMBEDDED if profile.export_images else ImageRefMode.PLACEHOLDER
+            ),
             html_lang=_HTML_LANGUAGE,
             split_page_view=False,
         )
@@ -213,7 +224,7 @@ def parse_document(
         result.document.save_as_json(
             docling_json_path,
             artifacts_dir=Path("assets"),
-            image_mode=ImageRefMode.REFERENCED,
+            image_mode=exported_image_mode,
             indent=2,
         )
         normalize_docling_json_file(docling_json_path)
@@ -266,18 +277,11 @@ def parse_document(
                 "embedded_pictures_requiring_visual_review": (
                     result.quality.embedded_pictures_requiring_visual_review
                 ),
-                "picture_ocr_text_nodes_isolated": (
-                    result.quality.picture_ocr_text_nodes_isolated
-                ),
-                "repeated_text_nodes_normalized": (
-                    result.quality.repeated_text_nodes_normalized
-                ),
-                "multipage_tables_merged": len(
-                    result.quality.merged_multipage_tables
-                ),
+                "picture_ocr_text_nodes_isolated": (result.quality.picture_ocr_text_nodes_isolated),
+                "repeated_text_nodes_normalized": (result.quality.repeated_text_nodes_normalized),
+                "multipage_tables_merged": len(result.quality.merged_multipage_tables),
                 "multipage_table_segments_absorbed": sum(
-                    len(item.segments) - 1
-                    for item in result.quality.merged_multipage_tables
+                    len(item.segments) - 1 for item in result.quality.merged_multipage_tables
                 ),
                 "possible_cross_page_table_continuations": len(
                     result.quality.possible_cross_page_table_pairs
@@ -285,8 +289,7 @@ def parse_document(
             },
             "quality_signals": {
                 "merged_multipage_tables": [
-                    item.to_dict()
-                    for item in result.quality.merged_multipage_tables
+                    item.to_dict() for item in result.quality.merged_multipage_tables
                 ],
                 "possible_cross_page_table_pairs": [
                     [first, second]

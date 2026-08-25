@@ -1,4 +1,4 @@
-"""로컬 및 NAVER OCR에 사용하는 고정 Docling 프로필."""
+"""무OCR, 로컬 OCR 및 NAVER OCR에 사용하는 고정 Docling 프로필."""
 
 from __future__ import annotations
 
@@ -12,11 +12,17 @@ from .errors import ParserError
 
 LOCAL_PROFILE_ID = "docling-local-ocr-v1"
 NAVER_PROFILE_ID = "docling-naver-ocr-v1"
+NO_OCR_FORMULA_PROFILE_ID = "docling-no-ocr-formula-v1"
+NO_OCR_NATIVE_PROFILE_ID = "docling-no-ocr-native-v1"
 _LAYOUT_MODEL_REPO_ID = "docling-project/docling-layout-heron"
 _LAYOUT_MODEL_REVISION = "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8"
+_FORMULA_MODEL_REPO_ID = "docling-project/CodeFormulaV2"
+_FORMULA_MODEL_REVISION = "ecedbe111d15c2dc60bfd4a823cbe80127b58af4"
 
 
 class OcrProvider(StrEnum):
+    NONE = "none"
+    NONE_NATIVE = "none-native"
     LOCAL = "local"
     NAVER = "naver"
 
@@ -62,10 +68,25 @@ class ParserProfile:
     naver_enable_table_detection: bool | None = None
     naver_max_image_edge: int | None = None
     naver_max_image_bytes: int | None = None
+    do_formula_enrichment: bool | None = None
+    formula_model_repo_id: str | None = None
+    formula_model_revision: str | None = None
+    formula_compile_model: bool | None = None
+    generate_page_images: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["ocr_provider"] = self.ocr_provider.value
+        # 기존 v1 프로필의 digest를 바꾸지 않도록 새 선택 필드만 미설정 시 제외한다.
+        for key in (
+            "do_formula_enrichment",
+            "formula_model_repo_id",
+            "formula_model_revision",
+            "formula_compile_model",
+            "generate_page_images",
+        ):
+            if payload[key] is None:
+                del payload[key]
         return payload
 
     @property
@@ -80,6 +101,39 @@ class ParserProfile:
 
 
 _PROFILES = {
+    NO_OCR_FORMULA_PROFILE_ID: ParserProfile(
+        id=NO_OCR_FORMULA_PROFILE_ID,
+        description=(
+            "Docling native-text parsing without OCR or remote services; local "
+            "CodeFormulaV2 enrichment is enabled for mathematical formulas."
+        ),
+        ocr_provider=OcrProvider.NONE,
+        external_data_transfer=False,
+        languages=(),
+        do_formula_enrichment=True,
+        formula_model_repo_id=_FORMULA_MODEL_REPO_ID,
+        formula_model_revision=_FORMULA_MODEL_REVISION,
+        formula_compile_model=False,
+        generate_page_images=True,
+        generate_picture_images=False,
+        isolate_embedded_picture_ocr=False,
+    ),
+    NO_OCR_NATIVE_PROFILE_ID: ParserProfile(
+        id=NO_OCR_NATIVE_PROFILE_ID,
+        description=(
+            "Docling native-text and accurate-table parsing without OCR, formula "
+            "VLM enrichment, page-image retention, or remote services."
+        ),
+        ocr_provider=OcrProvider.NONE_NATIVE,
+        external_data_transfer=False,
+        languages=(),
+        do_formula_enrichment=False,
+        generate_page_images=False,
+        generate_picture_images=False,
+        export_images=False,
+        traverse_pictures=False,
+        isolate_embedded_picture_ocr=False,
+    ),
     LOCAL_PROFILE_ID: ParserProfile(
         id=LOCAL_PROFILE_ID,
         description=(
@@ -123,5 +177,10 @@ def get_profile(profile_id: str) -> ParserProfile:
 
 def profile_for_provider(provider: str | OcrProvider) -> ParserProfile:
     selected = OcrProvider(provider)
-    profile_id = LOCAL_PROFILE_ID if selected is OcrProvider.LOCAL else NAVER_PROFILE_ID
+    profile_id = {
+        OcrProvider.NONE: NO_OCR_FORMULA_PROFILE_ID,
+        OcrProvider.NONE_NATIVE: NO_OCR_NATIVE_PROFILE_ID,
+        OcrProvider.LOCAL: LOCAL_PROFILE_ID,
+        OcrProvider.NAVER: NAVER_PROFILE_ID,
+    }[selected]
     return get_profile(profile_id)

@@ -35,9 +35,10 @@ class DoclingEngine:
     def __init__(self, profile: ParserProfile):
         self.profile = profile
         self._naver_usage_session_id: str | None = None
+        self._no_ocr_converter: Any | None = None
 
     def convert(self, source: Path) -> EngineResult:
-        if self.profile.ocr_provider is OcrProvider.LOCAL:
+        if self.profile.ocr_provider is not OcrProvider.NAVER:
             return self._convert(source, ocr_usage_session=None)
 
         from .ocr.naver_plugin import naver_ocr_usage_session
@@ -55,21 +56,9 @@ class DoclingEngine:
         *,
         ocr_usage_session: NaverOcrUsageSession | None,
     ) -> EngineResult:
-        from docling.datamodel.base_models import ConversionStatus, InputFormat
-        from docling.document_converter import DocumentConverter, PdfFormatOption
+        from docling.datamodel.base_models import ConversionStatus
 
-        pdf_options = self._pdf_pipeline_options(self.profile.ocr_mode)
-        converter = DocumentConverter(
-            allowed_formats=[
-                InputFormat.PDF,
-                InputFormat.DOCX,
-                InputFormat.PPTX,
-                InputFormat.XLSX,
-            ],
-            format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
-            },
-        )
+        converter = self._document_converter()
 
         try:
             conversion = converter.convert(source, raises_on_error=True)
@@ -86,8 +75,7 @@ class DoclingEngine:
 
         if conversion.status is not ConversionStatus.SUCCESS:
             errors = "; ".join(
-                self._safe_exception(item.error_message)
-                for item in conversion.errors[:5]
+                self._safe_exception(item.error_message) for item in conversion.errors[:5]
             )
             code = (
                 "NAVER_OCR_FAILED"
@@ -111,7 +99,11 @@ class DoclingEngine:
             self.profile,
             detect_cross_page_tables=source.suffix.lower() == ".pdf",
         )
-        if source.suffix.lower() in {".docx", ".pptx", ".xlsx"} and document.pictures:
+        if (
+            self.profile.ocr_provider not in {OcrProvider.NONE, OcrProvider.NONE_NATIVE}
+            and source.suffix.lower() in {".docx", ".pptx", ".xlsx"}
+            and document.pictures
+        ):
             (
                 office_picture_count,
                 office_picture_text_nodes,
@@ -124,8 +116,7 @@ class DoclingEngine:
                     len(document.pictures),
                 ),
                 picture_ocr_text_nodes_isolated=(
-                    quality.picture_ocr_text_nodes_isolated
-                    + office_picture_text_nodes
+                    quality.picture_ocr_text_nodes_isolated + office_picture_text_nodes
                 ),
             )
         else:
@@ -145,26 +136,45 @@ class DoclingEngine:
             quality=quality,
             warnings=warnings,
             conversion_version=version,
-            ocr_usage=(
-                ocr_usage_session.snapshot()
-                if ocr_usage_session is not None
-                else None
-            ),
+            ocr_usage=(ocr_usage_session.snapshot() if ocr_usage_session is not None else None),
         )
+
+    def _document_converter(self):
+        from docling.datamodel.base_models import InputFormat
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+
+        if self._no_ocr_converter is not None:
+            return self._no_ocr_converter
+
+        pdf_options = self._pdf_pipeline_options(self.profile.ocr_mode)
+        converter = DocumentConverter(
+            allowed_formats=[
+                InputFormat.PDF,
+                InputFormat.DOCX,
+                InputFormat.PPTX,
+                InputFormat.XLSX,
+            ],
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
+            },
+        )
+        # 무OCR 배치에서는 무거운 수식 모델과 파이프라인을 문서 간 재사용한다.
+        if self.profile.ocr_provider in {OcrProvider.NONE, OcrProvider.NONE_NATIVE}:
+            self._no_ocr_converter = converter
+        return converter
 
     def _pdf_pipeline_options(self, mode: str, *, image_input: bool = False):
         from docling.datamodel.accelerator_options import AcceleratorOptions
-        from docling.datamodel.pipeline_options import (
-            EasyOcrOptions,
-            OcrMode,
-            PdfPipelineOptions,
-            TableFormerMode,
-        )
+        from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
 
         options = PdfPipelineOptions()
-        options.do_ocr = True
+        options.do_ocr = self.profile.ocr_provider not in {
+            OcrProvider.NONE,
+            OcrProvider.NONE_NATIVE,
+        }
         options.do_table_structure = self.profile.do_table_structure
         options.table_structure_options.mode = TableFormerMode(self.profile.table_mode)
+        options.table_structure_options.do_cell_matching = True
         layout_model_spec = options.layout_options.model_spec.model_copy(
             update={
                 "repo_id": self.profile.layout_model_repo_id,
@@ -176,14 +186,42 @@ class DoclingEngine:
         )
         options.images_scale = self.profile.images_scale
         options.generate_picture_images = self.profile.generate_picture_images
-        options.generate_page_images = False
+        options.generate_page_images = bool(self.profile.generate_page_images)
+        options.do_formula_enrichment = bool(self.profile.do_formula_enrichment)
+        options.do_code_enrichment = False
+        options.code_formula_options.extract_formulas = bool(self.profile.do_formula_enrichment)
+        options.code_formula_options.extract_code = False
+        if self.profile.formula_model_repo_id:
+            from docling.datamodel.accelerator_options import AcceleratorDevice
+            from docling.datamodel.vlm_engine_options import TransformersVlmEngineOptions
+
+            formula_model_spec = options.code_formula_options.model_spec.model_copy(
+                update={
+                    "default_repo_id": self.profile.formula_model_repo_id,
+                    "revision": self.profile.formula_model_revision,
+                }
+            )
+            options.code_formula_options = options.code_formula_options.model_copy(
+                update={
+                    "engine_options": TransformersVlmEngineOptions(
+                        device=AcceleratorDevice(self.profile.accelerator_device),
+                        compile_model=bool(self.profile.formula_compile_model),
+                    ),
+                    "model_spec": formula_model_spec,
+                }
+            )
         options.accelerator_options = AcceleratorOptions(
             num_threads=self.profile.accelerator_threads,
             device=self.profile.accelerator_device,
         )
 
-        ocr_mode = OcrMode(mode)
-        if self.profile.ocr_provider is OcrProvider.LOCAL:
+        if self.profile.ocr_provider in {OcrProvider.NONE, OcrProvider.NONE_NATIVE}:
+            options.allow_external_plugins = False
+            options.enable_remote_services = False
+        elif self.profile.ocr_provider is OcrProvider.LOCAL:
+            from docling.datamodel.pipeline_options import EasyOcrOptions, OcrMode
+
+            ocr_mode = OcrMode(mode)
             options.ocr_options = EasyOcrOptions(
                 mode=ocr_mode,
                 lang=list(self.profile.languages),
@@ -198,8 +236,11 @@ class DoclingEngine:
             options.allow_external_plugins = False
             options.enable_remote_services = False
         else:
+            from docling.datamodel.pipeline_options import OcrMode
+
             from .ocr.naver_plugin import NaverOcrOptions
 
+            ocr_mode = OcrMode(mode)
             options.ocr_options = NaverOcrOptions(
                 mode=ocr_mode,
                 lang=list(self.profile.languages),
@@ -331,9 +372,7 @@ class DoclingEngine:
 
         from PIL import Image
 
-        has_alpha = "A" in image.getbands() or (
-            image.mode == "P" and "transparency" in image.info
-        )
+        has_alpha = "A" in image.getbands() or (image.mode == "P" and "transparency" in image.info)
         if has_alpha:
             rgba_image = image.convert("RGBA")
             rgb_image = Image.new("RGB", rgba_image.size, "white")
@@ -366,9 +405,7 @@ class DoclingEngine:
 
         parent = picture.parent.resolve(document) if picture.parent else document.body
         sibling_index = next(
-            index
-            for index, ref in enumerate(parent.children)
-            if ref.cref == picture.self_ref
+            index for index, ref in enumerate(parent.children) if ref.cref == picture.self_ref
         )
         document.insert_node_items(
             sibling=picture,

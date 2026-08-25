@@ -16,9 +16,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("source_path", type=Path, help="파싱할 PDF, DOCX, PPTX 또는 XLSX")
     parser.add_argument(
         "--ocr",
-        choices=("local", "naver"),
+        choices=("none", "none-native", "local", "naver"),
         default="local",
-        help="사용할 OCR 방식(기본값: local)",
+        help=(
+            "사용할 OCR 방식(기본값: local; none은 수식 보강, none-native는 native text/표만 수행)"
+        ),
     )
     parser.add_argument("--output-dir", type=Path, required=True, help="bundle 출력 폴더")
     parser.add_argument(

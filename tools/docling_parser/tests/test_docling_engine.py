@@ -3,12 +3,15 @@ from __future__ import annotations
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
 from docling_core.types.doc import DocItemLabel, DoclingDocument
 from docling_team_parser.docling_engine import DoclingEngine
 from docling_team_parser.errors import NaverOcrError
 from docling_team_parser.profiles import (
     LOCAL_PROFILE_ID,
     NAVER_PROFILE_ID,
+    NO_OCR_FORMULA_PROFILE_ID,
+    NO_OCR_NATIVE_PROFILE_ID,
     get_profile,
 )
 from PIL import Image
@@ -23,9 +26,7 @@ def test_pdf_and_office_image_inputs_use_distinct_ocr_scales() -> None:
     naver_pdf = naver_engine._pdf_pipeline_options("pdf_aware_layout_regions")
     naver_office = naver_engine._pdf_pipeline_options("full_page", image_input=True)
     naver_engine._naver_usage_session_id = "document-session"
-    naver_with_usage = naver_engine._pdf_pipeline_options(
-        "pdf_aware_layout_regions"
-    )
+    naver_with_usage = naver_engine._pdf_pipeline_options("pdf_aware_layout_regions")
 
     assert local_pdf.ocr_options.scale == 3.0
     assert naver_pdf.ocr_options.scale == 2.1
@@ -36,6 +37,54 @@ def test_pdf_and_office_image_inputs_use_distinct_ocr_scales() -> None:
     assert local_pdf.layout_options.model_spec.revision == (
         "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8"
     )
+
+
+def test_no_ocr_formula_profile_disables_ocr_and_pins_formula_model() -> None:
+    options = DoclingEngine(get_profile(NO_OCR_FORMULA_PROFILE_ID))._pdf_pipeline_options(
+        "pdf_aware_layout_regions"
+    )
+
+    assert options.do_ocr is False
+    assert options.do_table_structure is True
+    assert options.table_structure_options.do_cell_matching is True
+    assert options.do_formula_enrichment is True
+    assert options.do_code_enrichment is False
+    assert options.code_formula_options.extract_formulas is True
+    assert options.code_formula_options.extract_code is False
+    assert options.code_formula_options.model_spec.default_repo_id == (
+        "docling-project/CodeFormulaV2"
+    )
+    assert options.code_formula_options.model_spec.revision == (
+        "ecedbe111d15c2dc60bfd4a823cbe80127b58af4"
+    )
+    assert options.code_formula_options.engine_options.compile_model is False
+    assert options.generate_page_images is True
+    assert options.generate_picture_images is False
+    assert options.enable_remote_services is False
+    assert options.allow_external_plugins is False
+
+
+def test_no_ocr_converter_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = DoclingEngine(get_profile(NO_OCR_FORMULA_PROFILE_ID))
+    sentinel = object()
+    engine._no_ocr_converter = sentinel
+
+    assert engine._document_converter() is sentinel
+
+
+def test_no_ocr_native_profile_skips_formula_vlm_and_page_images() -> None:
+    options = DoclingEngine(get_profile(NO_OCR_NATIVE_PROFILE_ID))._pdf_pipeline_options(
+        "pdf_aware_layout_regions"
+    )
+
+    assert options.do_ocr is False
+    assert options.do_table_structure is True
+    assert options.table_structure_options.do_cell_matching is True
+    assert options.do_formula_enrichment is False
+    assert options.generate_page_images is False
+    assert options.generate_picture_images is False
+    assert options.enable_remote_services is False
+    assert options.allow_external_plugins is False
 
 
 def test_transparent_office_picture_is_flattened_onto_white() -> None:

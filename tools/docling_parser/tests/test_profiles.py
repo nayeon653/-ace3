@@ -6,6 +6,8 @@ import pytest
 from docling_team_parser.profiles import (
     LOCAL_PROFILE_ID,
     NAVER_PROFILE_ID,
+    NO_OCR_FORMULA_PROFILE_ID,
+    NO_OCR_NATIVE_PROFILE_ID,
     get_profile,
 )
 
@@ -20,6 +22,14 @@ from docling_team_parser.profiles import (
         (
             NAVER_PROFILE_ID,
             "sha256:a78b84564e1cce07ab34bc5020ec25b15235db58eb28f5fa434d45f0725387e3",
+        ),
+        (
+            NO_OCR_FORMULA_PROFILE_ID,
+            "sha256:60c05d014329a29fd1b7ed021186e3509f52b778c353e1b87a868bf86e370de1",
+        ),
+        (
+            NO_OCR_NATIVE_PROFILE_ID,
+            "sha256:d279b03f248f796f04a8674b709d9084cfed40c98793a59de347c67d5997b5d1",
         ),
     ),
 )

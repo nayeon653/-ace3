@@ -13,6 +13,10 @@
 - 일반 요청에는 `docling-local-ocr-v1`을 사용한다. NAVER OCR을 사용자가 현재
   요청에서 지정하거나 해당 범위의 외부 전송을 승인한 경우에만
   `docling-naver-ocr-v1`을 사용한다.
+- 사용자가 현재 요청에서 OCR을 사용하지 말라고 명시하면
+  `docling-no-ocr-formula-v1`을 사용한다. 이 프로필은 PDF의 native text와 구조를
+  파싱하고 로컬 CodeFormulaV2로 수식 영역만 보강한다. OCR 엔진, 외부 플러그인과
+  원격 서비스는 사용하지 않는다.
 - 원본과 생성 bundle을 수정하거나 덮어쓰지 않는다. 비교가 필요하면 별도 출력
   루트에 다시 생성한다.
 - Docling JSON을 기계 기준 결과로 사용하고 Markdown을 사람 검수용 표현으로
@@ -105,6 +109,50 @@ uv run --frozen --project "<parser-project>" python "<parse-script>" "<source-pa
 여러 파일이나 폴더 요청은 지원 확장자의 실제 파일 목록을 먼저 확정한 뒤 같은
 명령을 파일별로 반복한다. 로컬 OCR은 한 파일이 실패해도 나머지를 계속하고 마지막에
 성공·실패 파일을 요약한다. 파서 자체에 배치 상태나 별도 배치 manifest는 두지 않는다.
+
+## 무OCR 수식 보강 실행
+
+OCR 금지 요청에는 다음과 같이 실행한다.
+
+```bash
+uv run --frozen --project "<parser-project>" python "<parse-script>" "<source-path>" --ocr none --output-dir "<repo-root>/data/processed/docling/<collection>"
+```
+
+이 프로필은 `do_ocr=false`, `do_table_structure=true`, 정확 표 모드,
+`do_formula_enrichment=true`, `do_code_enrichment=false`를 사용한다. 페이지 이미지는
+로컬 수식 보강과 사람 검수를 위해 생성하지만 그림 안 일반 문장과 숫자는 OCR하지
+않는다. DOCX·PPTX·XLSX의 내장 그림도 별도 이미지 입력으로 다시 파싱하지 않는다.
+따라서 스캔 PDF의 일반 본문은 추출 대상에서 빠질 수 있으며, manifest와 별도 문서
+coverage 결과에 native text 부족을 명시한다. 수식 모델과 레이아웃 모델 revision,
+CPU 스레드 수, 표 모드는 프로필 digest에 포함한다.
+
+동일 문서군의 대표 PDF 3개 이상에서 수식 보강 전후의 `formula` 항목이 모두 0이고
+계산 규칙이 native text와 표에 존재함을 확인한 경우에는
+`docling-no-ocr-native-v1`을 사용할 수 있다. 이 프로필은 정확 표 구조와 bbox를
+유지하되 수식 VLM, 페이지·그림 이미지 생성과 이미지 export도 끈다. 그림 항목은
+placeholder 구조로만 남고 시각 검수에는 원본 문서를 사용한다.
+
+```bash
+uv run --frozen --project "<parser-project>" python "<parse-script>" "<source-path>" --ocr none-native --output-dir "<repo-root>/data/processed/docling/<collection>"
+```
+
+프로필 전환 근거, 표본 수, 페이지 수와 수식 항목 수는 검수 기록에 남기며, 같은
+배치에서 이미 성공한 상위 프로필 bundle을 하위 프로필로 다시 만들거나 덮어쓰지
+않는다.
+
+사용자가 그림에 존재하는 계산식에 한해 OCR을 허용한 경우에는 원문 bundle과 분리된
+그림 수식 보강 단계를 실행할 수 있다. PDF는 Docling JSON의 `picture` bbox만 원본에서
+잘라내고, Office 문서는 패키지의 내장 media만 검사한다. 작은 상·하단 장식은 제외한
+뒤 로컬 CodeFormulaV2가 `formula`로 분류한 그림만 로컬 EasyOCR ko/en으로 읽는다.
+Docling 수식 텍스트나 EasyOCR 텍스트에 수식 문법이 없는 결과는 최종 후보에서
+제외한다. 즉 페이지 전체나 일반 그림에 EasyOCR을 먼저 실행해서 후보를 찾지 않는다.
+결과에는 원본 파일 hash, Drive ID, 페이지, bbox, Docling 수식 텍스트, EasyOCR
+텍스트·신뢰도와 이미지 지문을 기록하며 원문 bundle을 수정하지 않는다. 이 단계에서도
+외부 플러그인과 원격 서비스는 사용하지 않는다.
+
+```bash
+uv run --frozen --project "<parser-project>" python "<parser-project>/scripts/extract_image_formula_candidates.py" "<bundle-root>" --inventory "<inventory-json>" --raw-root "<raw-root>" --output-dir "<catalog-dir>"
+```
 
 ## NAVER OCR 실행
 

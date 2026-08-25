@@ -103,6 +103,45 @@ def test_script_passes_naver_transfer_confirmation(
     }
 
 
+def test_script_accepts_no_ocr_formula_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    captured: dict[str, Any] = {}
+
+    def fake_parse(
+        _source_path: Path,
+        _output_dir: Path,
+        ocr_provider: str,
+        *,
+        confirm_external_transfer: bool,
+    ) -> SimpleNamespace:
+        captured.update(
+            ocr_provider=ocr_provider,
+            confirm_external_transfer=confirm_external_transfer,
+        )
+        return SimpleNamespace(to_dict=dict)
+
+    monkeypatch.setattr(module, "parse_document", fake_parse)
+
+    exit_code = module.main(
+        [
+            str(tmp_path / "sample.pdf"),
+            "--ocr",
+            "none",
+            "--output-dir",
+            str(tmp_path / "outputs"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "ocr_provider": "none",
+        "confirm_external_transfer": False,
+    }
+
+
 def test_script_prints_parser_error_as_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
