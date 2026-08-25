@@ -19,7 +19,10 @@ from langchain_core.runnables.graph_mermaid import draw_mermaid_png
 
 from pension_agent.agent.execution import AsyncConcurrencyLimiter, ModelConcurrencyMiddleware
 from pension_agent.agent.orchestration import create_domain_agent_tool, create_main_supervisor
+from pension_agent.agent.policy import create_policy_agent
+from pension_agent.agent.product import create_product_agent
 from pension_agent.agent.runtime import DomainAgentSpec, domain_agent_specs
+from pension_agent.agent.tax_payout import create_tax_payout_agent
 from pension_agent.config import (
     BGE_M3_EMBEDDING_CONFIG,
     DEFAULT_AGENT_RUNTIME_CONFIG,
@@ -174,7 +177,7 @@ def _quote_mermaid_node_labels(mermaid: str) -> str:
 
 
 def build_artifacts() -> tuple[GraphArtifact, ...]:
-    """제품 런타임과 같은 등록 정보·Factory·middleware로 그래프를 조립한다."""
+    """현재 도메인별 ReAct 생성 함수로 시각화 전용 그래프를 조립한다."""
 
     specs = domain_agent_specs()
     model = _GraphFakeModel(responses=[])
@@ -183,12 +186,22 @@ def build_artifacts() -> tuple[GraphArtifact, ...]:
         AsyncConcurrencyLimiter(DEFAULT_AGENT_RUNTIME_CONFIG.max_concurrent_hcx_calls)
     )
     domain_agents = {
-        spec.slug: spec.factory(
+        "policy": create_policy_agent(
             model=model,
             search_service=search_service,
             model_concurrency=model_concurrency,
-        )
-        for spec in specs
+        ),
+        "tax-payout": create_tax_payout_agent(
+            model=model,
+            search_service=search_service,
+            model_concurrency=model_concurrency,
+        ),
+        "product": create_product_agent(
+            model=model,
+            catalog_planner_model=model,
+            search_service=search_service,
+            model_concurrency=model_concurrency,
+        ),
     }
     domain_tools = tuple(
         create_domain_agent_tool(
@@ -206,7 +219,7 @@ def build_artifacts() -> tuple[GraphArtifact, ...]:
     )
     compiled_graphs = {
         "main-supervisor": supervisor,
-        **{spec.slug: domain_agents[spec.slug].graph for spec in specs},
+        **{spec.slug: _react_graph(domain_agents[spec.slug]) for spec in specs},
     }
     titles = {
         "main-supervisor": "Main Supervisor 컴파일 그래프",
@@ -229,6 +242,16 @@ def build_artifacts() -> tuple[GraphArtifact, ...]:
             for name, graph in compiled_graphs.items()
         ),
     )
+
+
+def _react_graph(runner: Any) -> Any:
+    """시각화 시점에만 현재 ReAct 구현체의 graph를 조회한다."""
+
+    implementation = getattr(runner, "implementation", None)
+    graph = getattr(implementation, "graph", None)
+    if graph is None:
+        raise TypeError("현재 도메인 구현은 ReAct 그래프 시각화를 지원하지 않습니다.")
+    return graph
 
 
 def render_document(artifacts: tuple[GraphArtifact, ...] | None = None) -> str:

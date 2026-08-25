@@ -78,6 +78,26 @@ def test_contracts_do_not_depend_on_agent_implementations() -> None:
     )
 
 
+def test_common_domain_runner_does_not_depend_on_react_or_domain_implementations() -> None:
+    imports = _absolute_imports(AGENT_ROOT / "domain_runner.py")
+    forbidden = (
+        "langchain.agents",
+        "langgraph",
+        "pension_agent.agent.orchestration",
+        "pension_agent.agent.search",
+    ) + tuple(f"pension_agent.agent.{name}" for name in DOMAIN_PACKAGES)
+
+    assert not any(imported.startswith(forbidden) for imported in imports)
+
+
+def test_each_domain_package_owns_its_react_implementation() -> None:
+    assert not (AGENT_ROOT / "domain_agent.py").exists()
+    for domain_package in DOMAIN_PACKAGES:
+        react_module = AGENT_ROOT / domain_package / "react.py"
+        assert react_module.exists()
+        assert "langchain.agents" in _absolute_imports(react_module)
+
+
 def test_orchestration_does_not_select_concrete_domain_agents() -> None:
     _assert_no_imports(
         AGENT_ROOT / "orchestration",

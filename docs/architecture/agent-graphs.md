@@ -119,30 +119,30 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	model("model")
 	tools("tools")
-	CompleteDomainResult\2ebefore_model("CompleteDomainResult.before_model")
-	RequireDomainTool\2eafter_model("RequireDomainTool.after_model")
-	SingleDomainSubmitPerModelCall\2eafter_model("SingleDomainSubmitPerModelCall.after_model")
-	DomainModelCallLimit\2ebefore_model("DomainModelCallLimit.before_model")
-	DomainModelCallLimit\2eafter_model("DomainModelCallLimit.after_model")
+	CompletePolicyResult\2ebefore_model("CompletePolicyResult.before_model")
+	RequirePolicyTool\2eafter_model("RequirePolicyTool.after_model")
+	SinglePolicySubmitPerModelCall\2eafter_model("SinglePolicySubmitPerModelCall.after_model")
+	PolicyModelCallLimit\2ebefore_model("PolicyModelCallLimit.before_model")
+	PolicyModelCallLimit\2eafter_model("PolicyModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	__end__([<p>__end__</p>]):::last
-	CompleteDomainResult\2ebefore_model -.-> DomainModelCallLimit\2ebefore_model;
-	CompleteDomainResult\2ebefore_model -.-> __end__;
-	DomainModelCallLimit\2eafter_model --> SingleDomainSubmitPerModelCall\2eafter_model;
-	DomainModelCallLimit\2ebefore_model -.-> __end__;
-	DomainModelCallLimit\2ebefore_model -.-> model;
-	RequireDomainTool\2eafter_model -.-> CompleteDomainResult\2ebefore_model;
-	RequireDomainTool\2eafter_model -.-> __end__;
-	RequireDomainTool\2eafter_model -.-> tools;
-	SingleDomainSubmitPerModelCall\2eafter_model --> RequireDomainTool\2eafter_model;
-	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> DomainModelCallLimit\2eafter_model;
+	CompletePolicyResult\2ebefore_model -.-> PolicyModelCallLimit\2ebefore_model;
+	CompletePolicyResult\2ebefore_model -.-> __end__;
+	PolicyModelCallLimit\2eafter_model --> SinglePolicySubmitPerModelCall\2eafter_model;
+	PolicyModelCallLimit\2ebefore_model -.-> __end__;
+	PolicyModelCallLimit\2ebefore_model -.-> model;
+	RequirePolicyTool\2eafter_model -.-> CompletePolicyResult\2ebefore_model;
+	RequirePolicyTool\2eafter_model -.-> __end__;
+	RequirePolicyTool\2eafter_model -.-> tools;
+	SinglePolicySubmitPerModelCall\2eafter_model --> RequirePolicyTool\2eafter_model;
+	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> PolicyModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
-	__start__ --> CompleteDomainResult\2ebefore_model;
+	__start__ --> CompletePolicyResult\2ebefore_model;
 	model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
-	tools -.-> CompleteDomainResult\2ebefore_model;
+	tools -.-> CompletePolicyResult\2ebefore_model;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
@@ -167,30 +167,30 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	model("model")
 	tools("tools")
-	CompleteDomainResult\2ebefore_model("CompleteDomainResult.before_model")
-	RequireDomainTool\2eafter_model("RequireDomainTool.after_model")
-	SingleDomainSubmitPerModelCall\2eafter_model("SingleDomainSubmitPerModelCall.after_model")
-	DomainModelCallLimit\2ebefore_model("DomainModelCallLimit.before_model")
-	DomainModelCallLimit\2eafter_model("DomainModelCallLimit.after_model")
+	CompleteTaxPayoutResult\2ebefore_model("CompleteTaxPayoutResult.before_model")
+	RequireTaxPayoutTool\2eafter_model("RequireTaxPayoutTool.after_model")
+	SingleTaxPayoutSubmitPerModelCall\2eafter_model("SingleTaxPayoutSubmitPerModelCall.after_model")
+	TaxPayoutModelCallLimit\2ebefore_model("TaxPayoutModelCallLimit.before_model")
+	TaxPayoutModelCallLimit\2eafter_model("TaxPayoutModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	__end__([<p>__end__</p>]):::last
-	CompleteDomainResult\2ebefore_model -.-> DomainModelCallLimit\2ebefore_model;
-	CompleteDomainResult\2ebefore_model -.-> __end__;
-	DomainModelCallLimit\2eafter_model --> SingleDomainSubmitPerModelCall\2eafter_model;
-	DomainModelCallLimit\2ebefore_model -.-> __end__;
-	DomainModelCallLimit\2ebefore_model -.-> model;
-	RequireDomainTool\2eafter_model -.-> CompleteDomainResult\2ebefore_model;
-	RequireDomainTool\2eafter_model -.-> __end__;
-	RequireDomainTool\2eafter_model -.-> tools;
-	SingleDomainSubmitPerModelCall\2eafter_model --> RequireDomainTool\2eafter_model;
-	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> DomainModelCallLimit\2eafter_model;
+	CompleteTaxPayoutResult\2ebefore_model -.-> TaxPayoutModelCallLimit\2ebefore_model;
+	CompleteTaxPayoutResult\2ebefore_model -.-> __end__;
+	RequireTaxPayoutTool\2eafter_model -.-> CompleteTaxPayoutResult\2ebefore_model;
+	RequireTaxPayoutTool\2eafter_model -.-> __end__;
+	RequireTaxPayoutTool\2eafter_model -.-> tools;
+	SingleTaxPayoutSubmitPerModelCall\2eafter_model --> RequireTaxPayoutTool\2eafter_model;
+	TaxPayoutModelCallLimit\2eafter_model --> SingleTaxPayoutSubmitPerModelCall\2eafter_model;
+	TaxPayoutModelCallLimit\2ebefore_model -.-> __end__;
+	TaxPayoutModelCallLimit\2ebefore_model -.-> model;
+	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> TaxPayoutModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
-	__start__ --> CompleteDomainResult\2ebefore_model;
+	__start__ --> CompleteTaxPayoutResult\2ebefore_model;
 	model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
-	tools -.-> CompleteDomainResult\2ebefore_model;
+	tools -.-> CompleteTaxPayoutResult\2ebefore_model;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
@@ -215,35 +215,35 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	model("model")
 	tools("tools")
-	CompleteDomainResult\2ebefore_model("CompleteDomainResult.before_model")
-	RequireDomainTool\2eafter_model("RequireDomainTool.after_model")
-	SingleDomainSubmitPerModelCall\2eafter_model("SingleDomainSubmitPerModelCall.after_model")
-	DomainModelCallLimit\2ebefore_model("DomainModelCallLimit.before_model")
-	DomainModelCallLimit\2eafter_model("DomainModelCallLimit.after_model")
+	CompleteProductResult\2ebefore_model("CompleteProductResult.before_model")
+	RequireProductTool\2eafter_model("RequireProductTool.after_model")
+	SingleProductSubmitPerModelCall\2eafter_model("SingleProductSubmitPerModelCall.after_model")
+	ProductModelCallLimit\2ebefore_model("ProductModelCallLimit.before_model")
+	ProductModelCallLimit\2eafter_model("ProductModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model("ToolCallLimitMiddleware[lookup_product_codes].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	EnforceProductToolSequence\2eafter_model("EnforceProductToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
-	CompleteDomainResult\2ebefore_model -.-> DomainModelCallLimit\2ebefore_model;
-	CompleteDomainResult\2ebefore_model -.-> __end__;
-	DomainModelCallLimit\2eafter_model --> SingleDomainSubmitPerModelCall\2eafter_model;
-	DomainModelCallLimit\2ebefore_model -.-> __end__;
-	DomainModelCallLimit\2ebefore_model -.-> model;
+	CompleteProductResult\2ebefore_model -.-> ProductModelCallLimit\2ebefore_model;
+	CompleteProductResult\2ebefore_model -.-> __end__;
 	EnforceProductToolSequence\2eafter_model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
-	RequireDomainTool\2eafter_model -.-> CompleteDomainResult\2ebefore_model;
-	RequireDomainTool\2eafter_model -.-> __end__;
-	RequireDomainTool\2eafter_model -.-> tools;
-	SingleDomainSubmitPerModelCall\2eafter_model --> RequireDomainTool\2eafter_model;
+	ProductModelCallLimit\2eafter_model --> SingleProductSubmitPerModelCall\2eafter_model;
+	ProductModelCallLimit\2ebefore_model -.-> __end__;
+	ProductModelCallLimit\2ebefore_model -.-> model;
+	RequireProductTool\2eafter_model -.-> CompleteProductResult\2ebefore_model;
+	RequireProductTool\2eafter_model -.-> __end__;
+	RequireProductTool\2eafter_model -.-> tools;
+	SingleProductSubmitPerModelCall\2eafter_model --> RequireProductTool\2eafter_model;
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> DomainModelCallLimit\2eafter_model;
+	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> ProductModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
-	__start__ --> CompleteDomainResult\2ebefore_model;
+	__start__ --> CompleteProductResult\2ebefore_model;
 	model --> EnforceProductToolSequence\2eafter_model;
-	tools -.-> CompleteDomainResult\2ebefore_model;
+	tools -.-> CompleteProductResult\2ebefore_model;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc

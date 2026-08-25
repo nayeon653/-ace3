@@ -2,8 +2,7 @@
 
 import json
 import logging
-from collections.abc import Awaitable
-from typing import Annotated, Protocol
+from typing import Annotated
 
 from langchain.messages import ToolMessage
 from langchain.tools import ToolRuntime, tool
@@ -15,23 +14,12 @@ from pension_agent.agent.contracts import (
     DomainName,
     DomainRequest,
     DomainResult,
+    DomainRunner,
     DomainToolResult,
     validate_domain_result,
 )
 from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.orchestration.state import SupervisorState
-
-
-class DomainRunner(Protocol):
-    """Main Supervisor Tool이 호출하는 비동기 Domain Agent 계약."""
-
-    def __call__(
-        self,
-        request: DomainRequest,
-        *,
-        deadline: float | None = None,
-    ) -> Awaitable[DomainResult]: ...
-
 
 logger = logging.getLogger(__name__)
 

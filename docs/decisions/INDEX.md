@@ -19,3 +19,4 @@
 | 2026-08-19 | architecture | accepted | [온라인 Agent 실행 경로를 native async로 전환](20260819-agent-runtime-native-async.md) |
 | 2026-08-20 | architecture | accepted | [Router 기반 결정론적 Search Service를 채택](20260820-80-router-search-service.md) |
 | 2026-08-24 | architecture | accepted | [Main Supervisor와 Product ReAct에 HCX-007을 선택 적용](20260824-96-selective-hcx-007-models.md) |
+| 2026-08-25 | architecture | accepted | [도메인 Agent 구현과 생성 책임을 각 도메인 패키지가 소유](20260825-98-domain-agent-implementation-ownership.md) |
