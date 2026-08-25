@@ -93,6 +93,10 @@ make parser-test   # 파서 단위 테스트
 
 - [`notebooks/search/search_service_playground.ipynb`](notebooks/search/search_service_playground.ipynb):
   Search Service의 검색과 라우팅을 단독으로 확인한다.
+- [`notebooks/agent/policy_agent_playground.ipynb`](notebooks/agent/policy_agent_playground.ipynb):
+  Policy Agent의 제도·이전 판단, 누락 조건과 최종 DomainResult를 확인한다.
+- [`notebooks/agent/tax_payout_agent_playground.ipynb`](notebooks/agent/tax_payout_agent_playground.ipynb):
+  Tax/Payout Agent의 과세·수령 판단과 숫자 계산 보호 경계를 확인한다.
 - [`notebooks/agent/product_agent_playground.ipynb`](notebooks/agent/product_agent_playground.ipynb):
   Product Agent의 상품 후보 식별, 상품별 문서 검색과 최종 DomainResult를 확인한다.
 - [`notebooks/agent/main_agent_playground.ipynb`](notebooks/agent/main_agent_playground.ipynb):
