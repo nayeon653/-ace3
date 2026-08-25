@@ -47,4 +47,4 @@ ACE-4의 패키지 구조를 적용하면서 FastAPI 진입점을 `pension_agent
 
 - [선행 결정: 실행 코드를 최상위 `pension_agent` 패키지로 통합](20260802-ace-4-package-layout.md)
 - [후속 결정: 모듈 의존성 방향을 단방향으로 제한](20260803-module-dependency-direction.md)
-- [`spec/api.md`](../../spec/api.md)
+- [`docs/specs/api.md`](../specs/api.md)

@@ -9,7 +9,7 @@
 |---|---|---|
 | 1. 소스코드 | 본 저장소 `main` 브랜치, 태그 `v1.0-final` | 2026-09-06 23:59 |
 | 2. 기술 제안서 | `docs/proposal/` | 2026-09-06 23:59 |
-| 3. 평가용 API 서버 정보 | `spec/api.md`의 엔드포인트 URL, `docs/deploy.md`(TBD) | 2026-09-06 23:59 |
+| 3. 평가용 API 서버 정보 | `docs/specs/api.md`의 엔드포인트 URL, `docs/deploy.md`(TBD) | 2026-09-06 23:59 |
 
 ## 마감 후 금지 사항
 
@@ -22,5 +22,5 @@
 ## 진행 상태
 
 - [ ] `v1.0-final` 태그 (제출 시점)
-- [ ] 평가용 API 서버 URL 확정 및 `spec/api.md` 반영
+- [ ] 평가용 API 서버 URL 확정 및 `docs/specs/api.md` 반영
 - [ ] 기술 제안서 완성
