@@ -180,4 +180,4 @@ stack trace, DB 주소, 내부 경로와 모델 내부 메시지는 별도 관�
 - [확인 가능한 작업 사본](https://app.notion.com/p/3b9522d1a920800ea574ca8eb703aa8f?pvs=204)
 - [HTTP 인터페이스 모듈 결정](20260803-api-interface-module.md)
 - [모듈 의존성 방향 결정](20260803-module-dependency-direction.md)
-- [`GET /answer` API 명세](../../spec/api.md)
+- [`GET /answer` API 명세](../specs/api.md)

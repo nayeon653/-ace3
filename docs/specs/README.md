@@ -15,7 +15,7 @@
 | Domain Agent | [Tax/Payout Agent](agents/tax-payout-agent.md) | `agent/tax_payout/` |
 | Domain Agent | [Product Agent](agents/product-agent.md) | `agent/product/` |
 | 보조 LLM 컴포넌트 | [Product Catalog Query Planner](agents/product-catalog-query-planner.md) | `agent/product/catalog_query.py` |
-| 결정론적 검색 컴포넌트 | [Search Service](search-service.md) | `agent/search/` |
+| 결정론적 검색 컴포넌트 | [Search Service](components/search-service.md) | `agent/search/` |
 
 Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 검증으로 검색 계획과
 결과를 만든다. Product Catalog Query Planner는 독립 Domain Agent가 아니라 Product Agent의

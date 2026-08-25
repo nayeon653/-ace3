@@ -117,7 +117,7 @@ admission 68개를 넘는 요청은 Agent를 시작하지 않고 정제된 503�
 끊기면 ASGI disconnect를 감지해 하위 answer coroutine을 취소한다. 따라서 provider를
 기다리는 요청이 있어도 `/health`는 같은 event loop에서 독립적으로 응답한다. 구체적인
 상한과 Uvicorn worker 수에 따른 배수는
-[`API 서버 실행과 확인`](../docs/operations/api-server.md)의 비동기 실행 예산을 따른다.
+[`API 서버 실행과 확인`](../operations/api-server.md)의 비동기 실행 예산을 따른다.
 
 서버 실행, 환경변수, 로컬 확인과 배포 방법은
-[`API 서버 실행과 확인`](../docs/operations/api-server.md)을 따른다.
+[`API 서버 실행과 확인`](../operations/api-server.md)을 따른다.
