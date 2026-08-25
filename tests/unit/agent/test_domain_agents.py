@@ -15,8 +15,14 @@ from langchain_core.outputs import ChatResult
 from langchain_core.runnables import Runnable
 from langsmith import RunTree, get_current_run_tree, tracing_context
 
-from pension_agent.agent.contracts import DomainName, Permission, validate_domain_result
-from pension_agent.agent.domain_agent import DomainAgent
+from pension_agent.agent.contracts import (
+    DomainName,
+    DomainResult,
+    DomainRunner,
+    Permission,
+    validate_domain_result,
+)
+from pension_agent.agent.domain_runner import GuardedDomainRunner
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.product import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
@@ -317,7 +323,7 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
     ],
 )
 async def test_domain_agents_use_search_result_and_submit_verified_result(
-    factory: Callable[..., DomainAgent],
+    factory: Callable[..., DomainRunner],
     domain: DomainName,
     permission: Permission,
     document_type: DocumentType,
@@ -1919,23 +1925,23 @@ async def test_domain_agent_waits_for_capacity_instead_of_failing_fast() -> None
     started = asyncio.Event()
     release = asyncio.Event()
 
-    class BlockingGraph:
-        async def ainvoke(
+    class BlockingRunner:
+        async def __call__(
             self,
-            input: dict[str, Any],
-            /,
+            request: dict[str, str],
             *,
-            context: Any,
-        ) -> dict[str, Any]:
-            del input
-            assert context.deadline > asyncio.get_running_loop().time()
+            deadline: float | None = None,
+        ) -> DomainResult:
+            del request
+            assert deadline is not None
+            assert deadline > asyncio.get_running_loop().time()
             started.set()
             await release.wait()
-            return _completed_graph_state()
+            return _completed_result()
 
-    agent = DomainAgent(
+    agent = GuardedDomainRunner(
         domain="policy",
-        graph=BlockingGraph(),
+        implementation=cast(DomainRunner, BlockingRunner()),
         max_concurrency=1,
     )
     request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
@@ -1956,20 +1962,23 @@ async def test_domain_agent_capacity_wait_respects_parent_deadline() -> None:
     started = asyncio.Event()
     release = asyncio.Event()
 
-    class BlockingGraph:
-        async def ainvoke(
+    class BlockingRunner:
+        async def __call__(
             self,
-            input: dict[str, Any],
-            /,
+            request: dict[str, str],
             *,
-            context: Any,
-        ) -> dict[str, Any]:
-            del input, context
+            deadline: float | None = None,
+        ) -> DomainResult:
+            del request, deadline
             started.set()
             await release.wait()
-            return _completed_graph_state()
+            return _completed_result()
 
-    agent = DomainAgent(domain="policy", graph=BlockingGraph(), max_concurrency=1)
+    agent = GuardedDomainRunner(
+        domain="policy",
+        implementation=cast(DomainRunner, BlockingRunner()),
+        max_concurrency=1,
+    )
     request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
     first_task = asyncio.create_task(agent(request))
     await started.wait()
@@ -1986,18 +1995,20 @@ async def test_domain_agent_capacity_wait_respects_parent_deadline() -> None:
 
 
 @pytest.mark.anyio
-async def test_domain_agent_does_not_start_graph_after_parent_deadline() -> None:
-    class UnexpectedGraph:
-        async def ainvoke(
+async def test_domain_agent_does_not_start_implementation_after_parent_deadline() -> None:
+    class UnexpectedRunner:
+        async def __call__(
             self,
-            input: dict[str, Any],
-            /,
+            request: dict[str, str],
             *,
-            context: Any,
-        ) -> dict[str, Any]:
-            raise AssertionError((input, context))
+            deadline: float | None = None,
+        ) -> DomainResult:
+            raise AssertionError((request, deadline))
 
-    agent = DomainAgent(domain="policy", graph=UnexpectedGraph())
+    agent = GuardedDomainRunner(
+        domain="policy",
+        implementation=cast(DomainRunner, UnexpectedRunner()),
+    )
 
     result = await agent(
         {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"},
@@ -2008,31 +2019,30 @@ async def test_domain_agent_does_not_start_graph_after_parent_deadline() -> None
 
 
 @pytest.mark.anyio
-async def test_domain_agent_timeout_cancels_graph_and_releases_capacity() -> None:
+async def test_domain_agent_timeout_cancels_implementation_and_releases_capacity() -> None:
     cancelled = asyncio.Event()
 
-    class TimeoutOnceGraph:
+    class TimeoutOnceRunner:
         calls = 0
 
-        async def ainvoke(
+        async def __call__(
             self,
-            input: dict[str, Any],
-            /,
+            request: dict[str, str],
             *,
-            context: Any,
-        ) -> dict[str, Any]:
-            del input, context
+            deadline: float | None = None,
+        ) -> DomainResult:
+            del request, deadline
             self.calls += 1
             if self.calls == 1:
                 try:
                     await asyncio.sleep(10)
                 finally:
                     cancelled.set()
-            return _completed_graph_state()
+            return _completed_result()
 
-    agent = DomainAgent(
+    agent = GuardedDomainRunner(
         domain="policy",
-        graph=TimeoutOnceGraph(),
+        implementation=cast(DomainRunner, TimeoutOnceRunner()),
         config=DomainAgentConfig(timeout_seconds=0.01, max_concurrency=1),
     )
     request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
@@ -2049,24 +2059,27 @@ async def test_domain_agent_timeout_cancels_graph_and_releases_capacity() -> Non
 async def test_domain_agent_external_cancellation_releases_capacity() -> None:
     started = asyncio.Event()
 
-    class CancellableGraph:
+    class CancellableRunner:
         block = True
 
-        async def ainvoke(
+        async def __call__(
             self,
-            input: dict[str, Any],
-            /,
+            request: dict[str, str],
             *,
-            context: Any,
-        ) -> dict[str, Any]:
-            del input, context
+            deadline: float | None = None,
+        ) -> DomainResult:
+            del request, deadline
             if self.block:
                 started.set()
                 await asyncio.sleep(10)
-            return _completed_graph_state()
+            return _completed_result()
 
-    graph = CancellableGraph()
-    agent = DomainAgent(domain="policy", graph=graph, max_concurrency=1)
+    runner = CancellableRunner()
+    agent = GuardedDomainRunner(
+        domain="policy",
+        implementation=cast(DomainRunner, runner),
+        max_concurrency=1,
+    )
     request = {"question": "이전할 수 있나요?", "objective": "이전 가능 여부 판단"}
     task = asyncio.create_task(agent(request))
     await started.wait()
@@ -2074,7 +2087,7 @@ async def test_domain_agent_external_cancellation_releases_capacity() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    graph.block = False
+    runner.block = False
 
     result = await agent(request)
 
@@ -2082,23 +2095,26 @@ async def test_domain_agent_external_cancellation_releases_capacity() -> None:
 
 
 @pytest.mark.anyio
-async def test_domain_agent_propagates_tracing_context_to_async_graph() -> None:
+async def test_domain_agent_propagates_tracing_context_to_async_implementation() -> None:
     observed_parent_ids: list[UUID | None] = []
 
-    class ContextRecordingGraph:
-        async def ainvoke(
+    class ContextRecordingRunner:
+        async def __call__(
             self,
-            input: dict[str, Any],
-            /,
+            request: dict[str, str],
             *,
-            context: Any,
-        ) -> dict[str, Any]:
-            del input, context
+            deadline: float | None = None,
+        ) -> DomainResult:
+            del request, deadline
             current_run = get_current_run_tree()
             observed_parent_ids.append(current_run.id if current_run is not None else None)
-            return _completed_graph_state()
+            return _completed_result()
 
-    agent = DomainAgent(domain="policy", graph=ContextRecordingGraph(), max_concurrency=1)
+    agent = GuardedDomainRunner(
+        domain="policy",
+        implementation=cast(DomainRunner, ContextRecordingRunner()),
+        max_concurrency=1,
+    )
     parents = [
         RunTree(
             name=f"request-{index}",
@@ -2118,20 +2134,18 @@ async def test_domain_agent_propagates_tracing_context_to_async_graph() -> None:
     assert observed_parent_ids == [parent.id for parent in parents]
 
 
-def _completed_graph_state() -> dict[str, Any]:
+def _completed_result() -> DomainResult:
     return {
-        "domain_result": {
-            "domain": "policy",
-            "execution_status": "completed",
-            "decision": {
-                "status": "determined",
-                "conclusion": "이전할 수 있습니다.",
-                "missing_conditions": [],
-            },
-            "evidence": [],
-            "calculations": [],
-            "warnings": [],
-        }
+        "domain": "policy",
+        "execution_status": "completed",
+        "decision": {
+            "status": "determined",
+            "conclusion": "이전할 수 있습니다.",
+            "missing_conditions": [],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
     }
 
 

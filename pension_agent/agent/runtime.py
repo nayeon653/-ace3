@@ -4,13 +4,10 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
 
 from httpx import AsyncClient, Client, Limits
-from langchain_core.language_models import BaseChatModel
 
-from pension_agent.agent.contracts import DomainName
-from pension_agent.agent.domain_agent import DomainAgent
+from pension_agent.agent.contracts import DomainName, DomainRunner
 from pension_agent.agent.execution import AsyncConcurrencyLimiter, ModelConcurrencyMiddleware
 from pension_agent.agent.model_factory import create_chat_clovax
 from pension_agent.agent.orchestration import (
@@ -31,7 +28,6 @@ from pension_agent.agent.product import (
 from pension_agent.agent.search import (
     LimitedChunkRetriever,
     LimitedQueryEmbedder,
-    SearchRunner,
     SearchService,
 )
 from pension_agent.agent.tax_payout import (
@@ -63,28 +59,15 @@ class AgentRuntimeBuildError(RuntimeError):
     """Agent 런타임을 안전하게 조립하지 못한 경우."""
 
 
-class DomainAgentFactory(Protocol):
-    """런타임 Domain Agent Factory의 공통 호출 계약."""
-
-    def __call__(
-        self,
-        *,
-        model: BaseChatModel,
-        search_service: SearchRunner,
-        model_concurrency: ModelConcurrencyMiddleware | None = None,
-    ) -> DomainAgent: ...
-
-
 @dataclass(frozen=True, slots=True)
 class DomainAgentSpec:
-    """런타임과 시각화가 공유하는 Domain Agent 등록 정보."""
+    """런타임과 시각화가 공유하는 Domain Agent Tool 메타데이터."""
 
     slug: str
     display_name: str
     domain: DomainName
     tool_name: str
     tool_description: str
-    factory: DomainAgentFactory
 
 
 def domain_agent_specs() -> tuple[DomainAgentSpec, ...]:
@@ -97,7 +80,6 @@ def domain_agent_specs() -> tuple[DomainAgentSpec, ...]:
             domain="policy",
             tool_name=POLICY_TOOL_NAME,
             tool_description=POLICY_TOOL_DESCRIPTION,
-            factory=create_policy_agent,
         ),
         DomainAgentSpec(
             slug="tax-payout",
@@ -105,7 +87,6 @@ def domain_agent_specs() -> tuple[DomainAgentSpec, ...]:
             domain="tax_payout",
             tool_name=TAX_PAYOUT_TOOL_NAME,
             tool_description=TAX_PAYOUT_TOOL_DESCRIPTION,
-            factory=create_tax_payout_agent,
         ),
         DomainAgentSpec(
             slug="product",
@@ -113,7 +94,6 @@ def domain_agent_specs() -> tuple[DomainAgentSpec, ...]:
             domain="product",
             tool_name=PRODUCT_TOOL_NAME,
             tool_description=PRODUCT_TOOL_DESCRIPTION,
-            factory=create_product_agent,
         ),
     )
 
@@ -243,30 +223,32 @@ async def build_runtime_answer_service(
             retriever=limited_retriever,
         )
 
-        domain_agents: list[tuple[DomainAgentSpec, DomainAgent]] = []
-        for spec in domain_agent_specs():
-            if spec.domain == "product":
-                agent = create_product_agent(
-                    model=product_react_model,
-                    catalog_planner_model=default_domain_model,
-                    search_service=search_service,
-                    model_concurrency=model_concurrency,
-                )
-            else:
-                agent = spec.factory(
-                    model=default_domain_model,
-                    search_service=search_service,
-                    model_concurrency=model_concurrency,
-                )
-            domain_agents.append((spec, agent))
+        domain_agents: dict[DomainName, DomainRunner] = {
+            "policy": create_policy_agent(
+                model=default_domain_model,
+                search_service=search_service,
+                model_concurrency=model_concurrency,
+            ),
+            "tax_payout": create_tax_payout_agent(
+                model=default_domain_model,
+                search_service=search_service,
+                model_concurrency=model_concurrency,
+            ),
+            "product": create_product_agent(
+                model=product_react_model,
+                catalog_planner_model=default_domain_model,
+                search_service=search_service,
+                model_concurrency=model_concurrency,
+            ),
+        }
         domain_tools = tuple(
             create_domain_agent_tool(
                 name=spec.tool_name,
                 description=spec.tool_description,
                 domain=spec.domain,
-                runner=agent,
+                runner=domain_agents[spec.domain],
             )
-            for spec, agent in domain_agents
+            for spec in domain_agent_specs()
         )
         supervisor = create_main_supervisor(
             model=supervisor_model,

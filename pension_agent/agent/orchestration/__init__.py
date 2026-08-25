@@ -1,7 +1,7 @@
 """Main Supervisor 실행과 Domain Agent 호출 경계."""
 
+from pension_agent.agent.contracts import DomainRunner
 from pension_agent.agent.orchestration.domain_tool import (
-    DomainRunner,
     build_domain_tool_result,
     create_domain_agent_tool,
 )

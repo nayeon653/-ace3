@@ -16,10 +16,9 @@ from pension_agent.agent.contracts import (
     CatalogResult,
     DomainResult,
     ExecutionStatus,
-    Permission,
     validate_domain_result,
 )
-from pension_agent.agent.domain_agent import DomainAgent, DomainAgentState, create_domain_agent
+from pension_agent.agent.domain_runner import GuardedDomainRunner
 from pension_agent.agent.execution import ExecutionContext, ModelConcurrencyMiddleware
 from pension_agent.agent.product.catalog_matcher import (
     ProductCatalogMatch,
@@ -36,6 +35,7 @@ from pension_agent.agent.product.catalog_query import (
     UnregisteredProviderQuery,
     UnresolvedProductQuery,
 )
+from pension_agent.agent.product.react import ProductAgentState, create_product_react_agent
 from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
 from pension_agent.retrieval import (
@@ -70,7 +70,7 @@ def create_product_agent(
     catalog: ProductCatalog | None = None,
     catalog_matcher: ProductCatalogMatcher | None = None,
     catalog_query_planner: ProductCatalogQueryPlanner | None = None,
-) -> DomainAgent:
+) -> GuardedDomainRunner:
     """ReAct와 카탈로그 계획 모델을 분리해 상품 근거를 조회한다."""
 
     selected_catalog = catalog or load_product_catalog()
@@ -89,9 +89,7 @@ def create_product_agent(
             selected_catalog,
         )
     product_config = config.model_copy(update={"max_search_calls": _PRODUCT_MAX_SEARCH_CALLS})
-    return create_domain_agent(
-        domain="product",
-        permission=Permission.PRODUCT,
+    implementation = create_product_react_agent(
         model=model,
         search_service=search_service,
         system_prompt=load_product_agent_prompt(),
@@ -99,6 +97,11 @@ def create_product_agent(
         model_concurrency=model_concurrency,
         product_code_resolver=selected_catalog.resolve_source_file_name,
         product_lookup_tool=catalog_tool,
+    )
+    return GuardedDomainRunner(
+        domain="product",
+        implementation=implementation,
+        config=product_config,
     )
 
 
@@ -114,7 +117,7 @@ def _create_product_catalog_query_tool(
         ),
     )
     async def query_product_catalog(
-        runtime: ToolRuntime[ExecutionContext, DomainAgentState],
+        runtime: ToolRuntime[ExecutionContext, ProductAgentState],
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("상품 카탈로그 조회 Tool 호출 ID가 없습니다.")
@@ -180,7 +183,7 @@ def _create_legacy_product_code_lookup_tool(matcher: ProductCatalogMatcher) -> B
         ),
     )
     async def lookup_product_codes(
-        runtime: ToolRuntime[ExecutionContext, DomainAgentState],
+        runtime: ToolRuntime[ExecutionContext, ProductAgentState],
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("상품 코드 식별 Tool 호출 ID가 없습니다.")

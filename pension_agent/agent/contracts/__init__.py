@@ -21,6 +21,7 @@ from pension_agent.agent.contracts.permissions import (
     document_types_for_permission,
     validate_permission,
 )
+from pension_agent.agent.contracts.runner import DomainRunner
 
 __all__ = [
     "AgentAnswer",
@@ -33,6 +34,7 @@ __all__ = [
     "DomainName",
     "DomainRequest",
     "DomainResult",
+    "DomainRunner",
     "DomainToolResult",
     "EvidenceChunk",
     "ExecutionStatus",

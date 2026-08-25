@@ -9,16 +9,16 @@
       "mermaid_sha256": "bfc8ee2d66e90ce8816070e5bfe8ab815c7c286c538c44a8922771bab5ebe4a2"
     },
     "policy.png": {
-      "image_sha256": "de498c77e17f1a62a6a5862773c88074c09c15661615b6141b05a2f3de1ae763",
-      "mermaid_sha256": "7dc6e6f4eab8769c9b419130709bfe3a4f91920b772e198226f360b130b1a1f1"
+      "image_sha256": "2547cc6c4f85ab5b69cac7aca9ef48911b6daf59ec1ae9cce550bb4fd47664ae",
+      "mermaid_sha256": "555080d589aa00b3bed7d60f00e6324cbffc7f176ebc12f05b2dfc5114751268"
     },
     "product.png": {
-      "image_sha256": "32f0b3f6518a51c747d1f9d51c6a2ee9e8c9cf09879aede9f6443f707cfffbf5",
-      "mermaid_sha256": "1e4401450d40257a2957e4b02695725ed2b650b1f339a7f87b15959192b613cb"
+      "image_sha256": "f48a95e0ca4b2cb878656cec50fb3256c7c0a0979ed72aac018838672e4b67bf",
+      "mermaid_sha256": "704b9118bf0b11dd216f345c60ab8cafcf346978a98f179877475c6a256d27dd"
     },
     "tax-payout.png": {
-      "image_sha256": "de498c77e17f1a62a6a5862773c88074c09c15661615b6141b05a2f3de1ae763",
-      "mermaid_sha256": "7dc6e6f4eab8769c9b419130709bfe3a4f91920b772e198226f360b130b1a1f1"
+      "image_sha256": "ee1570552eb4872ea5f3d0aa41c8b604987a8457624df19201e7f66485b01253",
+      "mermaid_sha256": "223000c3bac5279d84c445b6474715cb26418432c69379d0486207f52578b134"
     }
   },
   "renderer": "langchain-core MermaidDrawMethod.API",
