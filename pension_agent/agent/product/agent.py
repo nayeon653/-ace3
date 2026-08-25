@@ -63,6 +63,7 @@ def load_product_agent_prompt() -> str:
 def create_product_agent(
     *,
     model: BaseChatModel,
+    catalog_planner_model: BaseChatModel | None = None,
     search_service: SearchRunner,
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
     model_concurrency: ModelConcurrencyMiddleware | None = None,
@@ -70,7 +71,7 @@ def create_product_agent(
     catalog_matcher: ProductCatalogMatcher | None = None,
     catalog_query_planner: ProductCatalogQueryPlanner | None = None,
 ) -> DomainAgent:
-    """HCX 조회 계획을 검증한 뒤 카탈로그 또는 상품 문서를 조회한다."""
+    """ReAct와 카탈로그 계획 모델을 분리해 상품 근거를 조회한다."""
 
     selected_catalog = catalog or load_product_catalog()
     if catalog_matcher is not None and catalog_query_planner is not None:
@@ -79,7 +80,7 @@ def create_product_agent(
         catalog_tool = _create_legacy_product_code_lookup_tool(catalog_matcher)
     else:
         selected_planner = catalog_query_planner or HCXProductCatalogQueryPlanner(
-            model=model,
+            model=catalog_planner_model or model,
             catalog=selected_catalog,
             model_concurrency=model_concurrency,
         )

@@ -47,7 +47,7 @@ GET /answer → api(FastAPI) → agent(라우터/도구 오케스트레이션)
                                 ├→ retrieval(검색)
                                 ├→ rules(결정론적 세제 계산)
                                 └→ prompts + HyperCLOVA X
-                                   (Tool 선택·최종 답변: HCX-005)
+                                   (Main·Product ReAct: HCX-007, 나머지: HCX-005)
 ```
 
 원칙: **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도·세율 등 확정
@@ -132,8 +132,8 @@ LangSmith tracing은 기본적으로 꺼져 있습니다. 개발자가 개인 �
 로컬에 등록해 활성화하면 일반 `/answer` 요청을 포함한 모든 Agent 실행을 추적합니다.
 개인 계정·project 설정과 활성화 방법은
 [`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 따릅니다.
-서버 시작 과정에서 HCX-005, bge-m3, Qdrant, 결정론적 `SearchService`, Domain Agent 3종,
-Main Supervisor와 `AnswerService`를 프로세스당 한 번 조립하고 모든 `/answer`
+서버 시작 과정에서 역할별 HCX-007·HCX-005, bge-m3, Qdrant, 결정론적 `SearchService`,
+Domain Agent 3종, Main Supervisor와 `AnswerService`를 프로세스당 한 번 조립하고 모든 `/answer`
 요청에서 재사용합니다. 온라인 경로는 HCX, query embedding과 Qdrant까지 native async로
 실행하며 프로세스 단위 동시성 상한과 요청 전체 deadline을 적용합니다.
 
@@ -150,12 +150,12 @@ Docling 오프라인 파싱 스크립트와 FastAPI 평가 실행 진입점이 �
 
 ### HyperCLOVA X 설정
 
-Main Supervisor는 Tool 선택과 최종 답변 생성에 같은 HCX-005 인스턴스를 사용합니다.
-모델명, 생성 토큰 수, temperature, timeout과 retry는 환경변수가 아니라
+Main Supervisor와 Product Agent ReAct에는 HCX-007 비추론 모드를 사용하고, 다른
+Domain Agent와 Product Catalog Planner에는 HCX-005를 사용합니다. 모델명, Thinking,
+생성 토큰 수, temperature, timeout과 retry는 환경변수가 아니라
 [`pension_agent/config/hcx.py`](pension_agent/config/hcx.py)의 불변 config에서 버전
-관리합니다. 현재 모델명과 생성 파라미터는 실연결 검증 전에 임의로 정한 초기값이며,
-후속 검증 결과에 따라 HyperCLOVA X 범위 안에서 config와 결정 기록을 변경할 수
-있습니다.
+관리합니다. HCX-007의 Function Calling 구간은 Thinking을 `none`으로 고정합니다.
+후속 검증 결과에 따라 HyperCLOVA X 범위 안에서 config와 결정 기록을 변경할 수 있습니다.
 
 Pydantic Settings가 로컬 `.env` 또는 프로세스 환경에서 인증·연결 정보만 읽습니다.
 
@@ -164,8 +164,8 @@ CLOVASTUDIO_API_KEY=<발급받은 API 키>
 CLOVASTUDIO_API_BASE_URL=https://clovastudio.stream.ntruss.com/v1/openai
 ```
 
-애플리케이션 조립 경계에서는 환경 설정을 읽은 뒤 Factory가 만든 모델을 Main
-Supervisor에 주입합니다.
+애플리케이션 조립 경계에서는 환경 설정을 읽은 뒤 Factory가 만든 역할별 모델을 Main
+Supervisor와 Domain Agent에 주입합니다.
 
 ```python
 from pension_agent.agent.model_factory import create_chat_clovax

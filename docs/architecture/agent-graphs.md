@@ -16,7 +16,7 @@ flowchart TB
     question["GET /answer 질문"] --> supervisor
 
     subgraph main["Main Supervisor · CompiledStateGraph"]
-        supervisor["HCX-005 model"] <--> domain_tools["Domain Agent tools"]
+        supervisor["HCX-007 model"] <--> domain_tools["Domain Agent tools"]
     end
 
     domain_tools -->|analyze_policy| domain_policy
@@ -24,9 +24,9 @@ flowchart TB
     domain_tools -->|analyze_product| domain_product
 
     subgraph domains["Domain Agents · 각각 CompiledStateGraph"]
-        domain_policy["Policy Agent"]
-        domain_tax_payout["Tax/Payout Agent"]
-        domain_product["Product Agent"]
+        domain_policy["Policy Agent<br/>HCX-005"]
+        domain_tax_payout["Tax/Payout Agent<br/>HCX-005"]
+        domain_product["Product Agent<br/>HCX-007"]
     end
 
     domain_policy --> domain_tools

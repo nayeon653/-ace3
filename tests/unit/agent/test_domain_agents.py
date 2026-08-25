@@ -19,6 +19,7 @@ from pension_agent.agent.contracts import DomainName, Permission, validate_domai
 from pension_agent.agent.domain_agent import DomainAgent
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.product import (
+    PRODUCT_CATALOG_QUERY_TOOL_NAME,
     AmbiguousProductQuery,
     BrowseAllCatalogQuery,
     BrowseProviderCatalogQuery,
@@ -271,6 +272,34 @@ def _model(
         ]
     )
     return ToolCallingFakeModel(responses=responses)
+
+
+def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
+    class ProductReactModel(ToolCallingFakeModel):
+        bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
+
+    class CatalogPlannerModel(ToolCallingFakeModel):
+        bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
+
+    react_model = ProductReactModel(responses=[])
+    planner_model = CatalogPlannerModel(responses=[])
+
+    create_product_agent(
+        model=react_model,
+        catalog_planner_model=planner_model,
+        search_service=cast(
+            SearchRunner,
+            FakeSearchService(SearchResult(execution_status="completed")),
+        ),
+    )
+
+    assert planner_model.bindings == [
+        ([PRODUCT_CATALOG_QUERY_TOOL_NAME], {"tool_choice": PRODUCT_CATALOG_QUERY_TOOL_NAME})
+    ]
+    assert all(
+        set(names) == {"lookup_product_codes", "search_documents", "submit_domain_result"}
+        for names, _kwargs in react_model.bindings
+    )
 
 
 @pytest.mark.anyio

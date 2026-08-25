@@ -98,7 +98,8 @@ Tool 입출력과 최종 답변을 개인 LangSmith project에 기록한다. 개
 
 FastAPI lifespan은 서버 프로세스를 시작할 때 다음 객체를 한 번 조립한다.
 
-1. 런타임이 소유하는 HTTP client와 HCX-005 `ChatClovaX`, CLOVA `bge-m3` Query Embedder
+1. 런타임이 소유하는 HTTP client와 역할별 HCX-007·HCX-005 `ChatClovaX`, CLOVA
+   `bge-m3` Query Embedder
 2. `AsyncQdrantClient`와 `AsyncQdrantChunkRetriever`
 3. 규칙 기반 `SearchRouter`, `SearchService`, `EvidenceFilter`
 4. `policy`, `tax_payout`, `product` Domain Agent와 Main Supervisor

@@ -27,6 +27,9 @@ def create_chat_clovax(
 
     # Provider 예외가 정제 오류의 __context__에 남아 시크릿을 노출하지 않게 분리한다.
     try:
+        thinking = (
+            {"effort": config.thinking_effort} if config.thinking_effort is not None else None
+        )
         return ChatClovaX(
             model=config.model,
             max_completion_tokens=config.max_tokens,
@@ -37,6 +40,7 @@ def create_chat_clovax(
             base_url=connection.api_base_url,
             http_client=http_client,
             http_async_client=http_async_client,
+            thinking=thinking,
         )
     except (ImportError, OpenAIError, RuntimeError, TypeError, ValueError):
         pass

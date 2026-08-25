@@ -23,7 +23,9 @@ from pension_agent.agent.runtime import DomainAgentSpec, domain_agent_specs
 from pension_agent.config import (
     BGE_M3_EMBEDDING_CONFIG,
     DEFAULT_AGENT_RUNTIME_CONFIG,
+    DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
+    PRODUCT_REACT_HCX_CONFIG,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -97,7 +99,13 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
             '    subgraph domains["Domain Agents · 각각 CompiledStateGraph"]',
         )
     )
-    lines.extend(f'        {_domain_node_id(spec)}["{spec.display_name} Agent"]' for spec in specs)
+    lines.extend(
+        (
+            f'        {_domain_node_id(spec)}["{spec.display_name} Agent<br/>'
+            f'{PRODUCT_REACT_HCX_CONFIG.model if spec.domain == "product" else DEFAULT_DOMAIN_AGENT_HCX_CONFIG.model}"]'
+        )
+        for spec in specs
+    )
     lines.extend(("    end", ""))
     for spec in specs:
         node_id = _domain_node_id(spec)
@@ -114,7 +122,7 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
             '    subgraph catalog["HCX 카탈로그 Query 계획 · Python 조회"]',
             (
                 '        catalog_lookup["lookup_product_codes"] --> '
-                f'catalog_hcx["{MAIN_SUPERVISOR_HCX_CONFIG.model} model"]'
+                f'catalog_hcx["{DEFAULT_DOMAIN_AGENT_HCX_CONFIG.model} model"]'
             ),
             '        product_catalog["상품 카탈로그"] --> catalog_hcx',
             '        catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]',
