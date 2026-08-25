@@ -139,7 +139,7 @@ Domain Agent 3종, Main Supervisor와 `AnswerService`를 프로세스당 한 번
 
 운영 확인용 `GET /health`는 LLM이나 검색 시스템을 호출하지 않습니다. 평가용
 `GET /answer`의 정확한 요청·응답과 오류 계약은
-[`docs/api-spec.md`](docs/api-spec.md)를 참고하세요. 로컬 확인, 배포 실행, 환경변수와
+[`spec/api.md`](spec/api.md)를 참고하세요. 로컬 확인, 배포 실행, 환경변수와
 문제 해결 방법은 [`API 서버 실행과 확인`](docs/operations/api-server.md)에 있습니다.
 
 PR과 `main` 브랜치 push에는 Python 3.12 기반 Backend CI가 실행되며,
@@ -227,7 +227,7 @@ Policy와 Tax/Payout은 `pension_reference`, Product는 `fund_prospectus` 문서
 - [`AGENTS.md`](AGENTS.md), [`CLAUDE.md`](CLAUDE.md) — 도구별 공통 정책 진입점
 - [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 브랜치·커밋·PR·리뷰·태그 규칙 전문
 - [`docs/decisions/`](docs/decisions/README.md) — 아키텍처·프로세스 결정 기록
-- [`docs/api-spec.md`](docs/api-spec.md) — 평가용 API 명세
+- [`spec/README.md`](spec/README.md) — Agent별 현재 구현 스펙과 평가용 API 명세
 - [`docs/qdrant-retrieval-spec.md`](docs/qdrant-retrieval-spec.md) — Qdrant 저장·검색 계약 진입점
 - [`docs/operations/api-server.md`](docs/operations/api-server.md) — API 서버 로컬 실행·배포·문제 해결
 - [`docs/operations/agent-graph-visualization.md`](docs/operations/agent-graph-visualization.md) — 전체 Agent 그래프 생성·검수
