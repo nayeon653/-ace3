@@ -20,7 +20,6 @@ from pension_agent.rules import (
     CalculatorRegistrationError,
     CalculatorVersionRequiredError,
     InvalidCalculationInputError,
-    RuleSource,
 )
 
 
@@ -28,18 +27,6 @@ class _Input(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     amount: Decimal = Field(ge=0)
-
-
-def _source() -> RuleSource:
-    return RuleSource(
-        family_id="a" * 20,
-        candidate_id="b" * 20,
-        source_file_name="source.pdf",
-        source_sha256="c" * 64,
-        page=3,
-        section="산정방법",
-        locator="#/texts/1",
-    )
 
 
 def _definition(
@@ -60,7 +47,6 @@ def _definition(
         effective_from=effective_from,
         effective_to=effective_to,
         allowed_permissions=allowed_permissions,
-        sources=(_source(),),
     )
 
     def calculate(value: _Input) -> CalculationPayload:
@@ -78,7 +64,7 @@ def _service(definition: CalculatorDefinition | None = None) -> CalculationServi
     return CalculationService(registry)
 
 
-def test_service_returns_normalized_result_with_provenance() -> None:
+def test_service_returns_normalized_result() -> None:
     result = _service().calculate(
         CalculationRequest(calculator_id="double_amount", inputs={"amount": "10.25"})
     )
@@ -87,8 +73,6 @@ def test_service_returns_normalized_result_with_provenance() -> None:
     assert result.inputs == {"amount": Decimal("10.25")}
     assert result.outputs == {"doubled": Decimal("20.50")}
     assert result.units == {"doubled": "KRW"}
-    assert result.source_rule_ids == ("a" * 20,)
-    assert result.sources == (_source(),)
 
 
 def test_service_rejects_unknown_calculator() -> None:
@@ -198,13 +182,15 @@ def test_same_request_returns_same_result() -> None:
     assert service.calculate(request) == service.calculate(request)
 
 
-def test_active_metadata_requires_source() -> None:
-    with pytest.raises(ValueError, match="검증된 출처"):
+def test_metadata_rejects_effective_end_before_start() -> None:
+    with pytest.raises(ValueError, match="종료일"):
         CalculatorMetadata(
-            calculator_id="empty_source",
+            calculator_id="invalid_period",
             version="1.0.0",
-            display_name="출처 없는 계산기",
-            description="등록되면 안 되는 계산기",
+            display_name="적용 기간 오류 계산기",
+            description="적용 종료일이 시작일보다 빠른 계산기",
             status="active",
             domain_tags=frozenset({"test"}),
+            effective_from=date(2026, 1, 2),
+            effective_to=date(2026, 1, 1),
         )

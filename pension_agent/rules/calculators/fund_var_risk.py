@@ -5,11 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pension_agent.rules.models import (
-    CalculationPayload,
-    CalculatorMetadata,
-    RuleSource,
-)
+from pension_agent.rules.models import CalculationPayload, CalculatorMetadata
 from pension_agent.rules.registry import CalculatorDefinition
 
 _Percentage = Annotated[Decimal, Field(ge=-100, le=100, allow_inf_nan=False)]
@@ -65,8 +61,6 @@ def calculate_fund_var_risk(value: FundVarRiskInput) -> CalculationPayload:
     )
 
 
-_SOURCE_SHA256 = "7a8af3143e72224b2cab1bbca2342a27f8c302511e99f0f6b45f7044fb551fa5"
-_SOURCE_DRIVE_ID = "1EINmViwKqHCyhVHVfRGH2qgIokLtnYMn"
 FUND_VAR_RISK = CalculatorDefinition(
     metadata=CalculatorMetadata(
         calculator_id="fund_var_risk",
@@ -75,32 +69,6 @@ FUND_VAR_RISK = CalculatorDefinition(
         description="일간 손실률을 연환산하고 위험등급 상한표를 적용한다.",
         status="active",
         domain_tags=frozenset({"product", "risk"}),
-        sources=(
-            RuleSource(
-                family_id="702a66c07e5c2e2d94cd",
-                candidate_id="8d16937a57c7782f7ea5",
-                source_file_name="R2_KR5160420009.pdf",
-                source_sha256=_SOURCE_SHA256,
-                page=20,
-                section="라. 투자위험에 적합한 투자자 유형",
-                locator="#/texts/277",
-                drive_file_id=_SOURCE_DRIVE_ID,
-                extraction_source="docling_bundle",
-                parser_profile="docling-no-ocr-native-v1",
-            ),
-            RuleSource(
-                family_id="a3ab54a1fcb7fd5cbf6f",
-                candidate_id="b194a43dd27eab1c1a08",
-                source_file_name="R2_KR5160420009.pdf",
-                source_sha256=_SOURCE_SHA256,
-                page=20,
-                section="위험등급 기준표 (수익률 변동성 기준)",
-                locator="#/tables/26",
-                drive_file_id=_SOURCE_DRIVE_ID,
-                extraction_source="docling_bundle",
-                parser_profile="docling-no-ocr-native-v1",
-            ),
-        ),
     ),
     input_model=FundVarRiskInput,
     calculate=calculate_fund_var_risk,

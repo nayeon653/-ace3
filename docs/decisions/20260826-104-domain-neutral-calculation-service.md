@@ -19,8 +19,8 @@ superseded-by: []
 한도 등 여러 도메인의 계산 규칙이 함께 있다.
 
 Calculation Service를 Tax/Payout Agent 내부에 구현하면 Product나 Policy에서 같은 실행·
-검증·provenance 계약을 재사용하기 어렵다. 반대로 모든 Agent에 범용 수식 실행 Tool을
-노출하면 잘못된 규칙 선택과 임의 수식 실행 위험이 생긴다.
+검증 계약을 재사용하기 어렵다. 반대로 모든 Agent에 범용 수식 실행 Tool을 노출하면
+잘못된 규칙 선택과 임의 수식 실행 위험이 생긴다.
 
 ## 결정
 
@@ -29,8 +29,9 @@ Python 컴포넌트로 구현한다. 이 패키지는 Agent를 import하지 않�
 연결되지 않는다.
 
 Registry는 사람이 원문을 검토해 active로 승인한 명시적 Python callable만 실행한다.
-문자열 수식, DSL과 `eval`은 지원하지 않는다. 계산 결과에는 입력·출력뿐 아니라 계산기
-버전, 도메인 태그와 원문 provenance를 포함한다.
+문자열 수식, DSL과 `eval`은 지원하지 않는다. 계산 결과에는 입력·출력, 계산기 버전과
+도메인 태그를 포함한다. 계산 출처와 parser provenance는 현재 런타임 결과나 Agent 근거에
+포함하지 않고 오프라인 개발 자료로만 관리한다.
 
 Tax/Payout, Product와 Policy의 소비 여부와 `allowed_permissions`는 실제 사용 사례를 확인한
 후 도메인별 adapter 이슈에서 결정한다. permission은 계산 요청 payload가 아니라 신뢰된
@@ -47,18 +48,18 @@ adapter 호출 경계에서 주입한다. Main Supervisor는 Calculation Service
 ### Agent가 계산식 문자열을 전달하는 범용 실행기
 
 함수 추가는 빠르지만 LLM이 검증되지 않은 식이나 다른 도메인의 규칙을 실행할 수 있다.
-출처·버전·입력 경계도 함수별로 강제하기 어렵다.
+버전과 입력 경계도 함수별로 강제하기 어렵다.
 
 ### Agent별 독립 계산 코드
 
-도메인 결합은 적지만 Registry, Decimal, 오류와 provenance 계약이 중복되고 결과 형식이
-달라진다.
+도메인 결합은 적지만 Registry, Decimal과 오류 계약이 중복되고 결과 형식이 달라진다.
 
 ## 결과
 
 - 계산 함수와 Agent adapter를 독립적으로 개발·검토할 수 있다.
-- 같은 실행·버전·출처 계약을 여러 도메인이 재사용할 수 있다.
+- 같은 실행·버전·입출력 계약을 여러 도메인이 재사용할 수 있다.
 - 소비 권한은 후속 adapter에서 최소 `allowed_permissions`로 제한할 수 있다.
+- 계산 결과와 문서 근거의 연결은 실제 Agent adapter를 설계할 때 별도로 결정한다.
 - 실제 소비자가 아직 없으므로 초기 Service는 단위 테스트와 직접 Python 호출로만 검증된다.
 - Agent 연결 전에는 외부 API의 계산 기능이나 `DomainResult.calculations` 동작이 바뀌지 않는다.
 

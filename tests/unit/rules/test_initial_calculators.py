@@ -41,7 +41,6 @@ def test_pension_withdrawal_limit_formula(pension_year: int, expected: Decimal) 
     assert result.outputs == {"withdrawal_limit": expected}
     assert result.units == {"withdrawal_limit": "KRW"}
     assert result.domain_tags == frozenset({"pension", "withdrawal_limit"})
-    assert result.sources[0].page == 1
 
 
 @pytest.mark.parametrize("pension_year", [0, 11])
@@ -71,7 +70,6 @@ def test_fund_standard_price_formula_and_rounding() -> None:
 
     assert result.outputs == {"standard_price_per_1000_units": Decimal("1.24")}
     assert result.units == {"standard_price_per_1000_units": "KRW/1,000 units"}
-    assert result.sources[0].source_sha256.startswith("bfc65bedacc9")
 
 
 @pytest.mark.parametrize(
@@ -117,10 +115,6 @@ def test_fund_var_uses_absolute_loss_and_returns_grade() -> None:
     assert result.outputs["annualized_var_percent"] == Decimal(250).sqrt()
     assert result.outputs["risk_grade"] == 4
     assert result.outputs["risk_label"] == "보통 위험"
-    assert result.source_rule_ids == (
-        "702a66c07e5c2e2d94cd",
-        "a3ab54a1fcb7fd5cbf6f",
-    )
 
 
 def test_initial_calculators_are_json_serializable_without_binary_float() -> None:

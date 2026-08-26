@@ -26,7 +26,7 @@ class CalculationService:
         *,
         permission: Permission | None = None,
     ) -> CalculationResult:
-        """요청을 검증된 입력 모델로 변환하고 provenance를 포함해 반환한다."""
+        """요청을 검증된 입력 모델로 변환하고 정규화 결과를 반환한다."""
 
         definition = self._registry.resolve(
             request.calculator_id,
@@ -62,7 +62,5 @@ class CalculationService:
             outputs=payload.outputs,
             units=payload.units,
             domain_tags=metadata.domain_tags,
-            source_rule_ids=tuple(source.family_id for source in metadata.sources),
-            sources=metadata.sources,
             warnings=payload.warnings,
         )

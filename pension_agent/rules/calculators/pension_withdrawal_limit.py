@@ -5,11 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pension_agent.rules.models import (
-    CalculationPayload,
-    CalculatorMetadata,
-    RuleSource,
-)
+from pension_agent.rules.models import CalculationPayload, CalculatorMetadata
 from pension_agent.rules.registry import CalculatorDefinition
 
 _Money = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
@@ -47,20 +43,6 @@ PENSION_WITHDRAWAL_LIMIT = CalculatorDefinition(
         description="연금계좌 평가액과 연금수령연차로 연금수령한도를 계산한다.",
         status="active",
         domain_tags=frozenset({"pension", "withdrawal_limit"}),
-        sources=(
-            RuleSource(
-                family_id="b7dfcdf45499a9f10327",
-                candidate_id="0cbc65b32176ad9dd1be",
-                source_file_name="doc2.pdf",
-                source_sha256=("78b5ceb04224970c4535dd5549068e631d20d327978669307ec2a17cb46ce027"),
-                page=1,
-                section="1. 개시신청 개요",
-                locator="연금수령한도 및 연금수령연차 항목",
-                drive_file_id="1l8TMNcINBcP-s4gOBOCOy0rPGfrBZwfj",
-                extraction_source="docling_bundle",
-                parser_profile="docling-no-ocr-formula-v1",
-            ),
-        ),
     ),
     input_model=PensionWithdrawalLimitInput,
     calculate=calculate_pension_withdrawal_limit,

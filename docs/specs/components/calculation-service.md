@@ -43,11 +43,15 @@ Service와 동일한 공용 `Permission`을 `CalculationService.calculate(..., p
 - 계산기 ID·버전·표시 이름과 도메인 태그
 - Pydantic이 정규화한 입력
 - 출력 키별 값과 단위
-- 규칙 family ID와 전체 원문 provenance
 - 계산 결과 사용 시 확인해야 할 warning
 
 `Decimal`은 JSON에서 문자열로 직렬화한다. 금액·세율 계산에 binary `float`를 사용하지
 않는다.
+
+계산 출처는 현재 `CalculationResult`와 Agent의 `evidence`에 포함하지 않는다. 후보 선정과
+산식 검증에 사용한 PDF, formula catalog와 parser provenance는 오프라인 개발 자료로만
+관리한다. 계산 결과와 검색 근거를 연결하는 계약은 실제 Agent adapter를 구현할 때 별도로
+결정한다.
 
 ## 규칙 lifecycle
 
@@ -56,13 +60,9 @@ Service와 동일한 공용 `Permission`을 `CalculationService.calculate(..., p
 | `candidate` | 자동 추출 후보 | 금지 |
 | `draft` | 입력·출력과 산식 정규화 중 | 금지 |
 | `reviewed` | 원문 대조 완료, 활성화 전 | 금지 |
-| `active` | 검증된 출처와 함께 실행 승인 | 허용 |
+| `active` | 원문 대조를 마치고 실행 승인 | 허용 |
 | `retired` | 다른 버전으로 대체 | 금지 |
 | `blocked` | 상수·경계·단위·반올림 등을 확정하지 못함 | 금지 |
-
-active 메타데이터에는 하나 이상의 `RuleSource`가 필요하다. 출처는 family/candidate ID,
-파일명, SHA-256, 페이지·section 또는 locator, Drive ID, 추출 방식과 parser profile을
-보존한다.
 
 ## Registry와 실행 제한
 
@@ -91,11 +91,14 @@ active 메타데이터에는 하나 이상의 `RuleSource`가 필요하다. 출�
 
 ## 초기 active 계산기
 
-| 계산기 ID | 도메인 태그 | 산식·규칙 | 주요 출처 |
+다음 표의 검증 문서는 개발 단계의 원문 대조 기록이며 런타임 결과나 Agent 근거에
+직렬화하지 않는다.
+
+| 계산기 ID | 도메인 태그 | 산식·규칙 | 검증 문서 |
 |---|---|---|---|
-| `pension_withdrawal_limit` | `pension`, `withdrawal_limit` | 평가액 ÷ (11 - 수령연차) × 120%, 1~10년차 | `doc2.pdf` 1쪽, family `b7dfcdf45499a9f10327` |
-| `fund_standard_price` | `product`, `fund_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽, family `b90977046022dd5ed540` |
-| `fund_var_risk` | `product`, `risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽, families `702a66c07e5c2e2d94cd`, `a3ab54a1fcb7fd5cbf6f` |
+| `pension_withdrawal_limit` | `pension`, `withdrawal_limit` | 평가액 ÷ (11 - 수령연차) × 120%, 1~10년차 | `doc2.pdf` 1쪽 |
+| `fund_standard_price` | `product`, `fund_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
+| `fund_var_risk` | `product`, `risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 
 표시 자릿수나 최종 지급 단위의 반올림이 출처에 없으면 계산 결과 warning에 명시한다.
 기준가격 계산은 원문에 있는 원 미만 셋째 자리 반올림을 `ROUND_HALF_UP`으로 적용한다.
@@ -116,7 +119,6 @@ active 메타데이터에는 하나 이상의 `RuleSource`가 필요하다. 출�
 2. `extra="forbid"`, `frozen=True`인 Pydantic 입력 모델을 작성한다.
 3. 금액과 비율에 `Decimal` 범위 제약을 설정한다.
 4. 출력 키와 단위를 명시하고 필요한 warning을 작성한다.
-5. 각 독립 산식·조건표의 `RuleSource`를 모두 추가한다.
 
 ### 3. 함수와 Registry 등록
 
@@ -134,7 +136,7 @@ active 메타데이터에는 하나 이상의 `RuleSource`가 필요하다. 출�
 - 0으로 나누기와 입력 누락·추가 필드
 - 반올림 절반값과 단위
 - 같은 요청의 결정성
-- 계산기 ID·버전·상태·출처 누락
+- 계산기 ID·버전·상태
 - JSON에서 Decimal 문자열 직렬화
 
 ## Agent 연결 경계
@@ -148,6 +150,9 @@ adapter는 실제 평가 질문, 필요한 입력과 접근 권한을 확인한 
 3. 누락 조건과 적용 불가 처리
 4. DomainResult 또는 전용 결과 계약으로의 직렬화
 5. LLM이 Python 결과의 확정 숫자를 변경하지 못하게 하는 최종 응답 안정화
+
+계산 결과를 어떤 검색 근거와 연결할지는 이 adapter 이슈에서 별도로 검토하며, 현재
+Calculation Service의 출처 필드를 전제로 하지 않는다.
 
 Main Supervisor에는 범용 계산 실행 권한을 주지 않는다.
 

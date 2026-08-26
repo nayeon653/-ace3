@@ -1,4 +1,4 @@
-"""Calculation Service의 입력·결과와 규칙 출처 계약."""
+"""Calculation Service의 입력·결과 계약."""
 
 from __future__ import annotations
 
@@ -20,27 +20,6 @@ _Version = Annotated[
     str,
     StringConstraints(strip_whitespace=True, pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$"),
 ]
-_HexDigest = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, pattern=r"^[0-9a-f]{64}$"),
-]
-
-
-class RuleSource(BaseModel):
-    """계산 규칙을 원문에서 다시 찾기 위한 provenance."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
-
-    family_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{20}$")]
-    candidate_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{20}$")]
-    source_file_name: Annotated[str, StringConstraints(min_length=1)]
-    source_sha256: _HexDigest
-    page: int | None = Field(default=None, ge=1)
-    section: str | None = None
-    locator: Annotated[str, StringConstraints(min_length=1)]
-    drive_file_id: str | None = None
-    extraction_source: str | None = None
-    parser_profile: str | None = None
 
 
 class CalculatorMetadata(BaseModel):
@@ -57,16 +36,13 @@ class CalculatorMetadata(BaseModel):
     effective_from: date | None = None
     effective_to: date | None = None
     allowed_permissions: frozenset[Permission] | None = None
-    sources: tuple[RuleSource, ...] = ()
 
     @model_validator(mode="after")
     def validate_lifecycle(self) -> CalculatorMetadata:
-        """active 규칙에는 출처가 있고 적용 종료일은 시작일 이후여야 한다."""
+        """적용 종료일이 시작일보다 빠르지 않은지 검증한다."""
 
         if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
             raise ValueError("규칙 적용 종료일은 시작일보다 빠를 수 없습니다.")
-        if self.status == "active" and not self.sources:
-            raise ValueError("active 계산 규칙에는 검증된 출처가 필요합니다.")
         return self
 
     def applies_on(self, target: date) -> bool:
@@ -110,7 +86,7 @@ class CalculationPayload(BaseModel):
 
 
 class CalculationResult(BaseModel):
-    """함수 버전과 출처까지 포함한 결정론적 계산 기록."""
+    """함수 버전과 정규화 입출력을 포함한 결정론적 계산 기록."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -121,6 +97,4 @@ class CalculationResult(BaseModel):
     outputs: dict[str, CalculationScalar]
     units: dict[str, str]
     domain_tags: frozenset[str]
-    source_rule_ids: tuple[str, ...]
-    sources: tuple[RuleSource, ...]
     warnings: tuple[str, ...]

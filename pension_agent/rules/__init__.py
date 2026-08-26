@@ -20,7 +20,6 @@ from pension_agent.rules.models import (
     CalculationRequest,
     CalculationResult,
     CalculatorMetadata,
-    RuleSource,
     RuleStatus,
 )
 from pension_agent.rules.registry import CalculationRegistry, CalculatorDefinition
@@ -43,7 +42,6 @@ __all__ = [
     "CalculatorVersionRequiredError",
     "InputIssue",
     "InvalidCalculationInputError",
-    "RuleSource",
     "RuleStatus",
     "build_default_calculation_registry",
     "create_default_calculation_service",

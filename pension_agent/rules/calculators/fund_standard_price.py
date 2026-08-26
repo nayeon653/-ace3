@@ -7,11 +7,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pension_agent.rules.models import (
-    CalculationPayload,
-    CalculatorMetadata,
-    RuleSource,
-)
+from pension_agent.rules.models import CalculationPayload, CalculatorMetadata
 from pension_agent.rules.registry import CalculatorDefinition
 
 _Money = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
@@ -60,20 +56,6 @@ FUND_STANDARD_PRICE = CalculatorDefinition(
         description="순자산총액을 총좌수로 나누어 1,000좌당 기준가격을 계산한다.",
         status="active",
         domain_tags=frozenset({"product", "fund_price"}),
-        sources=(
-            RuleSource(
-                family_id="b90977046022dd5ed540",
-                candidate_id="50557c65895c523004ab",
-                source_file_name="R2_KR510902511M.pdf",
-                source_sha256=("bfc65bedacc9ff64f73414e7c5cd9ac13c241c9838611a983bb23d1abc715491"),
-                page=24,
-                section="12. 기준가격 산정기준 및 집합투자재산의 평가",
-                locator="#/tables/31",
-                drive_file_id="1Qf3hwVJJynrq-B_kNYV1_RX49j1biIgA",
-                extraction_source="docling_bundle",
-                parser_profile="docling-no-ocr-formula-v1",
-            ),
-        ),
     ),
     input_model=FundStandardPriceInput,
     calculate=calculate_fund_standard_price,
