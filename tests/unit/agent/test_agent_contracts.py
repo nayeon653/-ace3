@@ -33,7 +33,15 @@ def _completed_result() -> DomainResult:
                 "content": "외부 전달 금지",
             }
         ],
-        "calculations": [{"calculator_name": "example", "inputs": {"amount": 1}, "result": 1}],
+        "calculations": [
+            {
+                "calculator_id": "example",
+                "inputs": {"amount": "1"},
+                "outputs": {"result": "1"},
+                "units": {"result": "KRW"},
+                "warnings": [],
+            }
+        ],
         "warnings": [],
     }
 
@@ -53,11 +61,11 @@ def test_permission_maps_domain_to_document_types(
     assert document_types_for_permission(permission) == frozenset({expected_document_type})
 
 
-def test_domain_tool_result_excludes_evidence_and_calculations() -> None:
+def test_domain_tool_result_excludes_evidence_and_includes_calculations() -> None:
     tool_result = build_domain_tool_result(_completed_result())
 
     assert "evidence" not in tool_result
-    assert "calculations" not in tool_result
+    assert tool_result["calculations"] == _completed_result()["calculations"]
     assert tool_result["decision"]["conclusion"] == "이전할 수 있습니다."
 
 

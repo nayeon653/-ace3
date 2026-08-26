@@ -42,10 +42,11 @@ class EvidenceChunk(TypedDict):
 class CalculationResult(TypedDict):
     """Python 계산 함수가 생성한 확정 계산 기록."""
 
-    calculator_name: str
+    calculator_id: str
     inputs: dict[str, Any]
-    result: Any
-    unit: NotRequired[str]
+    outputs: dict[str, Any]
+    units: dict[str, str]
+    warnings: list[str]
 
 
 class DomainDecision(TypedDict):
@@ -94,6 +95,7 @@ class DomainToolResult(TypedDict):
     domain: DomainName
     execution_status: ExecutionStatus
     decision: NotRequired[DomainDecision]
+    calculations: list[CalculationResult]
     warnings: list[str]
     catalog_result: NotRequired[CatalogResult]
     error: NotRequired[str]
