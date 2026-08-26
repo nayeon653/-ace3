@@ -1,0 +1,53 @@
+"""집합투자기구의 1,000좌당 기준가격 계산 규칙."""
+
+from __future__ import annotations
+
+from decimal import ROUND_HALF_UP, Decimal, localcontext
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from pension_agent.rules.models import CalculationOutput, CalculatorDefinition
+
+_Money = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
+_Units = Annotated[Decimal, Field(gt=0, allow_inf_nan=False)]
+
+
+class FundStandardPriceInput(BaseModel):
+    """기준가격 산정에 필요한 전일 자산·부채·총좌수."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total_assets_krw: _Money
+    total_liabilities_krw: _Money
+    total_units: _Units
+
+    @model_validator(mode="after")
+    def validate_net_assets(self) -> FundStandardPriceInput:
+        """순자산총액이 음수가 되는 입력을 거부한다."""
+
+        if self.total_liabilities_krw > self.total_assets_krw:
+            raise ValueError("부채총액은 자산총액보다 클 수 없습니다.")
+        return self
+
+
+def calculate_fund_standard_price(value: FundStandardPriceInput) -> CalculationOutput:
+    """순자산총액을 총좌수로 나눈 뒤 1,000좌 단위 가격을 반올림한다."""
+
+    with localcontext() as context:
+        context.prec = 28
+        price = (
+            (value.total_assets_krw - value.total_liabilities_krw)
+            / value.total_units
+            * Decimal(1000)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return CalculationOutput(
+        outputs={"standard_price_per_1000_units": price},
+        units={"standard_price_per_1000_units": "KRW/1,000 units"},
+    )
+
+
+FUND_STANDARD_PRICE = CalculatorDefinition(
+    input_model=FundStandardPriceInput,
+    calculate=calculate_fund_standard_price,
+)
