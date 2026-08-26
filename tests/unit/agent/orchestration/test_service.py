@@ -125,6 +125,42 @@ def _catalog_result() -> DomainResult:
     }
 
 
+def _calculation_result() -> DomainResult:
+    return {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "determined",
+            "conclusion": "검증된 Python 계산 결과입니다.",
+            "missing_conditions": [],
+        },
+        "evidence": [
+            {
+                "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+                "source_file_name": "rules.pdf",
+                "title": "연금수령한도",
+                "locator": "1쪽",
+                "content": "연금수령한도 계산 규칙",
+            }
+        ],
+        "calculations": [
+            {
+                "calculator_id": "pension_withdrawal_limit",
+                "inputs": {
+                    "account_valuation_krw": "10000000",
+                    "pension_year": 1,
+                },
+                "outputs": {"withdrawal_limit": "1200000.0"},
+                "units": {"withdrawal_limit": "KRW"},
+                "warnings": [
+                    "출처에는 최종 지급 단위의 반올림·절사 규칙이 명시되지 않았습니다.",
+                ],
+            }
+        ],
+        "warnings": [],
+    }
+
+
 def _state(*, messages: list[Any], domain_results: list[DomainResult]) -> dict[str, Any]:
     return {
         "messages": messages,
@@ -197,6 +233,24 @@ async def test_answer_service_replaces_catalog_only_answer_with_verified_values(
         "- 미래에셋고배당포커스 (미래에셋, KR510902773M)"
     )
     assert "99" not in result.answer.answer
+
+
+async def test_answer_service_replaces_calculation_only_answer_with_verified_values() -> None:
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="연금수령한도는 999원입니다.")],
+            domain_results=[_calculation_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001",
+        question="연금계좌를 이전할 수 있나요?",
+    )
+
+    assert "연금수령한도: 1200000.0 KRW" in result.answer.answer
+    assert "반올림·절사 규칙" in result.answer.answer
+    assert "999" not in result.answer.answer
 
 
 async def test_answer_service_normalizes_supervisor_execution_failure() -> None:

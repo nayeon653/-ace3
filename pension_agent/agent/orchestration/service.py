@@ -9,6 +9,7 @@ from typing import Any, Protocol, cast
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import TypeAdapter, ValidationError
 
+from pension_agent.agent.calculation import format_calculation_summary
 from pension_agent.agent.contracts import (
     AgentAnswer,
     CatalogResult,
@@ -148,7 +149,10 @@ class AnswerService:
                                     "Main Supervisor의 최종 자연어 답변이 없습니다."
                                 ) from None
                             answer = _stabilize_catalog_answer(
-                                answer,
+                                _stabilize_calculation_answer(
+                                    answer,
+                                    state["domain_results"],
+                                ),
                                 state["domain_results"],
                             )
                 except TimeoutError:
@@ -284,6 +288,35 @@ def _stabilize_catalog_answer(
     if len(catalog_results) == len(domain_results):
         return AgentAnswer(answer=catalog_text)
     return AgentAnswer(answer=f"{answer.answer.rstrip()}\n\n{catalog_text}")
+
+
+def _stabilize_calculation_answer(
+    answer: AgentAnswer,
+    domain_results: list[DomainResult],
+) -> AgentAnswer:
+    """LLM 표현과 무관하게 검증된 Python 계산값을 최종 답변에 보존한다."""
+
+    calculation_domains = [result for result in domain_results if result["calculations"]]
+    calculations = [
+        calculation
+        for result in calculation_domains
+        for calculation in result["calculations"]
+    ]
+    if not calculations:
+        return answer
+
+    calculation_text = "검증된 Python 계산 결과:\n" + format_calculation_summary(calculations)
+    calculation_warnings = list(
+        dict.fromkeys(
+            warning for calculation in calculations for warning in calculation["warnings"]
+        )
+    )
+    if calculation_warnings:
+        warning_text = "\n".join(f"- {warning}" for warning in calculation_warnings)
+        calculation_text = f"{calculation_text}\n\n계산 주의사항:\n{warning_text}"
+    if len(calculation_domains) == len(domain_results):
+        return AgentAnswer(answer=calculation_text)
+    return AgentAnswer(answer=f"{answer.answer.rstrip()}\n\n{calculation_text}")
 
 
 def _catalog_answer(result: CatalogResult) -> str:
