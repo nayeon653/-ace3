@@ -147,3 +147,64 @@ append-only. 실패한 실험도 남긴다 — 같은 시도를 반복하지 않
   manual_normalization으로 분류한다(운영 정책에 반영, 아래 문서 참고).
 - 관련 PR/이슈: `feat/knowledge-docs-ingestion` 브랜치, PR 생성 예정. 상위
   이슈 #35(연금 Agent Knowledge Base / Vector DB 구축)의 하위 범위.
+
+## 2026-08-27 Tax/Payout Agent 기준 성능 실험
+
+- 가설: Tax/Payout Agent가 정성적 세제·수령 조건 질문에서 기준 성능을 확보했고,
+  숫자 확정 차단 후처리와 Tax/Payout 외 질문에 대한 도메인 경계가 의도대로
+  동작한다.
+- 방법: `notebooks/agent/tax_payout_agent_playground.ipynb`에서 Tax/Payout
+  Agent를 직접 실행(HCX-005, bge-m3, Qdrant 기반 Search Service)해 기존 예시
+  질문 2개와 추가 기준 질문 8개를 순차 실행하고, 그중 대표 질문 3개는
+  LangSmith trace를 읽기 전용으로 조회해 실행 구조를 확인했다. 실제 연결
+  주소, API key, workspace ID, trace 링크·trace ID는 기록하지 않는다.
+- 결과:
+  - 실행 결과: 기존 예시 2개와 추가 기준 질문 8개 전체에서 `execution_status`는
+    모두 `completed`, `calculations`는 모두 빈 목록이었다. 런타임 실패나
+    timeout은 발생하지 않았다.
+  - 추가 기준 질문 8개의 판정:
+
+    | 번호 | 질문 유형 | 판정 | 관찰 결과 |
+    | -: | -- | -- | -- |
+    | 1 | 세액공제 적용 조건 | 실패 | 조건 설명 질문을 계산기 필요 상태로 교체 |
+    | 2 | 일시금·분할 수령 과세 비교 | 실패 | 정성적 비교가 가능한 질문도 계산기 필요 상태로 교체 |
+    | 3 | 중도해지 세금 금액 | 부분 성공 | 숫자 임의 생성은 차단했지만 실제 계산 기능 부재 |
+    | 4 | 퇴직금 IRP 연금 수령 과세 | 실패 | 관련 근거를 검색했지만 조건 설명 대신 계산기 필요 상태로 교체 |
+    | 5 | 연금수령한도 초과 과세 | 실패 | 과세 방식 질문을 계산 질문으로 오인 |
+    | 6 | 55세 연금 수령 세율 | 부분 성공 | 숫자 생성은 차단했지만 필요한 사용자 조건과 계산 결과를 제공하지 못함 |
+    | 7 | 펀드 위험 | 실패 | Product 질문을 `not_applicable`이 아닌 `undetermined`로 처리하고 검색 청크 5개를 모두 근거로 선택 |
+    | 8 | 계좌 이전 절차 | 실패 | Policy 질문을 `not_applicable`로 거절하지 않고 Tax/Payout 책임으로 처리 |
+
+  - LangSmith trace 확인 결과(대표 질문 3개):
+    - 세 trace 모두 성공하고 HCX-005를 사용했다.
+    - 모델 호출 2회, `search_documents` 1회, `submit_domain_result` 1회로
+      Tool 순서는 항상 `search_documents → submit_domain_result`였다.
+    - Search Service 내부에 별도 LLM 호출은 없었다.
+    - 최종 evidence는 항상 검색 청크 ID의 부분집합이었다.
+    - 세액공제 조건 질문은 모델이 `determined`로 제출했지만 Python 숫자 패턴
+      후처리가 `conditional`로 교체했다.
+    - 중도해지 질문은 모델이 `undetermined`로 제출했지만 Python 숫자 패턴
+      후처리가 `conditional`로 다시 교체했다.
+    - 펀드 위험 질문은 모델이 `undetermined`로 제출했으며 Python 후처리 없이
+      그대로 유지됐다.
+- 결론: **보류** (아래 문제를 구분해 후속 작업으로 이관, 이번 실험에서는
+  운영 코드를 변경하지 않음).
+  1. ReAct 실행과 검색·제출 계약(search_documents → submit_domain_result,
+     evidence가 검색 청크의 부분집합)은 정상 동작한다.
+  2. `_NUMERIC_CLAIM_PATTERN`이 숫자뿐 아니라 `세율`, `한도`, 금액 관련
+     단어를 기준으로 상태와 결론을 일괄 교체해 과잉 차단한다.
+  3. 근거 부족을 뜻하는 `undetermined`도 계산 필요를 뜻하는 `conditional`로
+     변경되어 의미가 왜곡된다.
+  4. Tax/Payout 외 질문(Product, Policy)을 `not_applicable`로 분리하지
+     못하는 모델·프롬프트 경계 문제가 있다.
+  5. 검색 청크 5개를 모두 evidence로 제출한 사례가 있어 evidence precision
+     추가 평가가 필요하다.
+  6. 결정론적 계산기와 Agent Tool 연결은 아직 구현되지 않았다.
+
+  후속 작업 후보:
+  - Tax/Payout 숫자 차단 후처리 수정
+  - Tax/Payout 도메인 경계 강화
+  - Evidence 선택 정밀도 평가
+  - 결정론적 세제·수령 계산기 구현
+  - 계산 Tool과 Tax/Payout Agent 연결
+- 관련 PR/이슈: `test/106-tax-payout-baseline` 브랜치, 이슈 #106.
