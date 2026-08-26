@@ -64,9 +64,10 @@ DomainRequest
 
 ## 현재 제한
 
-`pension_agent/rules/`에는 아직 세액공제, 연금소득세율, 연금수령한도 등의 결정론적
-계산기와 Agent Tool 연결이 구현되어 있지 않다. 따라서 공통 계약에 `CalculationResult`가
-정의되어 있어도 현재 Tax/Payout Agent는 이를 생성하지 않는다.
+`pension_agent/rules/`에는 Agent와 분리된 공용 Calculation Service와 일부 초기 계산
+함수가 구현되어 있다. 다만 Tax/Payout Agent의 계산 Tool, allowlist와 결과 adapter는 아직
+연결하지 않았다. 따라서 공통 계약에 `CalculationResult`가 정의되어 있어도 현재
+Tax/Payout Agent는 이를 생성하지 않는다.
 
 계산 기능을 추가할 때는 다음을 같은 변경에서 명세해야 한다.
 
