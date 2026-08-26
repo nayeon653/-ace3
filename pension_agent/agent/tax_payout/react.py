@@ -24,6 +24,7 @@ from langgraph.types import Command
 from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
+    CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
 )
@@ -119,14 +120,15 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
         last_message = state.get("messages", [])[-1]
         if not isinstance(last_message, AIMessage) or last_message.tool_calls:
             return None
-        instruction = (
-            (
+        if state.get("calculations"):
+            instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+        elif state.get("search_result") is not None:
+            instruction = (
                 "연금수령한도 계산이면 calculate_pension_withdrawal_limit Tool을 호출하고, "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
-            if state.get("search_result") is not None
-            else "search_documents Tool로 제공 문서 근거를 검색하세요."
-        )
+        else:
+            instruction = "search_documents Tool로 제공 문서 근거를 검색하세요."
         return {
             "jump_to": "model",
             "messages": [
@@ -156,6 +158,34 @@ class SingleTaxPayoutSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
         if tool_calls == last_message.tool_calls:
             return None
         return {"messages": [last_message.model_copy(update={"tool_calls": tool_calls})]}
+
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.after_model(state, runtime)
+
+
+class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
+    """검색·계산·결과 제출 순서에서 현재 허용된 Tool 호출 하나만 남긴다."""
+
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        last_message = state.get("messages", [])[-1]
+        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+            return None
+        allowed_tools: tuple[str, ...]
+        if state.get("search_result") is None:
+            allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME,)
+        elif state.get("calculations"):
+            allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
+        else:
+            allowed_tools = (
+                CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+                SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+            )
+        allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
+        kept_calls = allowed_calls[:1]
+        if kept_calls == last_message.tool_calls:
+            return None
+        return {"messages": [last_message.model_copy(update={"tool_calls": kept_calls})]}
 
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.after_model(state, runtime)
@@ -223,6 +253,7 @@ def create_tax_payout_react_agent(
                 run_limit=config.max_submit_calls,
                 exit_behavior="continue",
             ),
+            EnforceTaxPayoutToolSequence(),
         ),
         name="tax_payout_agent",
     )

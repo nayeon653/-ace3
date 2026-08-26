@@ -33,10 +33,14 @@ def _runtime(*, with_evidence: bool = True) -> SimpleNamespace:
     )
     return SimpleNamespace(
         state={
+            "question": (
+                "평가액 1천만원, 1년차, 자산총액 100만원, 부채총액 10만원, "
+                "총좌수 10만좌, 손실률 -2%"
+            ),
             "search_result": SearchResult(
                 execution_status="completed",
                 retrieved_chunks=chunks,
-            )
+            ),
         },
         tool_call_id="call-1",
     )
@@ -47,6 +51,8 @@ async def test_pension_tool_records_rules_result_in_state() -> None:
     result = await create_pension_withdrawal_limit_tool().coroutine(
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
+        account_valuation_source="1천만원",
+        pension_year_source="1년차",
         runtime=_runtime(),
     )
 
@@ -62,10 +68,14 @@ async def test_product_tools_record_only_their_calculator_results() -> None:
         total_assets_krw=Decimal(1000000),
         total_liabilities_krw=Decimal(100000),
         total_units=Decimal(100000),
+        total_assets_source="100만원",
+        total_liabilities_source="10만원",
+        total_units_source="10만좌",
         runtime=_runtime(),
     )
     var_risk = await create_fund_var_risk_tool().coroutine(
         daily_loss_percentile_percent=Decimal(-2),
+        daily_loss_percentile_source="-2%",
         runtime=_runtime(),
     )
 
@@ -80,11 +90,51 @@ async def test_calculation_tool_requires_completed_search_evidence() -> None:
     result = await create_pension_withdrawal_limit_tool().coroutine(
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
+        account_valuation_source="1천만원",
+        pension_year_source="1년차",
         runtime=_runtime(with_evidence=False),
     )
 
     assert isinstance(result, str)
     assert "문서 근거" in result
+
+
+@pytest.mark.anyio
+async def test_calculation_tool_rejects_input_without_trusted_source() -> None:
+    result = await create_pension_withdrawal_limit_tool().coroutine(
+        account_valuation_krw=Decimal(999999999),
+        pension_year=10,
+        account_valuation_source="999,999,999원",
+        pension_year_source="10년차",
+        runtime=_runtime(),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("account_value", "account_source"),
+    [
+        (Decimal(1), "1년차"),
+        (Decimal(10000000), "평가액 1천만원, 1년차"),
+    ],
+)
+async def test_calculation_tool_rejects_wrong_field_or_multi_value_source(
+    account_value: Decimal,
+    account_source: str,
+) -> None:
+    result = await create_pension_withdrawal_limit_tool().coroutine(
+        account_valuation_krw=account_value,
+        pension_year=1,
+        account_valuation_source=account_source,
+        pension_year_source="1년차",
+        runtime=_runtime(),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
 
 
 def test_calculation_summary_preserves_verified_values() -> None:

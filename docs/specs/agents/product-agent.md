@@ -59,9 +59,10 @@ Product Catalog Query Planner에 질문 원문과 판단 목표를 전달하고 
 - 단일 상품 문서 검색 후 일간 2.5퍼센타일 손실률이 확인된 경우에만 실행한다.
 - Calculation Service의 `fund_var_risk`만 호출하며 한 번으로 제한한다.
 
-두 Tool 모두 사용자 질문 또는 검증된 검색 근거에 없는 입력을 추정하지 않는다. 계산한
-결과는 state에서 직접 `DomainResult.calculations`로 전달하고 자유 형식 제출값으로 받지
-않는다.
+두 Tool 모두 사용자 질문 또는 검증된 검색 근거에 없는 입력을 추정하지 않는다. 각 입력은
+그 값 하나와 단위를 포함한 원문 `source` 구절을 함께 제출하며, Python이 구절 포함 여부와
+정규화 수치 일치를 검증한다. 계산한 결과는 state에서 직접
+`DomainResult.calculations`로 전달하고 자유 형식 제출값으로 받지 않는다.
 
 ### `submit_domain_result`
 

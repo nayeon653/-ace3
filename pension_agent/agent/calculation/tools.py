@@ -12,6 +12,7 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import Field
 
+from pension_agent.agent.calculation.input_sources import inputs_match_trusted_sources
 from pension_agent.agent.contracts import CalculationResult
 from pension_agent.agent.execution import ExecutionContext
 from pension_agent.rules import CalculationError, CalculationRequest, calculate
@@ -40,6 +41,22 @@ def create_pension_withdrawal_limit_tool() -> BaseTool:
             int,
             Field(ge=1, le=10, description="1부터 10까지의 연금수령연차"),
         ],
+        account_valuation_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="평가액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        pension_year_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="수령연차 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
         runtime: ToolRuntime[ExecutionContext, Any],
     ) -> Command | str:
         return _execute_calculation(
@@ -47,6 +64,10 @@ def create_pension_withdrawal_limit_tool() -> BaseTool:
             inputs={
                 "account_valuation_krw": account_valuation_krw,
                 "pension_year": pension_year,
+            },
+            input_sources={
+                "account_valuation_krw": account_valuation_source,
+                "pension_year": pension_year_source,
             },
             tool_name=CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
             runtime=runtime,
@@ -78,6 +99,30 @@ def create_fund_standard_price_tool() -> BaseTool:
             Decimal,
             Field(gt=0, description="전일 총좌수"),
         ],
+        total_assets_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="자산총액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        total_liabilities_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="부채총액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        total_units_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="총좌수 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
         runtime: ToolRuntime[ExecutionContext, Any],
     ) -> Command | str:
         return _execute_calculation(
@@ -86,6 +131,11 @@ def create_fund_standard_price_tool() -> BaseTool:
                 "total_assets_krw": total_assets_krw,
                 "total_liabilities_krw": total_liabilities_krw,
                 "total_units": total_units,
+            },
+            input_sources={
+                "total_assets_krw": total_assets_source,
+                "total_liabilities_krw": total_liabilities_source,
+                "total_units": total_units_source,
             },
             tool_name=CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME,
             runtime=runtime,
@@ -109,11 +159,22 @@ def create_fund_var_risk_tool() -> BaseTool:
             Decimal,
             Field(ge=-100, le=100, description="일간 2.5퍼센타일 손실률(%)"),
         ],
+        daily_loss_percentile_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="손실률 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
         runtime: ToolRuntime[ExecutionContext, Any],
     ) -> Command | str:
         return _execute_calculation(
             calculator_id="fund_var_risk",
             inputs={"daily_loss_percentile_percent": daily_loss_percentile_percent},
+            input_sources={
+                "daily_loss_percentile_percent": daily_loss_percentile_source,
+            },
             tool_name=CALCULATE_FUND_VAR_RISK_TOOL_NAME,
             runtime=runtime,
         )
@@ -125,6 +186,7 @@ def _execute_calculation(
     *,
     calculator_id: str,
     inputs: dict[str, Any],
+    input_sources: dict[str, str],
     tool_name: str,
     runtime: ToolRuntime[ExecutionContext, Any],
 ) -> Command | str:
@@ -138,6 +200,15 @@ def _execute_calculation(
     ):
         return json.dumps(
             {"error": "검증된 문서 근거를 먼저 검색해야 합니다."},
+            ensure_ascii=False,
+        )
+    if not inputs_match_trusted_sources(
+        inputs=inputs,
+        input_sources=input_sources,
+        state=runtime.state,
+    ):
+        return json.dumps(
+            {"error": "계산 입력의 질문·문서 출처를 확인할 수 없습니다."},
             ensure_ascii=False,
         )
     try:

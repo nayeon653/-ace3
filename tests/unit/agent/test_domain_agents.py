@@ -1909,7 +1909,18 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                         "args": {"objective": "연금수령한도 산식 확인"},
                         "id": "search-call",
                         "type": "tool_call",
-                    }
+                    },
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "10000000",
+                            "pension_year": 1,
+                            "account_valuation_source": "1천만원",
+                            "pension_year_source": "1년차",
+                        },
+                        "id": "early-calculation-call",
+                        "type": "tool_call",
+                    },
                 ],
             ),
             AIMessage(
@@ -1920,6 +1931,8 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                         "args": {
                             "account_valuation_krw": "10000000",
                             "pension_year": 1,
+                            "account_valuation_source": "1천만원",
+                            "pension_year_source": "1년차",
                         },
                         "id": "calculation-call",
                         "type": "tool_call",
@@ -2015,6 +2028,9 @@ async def test_product_agent_records_and_uses_verified_standard_price_calculatio
                             "total_assets_krw": "1000000",
                             "total_liabilities_krw": "100000",
                             "total_units": "100000",
+                            "total_assets_source": "100만원",
+                            "total_liabilities_source": "10만원",
+                            "total_units_source": "10만좌",
                         },
                         "id": "calculation-call",
                         "type": "tool_call",
