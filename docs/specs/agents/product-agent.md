@@ -49,6 +49,24 @@ Product Catalog Query Planner에 질문 원문과 판단 목표를 전달하고 
 - 검색 입력은 판단할 비용·위험·유동성·운용 특성을 나타내는 구체적인 `objective`다.
 - 첫 검색이 부족하면 최대 한 번 다른 문서 표현으로 다시 검색할 수 있다.
 
+### `calculate_fund_standard_price`
+
+- 단일 상품 문서 검색 후 자산총액, 부채총액과 총좌수가 확인된 경우에만 실행한다.
+- Calculation Service의 `fund_standard_price`만 호출하며 한 번으로 제한한다.
+
+### `calculate_fund_var_risk`
+
+- 단일 상품 문서 검색 후 일간 2.5퍼센타일 손실률이 확인된 경우에만 실행한다.
+- Calculation Service의 `fund_var_risk`만 호출하며 한 번으로 제한한다.
+
+두 Tool 모두 사용자 질문 또는 검증된 검색 근거에 없는 입력을 추정하지 않는다. 각 입력은
+필드명, 값 하나와 단위를 포함한 원문 `source` 구절을 함께 제출하며, Python이 필드 의미,
+구절 포함 여부와 정규화 수치 일치를 검증한다. 검색 청크에서 가져온 입력은 해당 `chunk_id`를
+계산 결과에 기록하고 최종 evidence에 자동 포함한다. 계산한 결과는 state에서 직접
+`DomainResult.calculations`로 전달하고 자유 형식 제출값으로 받지 않는다.
+복합 질문에서 일부 계산만 성공하면 성공한 계산 결과를 보존하되 전체 상태를 강제로
+`determined`로 바꾸지 않고, 계산하지 못한 항목의 `missing_conditions`를 유지한다.
+
 ### `submit_domain_result`
 
 검색 근거 판단은 실제 사용한 청크 ID와 함께 제출한다. 카탈로그 개수·목록 결과는
@@ -80,6 +98,7 @@ lookup_product_codes
   -> 단일 product_code 확정
   -> 해당 상품 문서 search_documents
   -> 필요 시 검색 목표를 바꿔 1회 추가 검색
+  -> 기준가격 또는 VaR 계산이면 해당 Calculation Tool
   -> submit_domain_result
 ```
 
@@ -105,6 +124,7 @@ Middleware는 한 모델 응답에서 현재 단계에 허용된 Tool 호출 하
 - 식별된 후보 코드와 다른 상품 코드 검색을 거부한다.
 - 카탈로그 조회 후에는 정해진 확정 제출만 허용한다.
 - 단일 상품 식별 후 상품 범위 검색 전 최종 제출을 거부한다.
+- 상품 범위 검색 전 Calculation Tool 호출을 거부한다.
 - 한 모델 응답의 결과 제출은 하나로 제한한다.
 
 ## 실행 제한
@@ -114,6 +134,8 @@ Middleware는 한 모델 응답에서 현재 단계에 허용된 Tool 호출 하
 | Product ReAct 모델 호출 | 최대 5회 |
 | Catalog Tool | 최대 1회 |
 | 검색 Tool | 최대 2회 |
+| 기준가격 Tool | 최대 1회 |
+| VaR 위험등급 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |

@@ -2,6 +2,7 @@
 
 from pension_agent.agent.contracts.answer import AgentAnswer
 from pension_agent.agent.contracts.domain import (
+    CalculationInputSource,
     CalculationResult,
     CatalogItem,
     CatalogResult,
@@ -25,6 +26,7 @@ from pension_agent.agent.contracts.runner import DomainRunner
 
 __all__ = [
     "AgentAnswer",
+    "CalculationInputSource",
     "CalculationResult",
     "CatalogItem",
     "CatalogResult",

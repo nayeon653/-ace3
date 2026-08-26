@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import operator
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, NotRequired, Protocol, cast
@@ -22,7 +24,14 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import Field, ValidationError
 
+from pension_agent.agent.calculation import (
+    calculation_evidence_chunk_ids,
+    create_fund_standard_price_tool,
+    create_fund_var_risk_tool,
+    format_calculation_summary,
+)
 from pension_agent.agent.contracts import (
+    CalculationResult,
     DecisionStatus,
     DomainRequest,
     DomainResult,
@@ -39,6 +48,7 @@ SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 SUBMIT_DOMAIN_RESULT_TOOL_NAME = "submit_domain_result"
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
+_NUMERIC_CLAIM_PATTERN = re.compile(r"(?:\d|%|퍼센트|프로|만\s*원|억\s*원|금액|가격|등급)")
 ProductCodeResolver = Callable[[str], str]
 
 
@@ -51,6 +61,7 @@ class ProductAgentState(AgentState):
     product_scoped_search_completed: NotRequired[bool]
     product_catalog_result: NotRequired[DomainResult]
     search_result: NotRequired[SearchResult]
+    calculations: NotRequired[Annotated[list[CalculationResult], operator.add]]
     domain_result: NotRequired[DomainResult]
 
 
@@ -85,8 +96,14 @@ class CompleteProductResult(AgentMiddleware[Any, Any, Any]):
 class RequireProductTool(AgentMiddleware[Any, Any, Any]):
     """Product 결과가 제출될 때까지 단계에 맞는 Tool 호출을 강제한다."""
 
-    def __init__(self, *, max_search_calls: int) -> None:
+    def __init__(
+        self,
+        *,
+        max_search_calls: int,
+        calculation_tool_names: tuple[str, ...],
+    ) -> None:
         self._max_search_calls = max_search_calls
+        self._calculation_tool_names = calculation_tool_names
 
     @hook_config(can_jump_to=["model"])
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
@@ -98,6 +115,7 @@ class RequireProductTool(AgentMiddleware[Any, Any, Any]):
             instruction = _product_next_tool_instruction(
                 state,
                 max_search_calls=self._max_search_calls,
+                calculation_tool_names=self._calculation_tool_names,
             )
             return {
                 "jump_to": "model",
@@ -147,9 +165,16 @@ class SingleProductSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
 class EnforceProductToolSequence(AgentMiddleware[Any, Any, Any]):
     """Product Agent의 검색 우선·코드 식별·결과 제출 단계를 안전하게 제한한다."""
 
-    def __init__(self, *, lookup_tool_name: str, max_search_calls: int) -> None:
+    def __init__(
+        self,
+        *,
+        lookup_tool_name: str,
+        max_search_calls: int,
+        calculation_tool_names: tuple[str, ...],
+    ) -> None:
         self._lookup_tool_name = lookup_tool_name
         self._max_search_calls = max_search_calls
+        self._calculation_tool_names = calculation_tool_names
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
@@ -162,6 +187,7 @@ class EnforceProductToolSequence(AgentMiddleware[Any, Any, Any]):
             state,
             lookup_tool_name=self._lookup_tool_name,
             max_search_calls=self._max_search_calls,
+            calculation_tool_names=self._calculation_tool_names,
         )
         allowed_calls = [
             call
@@ -223,6 +249,7 @@ class ProductReactAgent:
             {
                 "question": request["question"],
                 "objective": request["objective"],
+                "calculations": [],
                 "messages": [
                     {
                         "role": "user",
@@ -254,17 +281,22 @@ def create_product_react_agent(
         product_code_resolver=product_code_resolver,
         max_search_calls=config.max_search_calls,
     )
+    calculation_tools = (create_fund_standard_price_tool(), create_fund_var_risk_tool())
+    calculation_tool_names = tuple(tool.name for tool in calculation_tools)
     result_tool = _create_product_result_tool()
     graph = create_agent(
         model=model,
-        tools=(product_lookup_tool, search_tool, result_tool),
+        tools=(product_lookup_tool, search_tool, *calculation_tools, result_tool),
         system_prompt=system_prompt,
         state_schema=ProductAgentState,
         context_schema=ExecutionContext,
         middleware=(
             *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteProductResult(),
-            RequireProductTool(max_search_calls=config.max_search_calls),
+            RequireProductTool(
+                max_search_calls=config.max_search_calls,
+                calculation_tool_names=calculation_tool_names,
+            ),
             SingleProductSubmitPerModelCall(),
             ProductModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(
@@ -277,6 +309,14 @@ def create_product_react_agent(
                 run_limit=1,
                 exit_behavior="continue",
             ),
+            *(
+                ToolCallLimitMiddleware(
+                    tool_name=calculation_tool.name,
+                    run_limit=1,
+                    exit_behavior="continue",
+                )
+                for calculation_tool in calculation_tools
+            ),
             ToolCallLimitMiddleware(
                 tool_name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                 run_limit=config.max_submit_calls,
@@ -285,6 +325,7 @@ def create_product_react_agent(
             EnforceProductToolSequence(
                 lookup_tool_name=product_lookup_tool.name,
                 max_search_calls=config.max_search_calls,
+                calculation_tool_names=calculation_tool_names,
             ),
         ),
         name="product_agent",
@@ -396,6 +437,7 @@ def _allowed_product_tools(
     *,
     lookup_tool_name: str,
     max_search_calls: int,
+    calculation_tool_names: tuple[str, ...],
 ) -> tuple[str, ...]:
     """현재 Product Agent 상태에서 실행 가능한 다음 Tool 이름을 반환한다."""
 
@@ -408,12 +450,28 @@ def _allowed_product_tools(
         return (lookup_tool_name,)
     if not state.get("product_scoped_search_completed"):
         return (SEARCH_DOCUMENTS_TOOL_NAME,)
+    unused_calculation_tools = tuple(
+        name for name in calculation_tool_names if not _tool_was_called(state, name)
+    )
     if search_call_count >= max_search_calls:
-        return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
+        return (*unused_calculation_tools, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
     search_result = state.get("search_result")
     if search_result is not None and not search_result.retrieved_chunks:
         return (SEARCH_DOCUMENTS_TOOL_NAME,)
-    return (SUBMIT_DOMAIN_RESULT_TOOL_NAME, SEARCH_DOCUMENTS_TOOL_NAME)
+    return (
+        *unused_calculation_tools,
+        SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+        SEARCH_DOCUMENTS_TOOL_NAME,
+    )
+
+
+def _tool_was_called(state: Mapping[str, Any], tool_name: str) -> bool:
+    """현재 실행 메시지에 완료된 특정 Tool 호출이 있는지 확인한다."""
+
+    return any(
+        isinstance(message, ToolMessage) and message.name == tool_name
+        for message in state.get("messages", [])
+    )
 
 
 def _product_tool_call_is_allowed(
@@ -456,6 +514,7 @@ def _product_next_tool_instruction(
     state: Mapping[str, Any],
     *,
     max_search_calls: int,
+    calculation_tool_names: tuple[str, ...],
 ) -> str:
     """Product Agent의 현재 단계에 맞는 다음 Tool 안내를 만든다."""
 
@@ -478,6 +537,14 @@ def _product_next_tool_instruction(
         and search_call_count < max_search_calls
     ):
         return "검색 목표를 다르게 재작성해 search_documents Tool을 호출하세요."
+    unused_calculation_tools = [
+        name for name in calculation_tool_names if not _tool_was_called(state, name)
+    ]
+    if unused_calculation_tools:
+        return (
+            "기준가격이나 VaR 계산이면 해당 Calculation Tool을 호출하고, "
+            "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+        )
     return "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
 
 
@@ -568,6 +635,7 @@ def _create_product_result_tool() -> Any:
         try:
             result = _build_product_result(
                 search_result=search_result,
+                calculations=list(runtime.state.get("calculations", [])),
                 status=status,
                 conclusion=conclusion,
                 missing_conditions=missing_conditions,
@@ -601,6 +669,7 @@ def _create_product_result_tool() -> Any:
 def _build_product_result(
     *,
     search_result: SearchResult,
+    calculations: list[CalculationResult],
     status: DecisionStatus,
     conclusion: str,
     missing_conditions: list[str],
@@ -614,25 +683,38 @@ def _build_product_result(
             execution_status=search_result.execution_status,
         )
 
+    required_evidence_ids = calculation_evidence_chunk_ids(calculations)
     selected_chunks = _select_evidence_chunks(
         search_result=search_result,
-        evidence_chunk_ids=evidence_chunk_ids,
+        evidence_chunk_ids=list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
     )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_limitations = list(search_result.limitations)
     normalized_conclusion = conclusion.strip()
+    if calculations:
+        normalized_conclusion = "검증된 Python 계산 결과:\n" + format_calculation_summary(
+            calculations
+        )
+        normalized_warnings = [
+            value for value in normalized_warnings if not _NUMERIC_CLAIM_PATTERN.search(value)
+        ]
+        normalized_warnings.extend(
+            warning for calculation in calculations for warning in calculation["warnings"]
+        )
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
         normalized_missing = ["제공 문서의 관련 근거"]
         normalized_warnings.append("검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.")
+        calculations = []
 
     if status == "not_applicable":
         normalized_conclusion = _NOT_APPLICABLE_CONCLUSION
         normalized_missing = []
         normalized_warnings = []
         normalized_limitations = []
+        calculations = []
 
     normalized_warnings.extend(normalized_limitations)
     evidence = [_evidence_from_chunk(chunk) for chunk in selected_chunks]
@@ -647,7 +729,7 @@ def _build_product_result(
             "missing_conditions": normalized_missing,
         },
         "evidence": evidence,
-        "calculations": [],
+        "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
 

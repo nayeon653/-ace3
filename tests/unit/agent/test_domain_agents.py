@@ -35,6 +35,7 @@ from pension_agent.agent.product import (
     create_product_agent,
     load_product_agent_prompt,
 )
+from pension_agent.agent.product.react import _build_product_result
 from pension_agent.agent.search import (
     SearchChunkPayload,
     SearchRequest,
@@ -45,6 +46,7 @@ from pension_agent.agent.tax_payout import (
     create_tax_payout_agent,
     load_tax_payout_agent_prompt,
 )
+from pension_agent.agent.tax_payout.react import _build_tax_payout_result
 from pension_agent.config import DomainAgentConfig
 from pension_agent.core import DocumentType
 from pension_agent.retrieval import load_product_catalog
@@ -303,7 +305,14 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
         ([PRODUCT_CATALOG_QUERY_TOOL_NAME], {"tool_choice": PRODUCT_CATALOG_QUERY_TOOL_NAME})
     ]
     assert all(
-        set(names) == {"lookup_product_codes", "search_documents", "submit_domain_result"}
+        set(names)
+        == {
+            "lookup_product_codes",
+            "search_documents",
+            "calculate_fund_standard_price",
+            "calculate_fund_var_risk",
+            "submit_domain_result",
+        }
         for names, _kwargs in react_model.bindings
     )
 
@@ -376,9 +385,23 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
     assert all(
         set(names)
         == (
-            {"lookup_product_codes", "search_documents", "submit_domain_result"}
+            {
+                "lookup_product_codes",
+                "search_documents",
+                "calculate_fund_standard_price",
+                "calculate_fund_var_risk",
+                "submit_domain_result",
+            }
             if domain == "product"
-            else {"search_documents", "submit_domain_result"}
+            else (
+                {
+                    "search_documents",
+                    "calculate_pension_withdrawal_limit",
+                    "submit_domain_result",
+                }
+                if domain == "tax_payout"
+                else {"search_documents", "submit_domain_result"}
+            )
         )
         for names, _kwargs in model.bindings
     )
@@ -1865,6 +1888,291 @@ async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
 
 
 @pytest.mark.anyio
+async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="연금수령한도",
+                    content="평가액 1천만원, 수령연차 1년차에 대한 산식입니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "연금수령한도 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "10000000",
+                            "pension_year": 1,
+                            "account_valuation_source": "평가액 1천만원",
+                            "pension_year_source": "1년차",
+                        },
+                        "id": "early-calculation-call",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "10000000",
+                            "pension_year": 1,
+                            "account_valuation_source": "평가액 1천만원",
+                            "pension_year_source": "1년차",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 계산값은 999원입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "검색 문서 기준 연금수령한도는?",
+            "objective": "연금수령한도 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert "1200000.0 KRW" in result["decision"]["conclusion"]
+    assert "999" not in result["decision"]["conclusion"]
+    assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
+    assert result["calculations"][0]["outputs"] == {"withdrawal_limit": "1200000.0"}
+    assert result["calculations"][0]["input_sources"]["account_valuation_krw"] == {
+        "origin": "evidence",
+        "text": "평가액 1천만원",
+        "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+    }
+    assert [chunk["chunk_id"] for chunk in result["evidence"]] == [
+        "550e8400-e29b-41d4-a716-446655440000"
+    ]
+
+
+@pytest.mark.anyio
+async def test_product_agent_records_and_uses_verified_standard_price_calculation() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.FUND_PROSPECTUS,
+                    source_file_name="R2_KR510902511M.pdf",
+                    title="기준가격 산정방법",
+                    content="순자산총액을 총좌수로 나누어 1,000좌당 기준가격을 계산합니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "기준가격 산정방법 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_standard_price",
+                        "args": {
+                            "total_assets_krw": "1000000",
+                            "total_liabilities_krw": "100000",
+                            "total_units": "100000",
+                            "total_assets_source": "자산 100만원",
+                            "total_liabilities_source": "부채 10만원",
+                            "total_units_source": "총좌수 10만좌",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 기준가격은 1원입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 상품의 자산 100만원, 부채 10만원, "
+            "총좌수 10만좌일 때 기준가격은?",
+            "objective": "펀드 기준가격 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert "9000.00 KRW/1,000 units" in result["decision"]["conclusion"]
+    assert "1원" not in result["decision"]["conclusion"]
+    assert result["calculations"][0]["calculator_id"] == "fund_standard_price"
+    assert result["calculations"][0]["outputs"] == {"standard_price_per_1000_units": "9000.00"}
+
+
+@pytest.mark.parametrize(
+    ("builder", "document_type", "calculation"),
+    [
+        (
+            _build_tax_payout_result,
+            DocumentType.PENSION_REFERENCE,
+            {
+                "calculator_id": "pension_withdrawal_limit",
+                "inputs": {"account_valuation_krw": "10000000", "pension_year": 1},
+                "input_sources": {
+                    "account_valuation_krw": {
+                        "origin": "question",
+                        "text": "평가액 1천만원",
+                        "chunk_id": None,
+                    },
+                    "pension_year": {
+                        "origin": "question",
+                        "text": "1년차",
+                        "chunk_id": None,
+                    },
+                },
+                "outputs": {"withdrawal_limit": "1200000.0"},
+                "units": {"withdrawal_limit": "KRW"},
+                "warnings": [],
+            },
+        ),
+        (
+            _build_product_result,
+            DocumentType.FUND_PROSPECTUS,
+            {
+                "calculator_id": "fund_standard_price",
+                "inputs": {
+                    "total_assets_krw": "1000000",
+                    "total_liabilities_krw": "100000",
+                    "total_units": "100000",
+                },
+                "input_sources": {
+                    "total_assets_krw": {
+                        "origin": "question",
+                        "text": "자산 100만원",
+                        "chunk_id": None,
+                    },
+                    "total_liabilities_krw": {
+                        "origin": "question",
+                        "text": "부채 10만원",
+                        "chunk_id": None,
+                    },
+                    "total_units": {
+                        "origin": "question",
+                        "text": "총좌수 10만좌",
+                        "chunk_id": None,
+                    },
+                },
+                "outputs": {"standard_price_per_1000_units": "9000.00"},
+                "units": {"standard_price_per_1000_units": "KRW/1,000 units"},
+                "warnings": [],
+            },
+        ),
+    ],
+)
+def test_partial_calculation_preserves_missing_conditions(
+    builder: Callable[..., DomainResult],
+    document_type: DocumentType,
+    calculation: Any,
+) -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = builder(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(document_type, chunk_id=chunk_id)],
+        ),
+        calculations=[calculation],
+        status="conditional",
+        conclusion="지원되는 항목만 계산했습니다.",
+        missing_conditions=["지원되지 않은 추가 계산식"],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == ["지원되지 않은 추가 계산식"]
+    assert "검증된 Python 계산 결과" in result["decision"]["conclusion"]
+    validate_domain_result(result)
+
+
+@pytest.mark.anyio
 async def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() -> None:
     search = FakeSearchService(
         SearchResult(
@@ -2149,7 +2457,7 @@ def _completed_result() -> DomainResult:
     }
 
 
-def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() -> None:
+def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> None:
     assert "search_documents" in load_policy_agent_prompt()
     product_prompt = load_product_agent_prompt()
     assert "search_documents" in product_prompt
@@ -2159,10 +2467,13 @@ def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() 
     assert "특정 상품의 최종 근거로 바로 제출하지 않는다" in product_prompt
     assert "문서 근거 검색에 적합한 구체적인 `objective`로 재작성한다" in product_prompt
     assert "누락된 판단 기준과 다른 문서 용어" in product_prompt
+    assert "calculate_fund_standard_price" in product_prompt
+    assert "calculate_fund_var_risk" in product_prompt
     assert "2회" not in product_prompt
     assert "두 번" not in product_prompt
     assert '"product_code":"KR510902511M"' not in product_prompt
     assert "{{PRODUCT_CATALOG_JSON}}" not in product_prompt
     tax_prompt = load_tax_payout_agent_prompt()
-    assert "확정 세금, 금액, 세율, 한도를 생성하지 않는다" in tax_prompt
+    assert "calculate_pension_withdrawal_limit" in tax_prompt
+    assert "지원하지 않는 세금, 금액, 세율이나 한도를 직접 계산하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt

@@ -31,6 +31,7 @@ def build_domain_tool_result(result: DomainResult) -> DomainToolResult:
     tool_result: DomainToolResult = {
         "domain": result["domain"],
         "execution_status": result["execution_status"],
+        "calculations": result["calculations"],
         "warnings": result["warnings"],
     }
     if "decision" in result:

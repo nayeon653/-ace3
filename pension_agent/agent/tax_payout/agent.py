@@ -31,7 +31,7 @@ def create_tax_payout_agent(
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
     model_concurrency: ModelConcurrencyMiddleware | None = None,
 ) -> GuardedDomainRunner:
-    """단일 Search Service Tool만 사용하는 세제·수령 Agent를 만든다."""
+    """검색과 연금수령한도 계산 Tool을 사용하는 세제·수령 Agent를 만든다."""
 
     implementation = create_tax_payout_react_agent(
         model=model,

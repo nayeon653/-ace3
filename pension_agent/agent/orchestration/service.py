@@ -9,6 +9,7 @@ from typing import Any, Protocol, cast
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import TypeAdapter, ValidationError
 
+from pension_agent.agent.calculation import format_calculation_summary
 from pension_agent.agent.contracts import (
     AgentAnswer,
     CatalogResult,
@@ -148,7 +149,10 @@ class AnswerService:
                                     "Main Supervisor의 최종 자연어 답변이 없습니다."
                                 ) from None
                             answer = _stabilize_catalog_answer(
-                                answer,
+                                _stabilize_calculation_answer(
+                                    answer,
+                                    state["domain_results"],
+                                ),
                                 state["domain_results"],
                             )
                 except TimeoutError:
@@ -284,6 +288,62 @@ def _stabilize_catalog_answer(
     if len(catalog_results) == len(domain_results):
         return AgentAnswer(answer=catalog_text)
     return AgentAnswer(answer=f"{answer.answer.rstrip()}\n\n{catalog_text}")
+
+
+def _stabilize_calculation_answer(
+    answer: AgentAnswer,
+    domain_results: list[DomainResult],
+) -> AgentAnswer:
+    """LLM 표현과 무관하게 검증된 Python 계산값을 최종 답변에 보존한다."""
+
+    calculation_domains = [result for result in domain_results if result["calculations"]]
+    calculations = [
+        calculation for result in calculation_domains for calculation in result["calculations"]
+    ]
+    if not calculations:
+        return answer
+
+    conclusions: list[str] = []
+    conditions: list[str] = []
+    warnings: list[str] = []
+    for result in domain_results:
+        if "catalog_result" in result:
+            continue
+        warnings.extend(result["warnings"])
+        if result["execution_status"] != "completed":
+            conclusions.append(
+                f"{_domain_label(result['domain'])} 분석을 완료하지 못했습니다: {result['error']}"
+            )
+            continue
+        decision = result["decision"]
+        if decision["status"] == "not_applicable":
+            continue
+        if not result["calculations"]:
+            conclusions.append(decision["conclusion"])
+        if decision["missing_conditions"]:
+            condition_text = "\n".join(
+                f"- {condition}" for condition in decision["missing_conditions"]
+            )
+            conditions.append(f"{_domain_label(result['domain'])} 확인 조건:\n{condition_text}")
+    calculation_text = "검증된 Python 계산 결과:\n" + format_calculation_summary(calculations)
+    conclusions.append(calculation_text)
+    warnings.extend(warning for calculation in calculations for warning in calculation["warnings"])
+    answer_parts = [*conclusions, *conditions]
+    unique_warnings = list(dict.fromkeys(warnings))
+    if unique_warnings:
+        warning_text = "\n".join(f"- {warning}" for warning in unique_warnings)
+        answer_parts.append(f"주의사항:\n{warning_text}")
+    return AgentAnswer(answer="\n\n".join(answer_parts))
+
+
+def _domain_label(domain: str) -> str:
+    """내부 도메인 이름을 사용자용 레이블로 변환한다."""
+
+    return {
+        "policy": "업무·제도",
+        "tax_payout": "세제·수령",
+        "product": "상품·운용",
+    }.get(domain, domain)
 
 
 def _catalog_answer(result: CatalogResult) -> str:
