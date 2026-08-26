@@ -303,25 +303,47 @@ def _stabilize_calculation_answer(
     if not calculations:
         return answer
 
-    answer_parts = [
-        result["decision"]["conclusion"]
-        for result in domain_results
-        if not result["calculations"]
-        and "catalog_result" not in result
-        and "decision" in result
-        and result["decision"]["status"] != "not_applicable"
-    ]
+    conclusions: list[str] = []
+    conditions: list[str] = []
+    warnings: list[str] = []
+    for result in domain_results:
+        if "catalog_result" in result:
+            continue
+        warnings.extend(result["warnings"])
+        if result["execution_status"] != "completed":
+            conclusions.append(
+                f"{_domain_label(result['domain'])} 분석을 완료하지 못했습니다: {result['error']}"
+            )
+            continue
+        decision = result["decision"]
+        if decision["status"] == "not_applicable":
+            continue
+        if not result["calculations"]:
+            conclusions.append(decision["conclusion"])
+        if decision["missing_conditions"]:
+            condition_text = "\n".join(
+                f"- {condition}" for condition in decision["missing_conditions"]
+            )
+            conditions.append(f"{_domain_label(result['domain'])} 확인 조건:\n{condition_text}")
     calculation_text = "검증된 Python 계산 결과:\n" + format_calculation_summary(calculations)
-    calculation_warnings = list(
-        dict.fromkeys(
-            warning for calculation in calculations for warning in calculation["warnings"]
-        )
-    )
-    if calculation_warnings:
-        warning_text = "\n".join(f"- {warning}" for warning in calculation_warnings)
-        calculation_text = f"{calculation_text}\n\n계산 주의사항:\n{warning_text}"
-    answer_parts.append(calculation_text)
+    conclusions.append(calculation_text)
+    warnings.extend(warning for calculation in calculations for warning in calculation["warnings"])
+    answer_parts = [*conclusions, *conditions]
+    unique_warnings = list(dict.fromkeys(warnings))
+    if unique_warnings:
+        warning_text = "\n".join(f"- {warning}" for warning in unique_warnings)
+        answer_parts.append(f"주의사항:\n{warning_text}")
     return AgentAnswer(answer="\n\n".join(answer_parts))
+
+
+def _domain_label(domain: str) -> str:
+    """내부 도메인 이름을 사용자용 레이블로 변환한다."""
+
+    return {
+        "policy": "업무·제도",
+        "tax_payout": "세제·수령",
+        "product": "상품·운용",
+    }.get(domain, domain)
 
 
 def _catalog_answer(result: CatalogResult) -> str:

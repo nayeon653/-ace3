@@ -157,7 +157,7 @@ def _calculation_result() -> DomainResult:
                 ],
             }
         ],
-        "warnings": [],
+        "warnings": ["검색 범위가 제한적입니다."],
     }
 
 
@@ -254,10 +254,17 @@ async def test_answer_service_replaces_calculation_only_answer_with_verified_val
 
 
 async def test_answer_service_rebuilds_mixed_answer_from_verified_domain_results() -> None:
+    conditional_result = _completed_result()
+    conditional_result["decision"] = {
+        "status": "conditional",
+        "conclusion": "조건에 따라 이전할 수 있습니다.",
+        "missing_conditions": ["가입 유형"],
+    }
+    conditional_result["warnings"] = ["이전 전 수수료를 확인해야 합니다."]
     supervisor = FakeSupervisor(
         result=_state(
             messages=[AIMessage(content="이전할 수 없고 계산값은 999원입니다.")],
-            domain_results=[_completed_result(), _calculation_result()],
+            domain_results=[conditional_result, _calculation_result(), _failed_result()],
         )
     )
 
@@ -266,7 +273,11 @@ async def test_answer_service_rebuilds_mixed_answer_from_verified_domain_results
         question="연금계좌를 이전할 수 있나요?",
     )
 
-    assert "이전할 수 있습니다." in result.answer.answer
+    assert "조건에 따라 이전할 수 있습니다." in result.answer.answer
+    assert "가입 유형" in result.answer.answer
+    assert "이전 전 수수료" in result.answer.answer
+    assert "검색 범위가 제한적" in result.answer.answer
+    assert "상품·운용 분석을 완료하지 못했습니다" in result.answer.answer
     assert "연금수령한도: 1200000.0 KRW" in result.answer.answer
     assert "999" not in result.answer.answer
 
