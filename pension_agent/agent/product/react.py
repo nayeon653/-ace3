@@ -25,6 +25,7 @@ from langgraph.types import Command
 from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
+    calculation_evidence_chunk_ids,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
     format_calculation_summary,
@@ -682,9 +683,10 @@ def _build_product_result(
             execution_status=search_result.execution_status,
         )
 
+    required_evidence_ids = calculation_evidence_chunk_ids(calculations)
     selected_chunks = _select_evidence_chunks(
         search_result=search_result,
-        evidence_chunk_ids=evidence_chunk_ids,
+        evidence_chunk_ids=list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
     )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]

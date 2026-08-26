@@ -15,7 +15,12 @@ from pension_agent.agent.calculation import (
 from pension_agent.agent.search import SearchResult
 
 
-def _runtime(*, with_evidence: bool = True) -> SimpleNamespace:
+def _runtime(
+    *,
+    with_evidence: bool = True,
+    question: str | None = None,
+    chunk_content: str = "검증된 계산 규칙",
+) -> SimpleNamespace:
     chunks = (
         [
             {
@@ -25,7 +30,7 @@ def _runtime(*, with_evidence: bool = True) -> SimpleNamespace:
                 "chunk_index": 0,
                 "title": "계산 규칙",
                 "locator": "1쪽",
-                "content": "검증된 계산 규칙",
+                "content": chunk_content,
             }
         ]
         if with_evidence
@@ -33,7 +38,8 @@ def _runtime(*, with_evidence: bool = True) -> SimpleNamespace:
     )
     return SimpleNamespace(
         state={
-            "question": (
+            "question": question
+            or (
                 "평가액 1천만원, 1년차, 자산총액 100만원, 부채총액 10만원, "
                 "총좌수 10만좌, 손실률 -2%"
             ),
@@ -51,7 +57,7 @@ async def test_pension_tool_records_rules_result_in_state() -> None:
     result = await create_pension_withdrawal_limit_tool().coroutine(
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
-        account_valuation_source="1천만원",
+        account_valuation_source="평가액 1천만원",
         pension_year_source="1년차",
         runtime=_runtime(),
     )
@@ -68,14 +74,14 @@ async def test_product_tools_record_only_their_calculator_results() -> None:
         total_assets_krw=Decimal(1000000),
         total_liabilities_krw=Decimal(100000),
         total_units=Decimal(100000),
-        total_assets_source="100만원",
-        total_liabilities_source="10만원",
-        total_units_source="10만좌",
+        total_assets_source="자산총액 100만원",
+        total_liabilities_source="부채총액 10만원",
+        total_units_source="총좌수 10만좌",
         runtime=_runtime(),
     )
     var_risk = await create_fund_var_risk_tool().coroutine(
         daily_loss_percentile_percent=Decimal(-2),
-        daily_loss_percentile_source="-2%",
+        daily_loss_percentile_source="손실률 -2%",
         runtime=_runtime(),
     )
 
@@ -90,7 +96,7 @@ async def test_calculation_tool_requires_completed_search_evidence() -> None:
     result = await create_pension_withdrawal_limit_tool().coroutine(
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
-        account_valuation_source="1천만원",
+        account_valuation_source="평가액 1천만원",
         pension_year_source="1년차",
         runtime=_runtime(with_evidence=False),
     )
@@ -104,13 +110,53 @@ async def test_calculation_tool_rejects_input_without_trusted_source() -> None:
     result = await create_pension_withdrawal_limit_tool().coroutine(
         account_valuation_krw=Decimal(999999999),
         pension_year=10,
-        account_valuation_source="999,999,999원",
+        account_valuation_source="평가액 999,999,999원",
         pension_year_source="10년차",
         runtime=_runtime(),
     )
 
     assert isinstance(result, str)
     assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_calculation_tool_rejects_money_from_another_field() -> None:
+    result = await create_fund_standard_price_tool().coroutine(
+        total_assets_krw=Decimal(500000),
+        total_liabilities_krw=Decimal(100000),
+        total_units=Decimal(100000),
+        total_assets_source="가입금액 50만원",
+        total_liabilities_source="부채총액 10만원",
+        total_units_source="총좌수 10만좌",
+        runtime=_runtime(
+            question="가입금액 50만원, 자산총액 100만원, 부채총액 10만원, 총좌수 10만좌"
+        ),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_calculation_tool_records_evidence_source_chunk() -> None:
+    result = await create_pension_withdrawal_limit_tool().coroutine(
+        account_valuation_krw=Decimal(10000000),
+        pension_year=1,
+        account_valuation_source="평가액 1천만원",
+        pension_year_source="수령연차 1년차",
+        runtime=_runtime(
+            question="연금수령한도를 계산해줘",
+            chunk_content="평가액 1천만원, 수령연차 1년차에 대한 계산 규칙",
+        ),
+    )
+
+    assert isinstance(result, Command)
+    sources = result.update["calculations"][0]["input_sources"]
+    assert sources["account_valuation_krw"] == {
+        "origin": "evidence",
+        "text": "평가액 1천만원",
+        "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+    }
 
 
 @pytest.mark.anyio
@@ -143,6 +189,13 @@ def test_calculation_summary_preserves_verified_values() -> None:
             {
                 "calculator_id": "fund_var_risk",
                 "inputs": {"daily_loss_percentile_percent": "-2"},
+                "input_sources": {
+                    "daily_loss_percentile_percent": {
+                        "origin": "question",
+                        "text": "손실률 -2%",
+                        "chunk_id": None,
+                    }
+                },
                 "outputs": {
                     "annualized_var_percent": "31.62277660168379331998893544",
                     "risk_grade": 2,

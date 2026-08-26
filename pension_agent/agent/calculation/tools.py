@@ -12,8 +12,8 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import Field
 
-from pension_agent.agent.calculation.input_sources import inputs_match_trusted_sources
-from pension_agent.agent.contracts import CalculationResult
+from pension_agent.agent.calculation.input_sources import validated_input_sources
+from pension_agent.agent.contracts import CalculationInputSource, CalculationResult
 from pension_agent.agent.execution import ExecutionContext
 from pension_agent.rules import CalculationError, CalculationRequest, calculate
 
@@ -202,11 +202,12 @@ def _execute_calculation(
             {"error": "검증된 문서 근거를 먼저 검색해야 합니다."},
             ensure_ascii=False,
         )
-    if not inputs_match_trusted_sources(
+    verified_sources = validated_input_sources(
         inputs=inputs,
         input_sources=input_sources,
         state=runtime.state,
-    ):
+    )
+    if verified_sources is None:
         return json.dumps(
             {"error": "계산 입력의 질문·문서 출처를 확인할 수 없습니다."},
             ensure_ascii=False,
@@ -220,7 +221,10 @@ def _execute_calculation(
         )
     if runtime.tool_call_id is None:
         raise ValueError("Calculation Tool 호출 ID가 없습니다.")
-    calculation = _agent_calculation_result(result.model_dump(mode="json"))
+    calculation = _agent_calculation_result(
+        result.model_dump(mode="json"),
+        input_sources=verified_sources,
+    )
     return Command(
         update={
             "calculations": [calculation],
@@ -235,12 +239,17 @@ def _execute_calculation(
     )
 
 
-def _agent_calculation_result(value: dict[str, Any]) -> CalculationResult:
+def _agent_calculation_result(
+    value: dict[str, Any],
+    *,
+    input_sources: dict[str, CalculationInputSource],
+) -> CalculationResult:
     """Rules 결과를 JSON 직렬화 가능한 Agent 계약으로 변환한다."""
 
     return {
         "calculator_id": value["calculator_id"],
         "inputs": value["inputs"],
+        "input_sources": input_sources,
         "outputs": value["outputs"],
         "units": value["units"],
         "warnings": list(value["warnings"]),

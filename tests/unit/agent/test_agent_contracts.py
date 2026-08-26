@@ -37,6 +37,13 @@ def _completed_result() -> DomainResult:
             {
                 "calculator_id": "example",
                 "inputs": {"amount": "1"},
+                "input_sources": {
+                    "amount": {
+                        "origin": "question",
+                        "text": "금액 1원",
+                        "chunk_id": None,
+                    }
+                },
                 "outputs": {"result": "1"},
                 "units": {"result": "KRW"},
                 "warnings": [],
@@ -124,6 +131,18 @@ def test_invalid_domain_result_combinations_raise() -> None:
     for result in (missing_decision, failed_with_decision, conditional_without_condition):
         with pytest.raises(ValueError):
             validate_domain_result(result)
+
+
+def test_domain_result_requires_calculation_source_evidence() -> None:
+    result = _completed_result()
+    result["calculations"][0]["input_sources"]["amount"] = {
+        "origin": "evidence",
+        "text": "금액 1원",
+        "chunk_id": "CH-MISSING",
+    }
+
+    with pytest.raises(ValueError, match="최종 evidence"):
+        validate_domain_result(result)
 
 
 def test_agent_answer_rejects_extra_fields() -> None:

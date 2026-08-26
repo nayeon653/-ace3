@@ -83,10 +83,12 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 | Main Supervisor | 직접 호출 금지 |
 
 Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 Agent state에 직접 누적한다.
-각 입력에는 단일 값과 필드 단위를 포함한 원문 `source`가 필요하며 Agent adapter가 질문과
-검색 청크의 실제 구절인지 확인한 뒤 수치를 정규화한다. 출처가 없거나 여러 수치가 섞인
-구절은 실행하지 않는다.
-최종 `DomainResult`에 근거 청크가 없으면 계산 결과도 제거한다. `AnswerService`는 계산만 있는
+각 입력에는 필드명, 단일 값과 단위를 포함한 원문 `source`가 필요하며 Agent adapter가 질문과
+검색 청크의 실제 구절인지 확인한 뒤 수치를 정규화한다. 필드 의미가 다르거나 출처가 없거나
+여러 수치가 섞인 구절은 실행하지 않는다. 검증된 출처는 `question` 또는 `evidence` origin과
+검색 청크 ID로 `CalculationResult.input_sources`에 보존한다.
+검색 청크에서 가져온 계산 입력은 해당 청크를 최종 `DomainResult.evidence`에 자동 포함한다.
+출처 청크가 최종 evidence에 없으면 공통 계약 검증에 실패한다. `AnswerService`는 계산만 있는
 답변을 검증된 Python 결과로 교체하고 복합 답변에는 같은 결과를 결정론적으로 덧붙인다.
 
 ## 검증 위치

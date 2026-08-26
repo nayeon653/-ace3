@@ -1894,7 +1894,7 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                 _chunk(
                     DocumentType.PENSION_REFERENCE,
                     title="연금수령한도",
-                    content="평가액을 수령연차에 따른 산식으로 계산합니다.",
+                    content="평가액 1천만원, 수령연차 1년차에 대한 산식입니다.",
                 )
             ],
         )
@@ -1915,7 +1915,7 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                         "args": {
                             "account_valuation_krw": "10000000",
                             "pension_year": 1,
-                            "account_valuation_source": "1천만원",
+                            "account_valuation_source": "평가액 1천만원",
                             "pension_year_source": "1년차",
                         },
                         "id": "early-calculation-call",
@@ -1931,7 +1931,7 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                         "args": {
                             "account_valuation_krw": "10000000",
                             "pension_year": 1,
-                            "account_valuation_source": "1천만원",
+                            "account_valuation_source": "평가액 1천만원",
                             "pension_year_source": "1년차",
                         },
                         "id": "calculation-call",
@@ -1949,7 +1949,7 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                             "conclusion": "임의 계산값은 999원입니다.",
                             "missing_conditions": [],
                             "warnings": [],
-                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                            "evidence_chunk_ids": [],
                         },
                         "id": "submit-call",
                         "type": "tool_call",
@@ -1965,7 +1965,7 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
 
     result = await agent(
         {
-            "question": "평가액 1천만원인 연금계좌의 1년차 수령한도는?",
+            "question": "검색 문서 기준 연금수령한도는?",
             "objective": "연금수령한도 계산",
         }
     )
@@ -1975,6 +1975,14 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
     assert "999" not in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
     assert result["calculations"][0]["outputs"] == {"withdrawal_limit": "1200000.0"}
+    assert result["calculations"][0]["input_sources"]["account_valuation_krw"] == {
+        "origin": "evidence",
+        "text": "평가액 1천만원",
+        "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+    }
+    assert [chunk["chunk_id"] for chunk in result["evidence"]] == [
+        "550e8400-e29b-41d4-a716-446655440000"
+    ]
 
 
 @pytest.mark.anyio
@@ -2028,9 +2036,9 @@ async def test_product_agent_records_and_uses_verified_standard_price_calculatio
                             "total_assets_krw": "1000000",
                             "total_liabilities_krw": "100000",
                             "total_units": "100000",
-                            "total_assets_source": "100만원",
-                            "total_liabilities_source": "10만원",
-                            "total_units_source": "10만좌",
+                            "total_assets_source": "자산 100만원",
+                            "total_liabilities_source": "부채 10만원",
+                            "total_units_source": "총좌수 10만좌",
                         },
                         "id": "calculation-call",
                         "type": "tool_call",

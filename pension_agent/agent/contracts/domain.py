@@ -39,11 +39,20 @@ class EvidenceChunk(TypedDict):
     content: str
 
 
+class CalculationInputSource(TypedDict):
+    """계산 입력이 실제로 확인된 질문 또는 검색 청크 출처."""
+
+    origin: Literal["question", "evidence"]
+    text: str
+    chunk_id: str | None
+
+
 class CalculationResult(TypedDict):
     """Python 계산 함수가 생성한 확정 계산 기록."""
 
     calculator_id: str
     inputs: dict[str, Any]
+    input_sources: dict[str, CalculationInputSource]
     outputs: dict[str, Any]
     units: dict[str, str]
     warnings: list[str]
@@ -127,6 +136,8 @@ def validate_domain_result(result: DomainResult) -> None:
     if not has_decision:
         return
 
+    _validate_calculation_sources(result)
+
     decision = result["decision"]
     missing_conditions = decision["missing_conditions"]
     if decision["status"] in {"determined", "not_applicable"}:
@@ -137,6 +148,23 @@ def validate_domain_result(result: DomainResult) -> None:
 
     if has_catalog_result:
         _validate_catalog_result(result)
+
+
+def _validate_calculation_sources(result: DomainResult) -> None:
+    """계산 입력 출처와 최종 근거 청크의 연결을 검증한다."""
+
+    evidence_ids = {chunk["chunk_id"] for chunk in result["evidence"]}
+    for calculation in result["calculations"]:
+        if calculation["inputs"].keys() != calculation["input_sources"].keys():
+            raise ValueError("계산 입력과 출처 필드가 일치해야 합니다.")
+        for source in calculation["input_sources"].values():
+            if not source["text"].strip():
+                raise ValueError("계산 입력 출처 원문이 필요합니다.")
+            if source["origin"] == "question":
+                if source["chunk_id"] is not None:
+                    raise ValueError("질문 출처에는 근거 청크 ID를 포함할 수 없습니다.")
+            elif source["chunk_id"] not in evidence_ids:
+                raise ValueError("계산 입력의 근거 청크가 최종 evidence에 필요합니다.")
 
 
 def _validate_catalog_result(result: DomainResult) -> None:

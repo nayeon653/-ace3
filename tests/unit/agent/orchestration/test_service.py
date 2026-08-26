@@ -150,6 +150,18 @@ def _calculation_result() -> DomainResult:
                     "account_valuation_krw": "10000000",
                     "pension_year": 1,
                 },
+                "input_sources": {
+                    "account_valuation_krw": {
+                        "origin": "question",
+                        "text": "평가액 1천만원",
+                        "chunk_id": None,
+                    },
+                    "pension_year": {
+                        "origin": "question",
+                        "text": "1년차",
+                        "chunk_id": None,
+                    },
+                },
                 "outputs": {"withdrawal_limit": "1200000.0"},
                 "units": {"withdrawal_limit": "KRW"},
                 "warnings": [

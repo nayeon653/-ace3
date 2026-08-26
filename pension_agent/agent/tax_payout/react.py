@@ -25,6 +25,7 @@ from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+    calculation_evidence_chunk_ids,
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
 )
@@ -405,7 +406,11 @@ def _build_tax_payout_result(
             search_result.error or "검색을 완료하지 못했습니다.",
             execution_status=search_result.execution_status,
         )
-    selected_chunks = _select_evidence(search_result, evidence_chunk_ids)
+    required_evidence_ids = calculation_evidence_chunk_ids(calculations)
+    selected_chunks = _select_evidence(
+        search_result,
+        list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
+    )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_warnings.extend(search_result.limitations)
