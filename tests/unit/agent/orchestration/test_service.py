@@ -253,6 +253,24 @@ async def test_answer_service_replaces_calculation_only_answer_with_verified_val
     assert "999" not in result.answer.answer
 
 
+async def test_answer_service_rebuilds_mixed_answer_from_verified_domain_results() -> None:
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="이전할 수 없고 계산값은 999원입니다.")],
+            domain_results=[_completed_result(), _calculation_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001",
+        question="연금계좌를 이전할 수 있나요?",
+    )
+
+    assert "이전할 수 있습니다." in result.answer.answer
+    assert "연금수령한도: 1200000.0 KRW" in result.answer.answer
+    assert "999" not in result.answer.answer
+
+
 async def test_answer_service_normalizes_supervisor_execution_failure() -> None:
     supervisor = FakeSupervisor(error=RuntimeError("provider 내부 오류와 민감정보"))
 

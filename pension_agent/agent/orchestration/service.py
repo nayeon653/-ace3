@@ -305,6 +305,14 @@ def _stabilize_calculation_answer(
     if not calculations:
         return answer
 
+    answer_parts = [
+        result["decision"]["conclusion"]
+        for result in domain_results
+        if not result["calculations"]
+        and "catalog_result" not in result
+        and "decision" in result
+        and result["decision"]["status"] != "not_applicable"
+    ]
     calculation_text = "검증된 Python 계산 결과:\n" + format_calculation_summary(calculations)
     calculation_warnings = list(
         dict.fromkeys(
@@ -314,9 +322,8 @@ def _stabilize_calculation_answer(
     if calculation_warnings:
         warning_text = "\n".join(f"- {warning}" for warning in calculation_warnings)
         calculation_text = f"{calculation_text}\n\n계산 주의사항:\n{warning_text}"
-    if len(calculation_domains) == len(domain_results):
-        return AgentAnswer(answer=calculation_text)
-    return AgentAnswer(answer=f"{answer.answer.rstrip()}\n\n{calculation_text}")
+    answer_parts.append(calculation_text)
+    return AgentAnswer(answer="\n\n".join(answer_parts))
 
 
 def _catalog_answer(result: CatalogResult) -> str:
