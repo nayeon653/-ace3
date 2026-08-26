@@ -13,12 +13,12 @@
       "mermaid_sha256": "555080d589aa00b3bed7d60f00e6324cbffc7f176ebc12f05b2dfc5114751268"
     },
     "product.png": {
-      "image_sha256": "f48a95e0ca4b2cb878656cec50fb3256c7c0a0979ed72aac018838672e4b67bf",
-      "mermaid_sha256": "704b9118bf0b11dd216f345c60ab8cafcf346978a98f179877475c6a256d27dd"
+      "image_sha256": "8f98a2b4ab47ded78d5dc3dc13fbae3d20400965f3c5922c91e0fa54030c40fb",
+      "mermaid_sha256": "ff2693ef23dfad19f7cae7e0ffa363a7ef6c3c45ab6227a4a01be3fbc0efab81"
     },
     "tax-payout.png": {
-      "image_sha256": "ee1570552eb4872ea5f3d0aa41c8b604987a8457624df19201e7f66485b01253",
-      "mermaid_sha256": "223000c3bac5279d84c445b6474715cb26418432c69379d0486207f52578b134"
+      "image_sha256": "65507c48633cb29e75ba4e6e71f832a8bdf8ddd9baa64ac6fda8d3b27e5ea206",
+      "mermaid_sha256": "db0207d077dba6197fbe97abe8ef6357bcaaa42f0ab3910663211f952d0630d6"
     }
   },
   "renderer": "langchain-core MermaidDrawMethod.API",

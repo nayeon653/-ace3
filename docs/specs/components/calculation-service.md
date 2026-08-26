@@ -72,10 +72,19 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 
 ## Agent 연결 경계
 
-현재 어떤 Agent도 계산 함수를 호출하지 않는다. 실제 연결 시 각 Agent 호출부가 허용할
-계산기 ID, 입력 구성, 누락 조건, `DomainResult` 직렬화와 최종 응답 안정화를 별도 이슈에서
-정한다. Calculation Service 내부에는 범용 adapter나 Agent permission 계층을 미리 두지
-않는다.
+Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계층이 계산기별로
+명시적인 Tool schema를 만들고 실제 전달한 Tool만 호출할 수 있게 한다.
+
+| 소비자 | 허용 계산기 |
+|---|---|
+| Tax/Payout Agent | `pension_withdrawal_limit` |
+| Product Agent | `fund_standard_price`, `fund_var_risk` |
+| Policy Agent | 없음 |
+| Main Supervisor | 직접 호출 금지 |
+
+Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 Agent state에 직접 누적한다.
+최종 `DomainResult`에 근거 청크가 없으면 계산 결과도 제거한다. `AnswerService`는 계산만 있는
+답변을 검증된 Python 결과로 교체하고 복합 답변에는 같은 결과를 결정론적으로 덧붙인다.
 
 ## 검증 위치
 

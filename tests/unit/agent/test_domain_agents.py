@@ -2346,7 +2346,7 @@ def _completed_result() -> DomainResult:
     }
 
 
-def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() -> None:
+def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> None:
     assert "search_documents" in load_policy_agent_prompt()
     product_prompt = load_product_agent_prompt()
     assert "search_documents" in product_prompt
@@ -2356,10 +2356,13 @@ def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() 
     assert "특정 상품의 최종 근거로 바로 제출하지 않는다" in product_prompt
     assert "문서 근거 검색에 적합한 구체적인 `objective`로 재작성한다" in product_prompt
     assert "누락된 판단 기준과 다른 문서 용어" in product_prompt
+    assert "calculate_fund_standard_price" in product_prompt
+    assert "calculate_fund_var_risk" in product_prompt
     assert "2회" not in product_prompt
     assert "두 번" not in product_prompt
     assert '"product_code":"KR510902511M"' not in product_prompt
     assert "{{PRODUCT_CATALOG_JSON}}" not in product_prompt
     tax_prompt = load_tax_payout_agent_prompt()
-    assert "확정 세금, 금액, 세율, 한도를 생성하지 않는다" in tax_prompt
+    assert "calculate_pension_withdrawal_limit" in tax_prompt
+    assert "지원하지 않는 세금, 금액, 세율이나 한도를 직접 계산하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt
