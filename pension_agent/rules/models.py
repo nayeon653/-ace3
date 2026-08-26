@@ -37,6 +37,8 @@ class RuleSource(BaseModel):
     section: str | None = None
     locator: Annotated[str, StringConstraints(min_length=1)]
     drive_file_id: str | None = None
+    extraction_source: str | None = None
+    parser_profile: str | None = None
 
 
 class CalculatorMetadata(BaseModel):

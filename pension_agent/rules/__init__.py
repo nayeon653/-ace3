@@ -1,5 +1,9 @@
 """출처가 검증된 결정론적 계산 규칙과 실행 서비스."""
 
+from pension_agent.rules.defaults import (
+    build_default_calculation_registry,
+    create_default_calculation_service,
+)
 from pension_agent.rules.errors import (
     CalculationError,
     CalculationExecutionError,
@@ -41,4 +45,6 @@ __all__ = [
     "InvalidCalculationInputError",
     "RuleSource",
     "RuleStatus",
+    "build_default_calculation_registry",
+    "create_default_calculation_service",
 ]
