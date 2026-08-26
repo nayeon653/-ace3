@@ -1,48 +1,27 @@
-"""출처가 검증된 결정론적 계산 규칙과 실행 서비스."""
+"""결정론적 계산 함수와 최소 실행 진입점."""
 
-from pension_agent.rules.defaults import (
-    build_default_calculation_registry,
-    create_default_calculation_service,
-)
 from pension_agent.rules.errors import (
     CalculationError,
     CalculationExecutionError,
-    CalculatorNotActiveError,
     CalculatorNotFoundError,
-    CalculatorPermissionDeniedError,
-    CalculatorRegistrationError,
-    CalculatorVersionRequiredError,
     InputIssue,
     InvalidCalculationInputError,
 )
 from pension_agent.rules.models import (
-    CalculationPayload,
+    CalculationOutput,
     CalculationRequest,
     CalculationResult,
-    CalculatorMetadata,
-    RuleStatus,
 )
-from pension_agent.rules.registry import CalculationRegistry, CalculatorDefinition
-from pension_agent.rules.service import CalculationService
+from pension_agent.rules.service import calculate
 
 __all__ = [
     "CalculationError",
     "CalculationExecutionError",
-    "CalculationPayload",
-    "CalculationRegistry",
+    "CalculationOutput",
     "CalculationRequest",
     "CalculationResult",
-    "CalculationService",
-    "CalculatorDefinition",
-    "CalculatorMetadata",
-    "CalculatorNotActiveError",
     "CalculatorNotFoundError",
-    "CalculatorPermissionDeniedError",
-    "CalculatorRegistrationError",
-    "CalculatorVersionRequiredError",
     "InputIssue",
     "InvalidCalculationInputError",
-    "RuleStatus",
-    "build_default_calculation_registry",
-    "create_default_calculation_service",
+    "calculate",
 ]

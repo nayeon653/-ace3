@@ -1,9 +1,19 @@
 """Domain Agent의 검색 권한 계약."""
 
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
 
-from pension_agent.core import DocumentType, Permission
+from pension_agent.core import DocumentType
+
+
+class Permission(StrEnum):
+    """Search Service에 전달하는 Domain Agent 식별자."""
+
+    POLICY = "policy"
+    TAX_PAYOUT = "tax_payout"
+    PRODUCT = "product"
+
 
 _DOCUMENT_TYPES_BY_PERMISSION: Final = MappingProxyType(
     {

@@ -7,8 +7,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pension_agent.rules.models import CalculationPayload, CalculatorMetadata
-from pension_agent.rules.registry import CalculatorDefinition
+from pension_agent.rules.models import CalculationOutput, CalculatorDefinition
 
 _Money = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
 _Units = Annotated[Decimal, Field(gt=0, allow_inf_nan=False)]
@@ -32,7 +31,7 @@ class FundStandardPriceInput(BaseModel):
         return self
 
 
-def calculate_fund_standard_price(value: FundStandardPriceInput) -> CalculationPayload:
+def calculate_fund_standard_price(value: FundStandardPriceInput) -> CalculationOutput:
     """순자산총액을 총좌수로 나눈 뒤 1,000좌 단위 가격을 반올림한다."""
 
     with localcontext() as context:
@@ -42,21 +41,13 @@ def calculate_fund_standard_price(value: FundStandardPriceInput) -> CalculationP
             / value.total_units
             * Decimal(1000)
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return CalculationPayload(
+    return CalculationOutput(
         outputs={"standard_price_per_1000_units": price},
         units={"standard_price_per_1000_units": "KRW/1,000 units"},
     )
 
 
 FUND_STANDARD_PRICE = CalculatorDefinition(
-    metadata=CalculatorMetadata(
-        calculator_id="fund_standard_price",
-        version="1.0.0",
-        display_name="집합투자기구 기준가격",
-        description="순자산총액을 총좌수로 나누어 1,000좌당 기준가격을 계산한다.",
-        status="active",
-        domain_tags=frozenset({"product", "fund_price"}),
-    ),
     input_model=FundStandardPriceInput,
     calculate=calculate_fund_standard_price,
 )

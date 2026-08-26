@@ -5,8 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pension_agent.rules.models import CalculationPayload, CalculatorMetadata
-from pension_agent.rules.registry import CalculatorDefinition
+from pension_agent.rules.models import CalculationOutput, CalculatorDefinition
 
 _Percentage = Annotated[Decimal, Field(ge=-100, le=100, allow_inf_nan=False)]
 _RISK_LABELS = {
@@ -43,14 +42,14 @@ def classify_var_risk_grade(annualized_var_percent: Decimal) -> int:
     return 6
 
 
-def calculate_fund_var_risk(value: FundVarRiskInput) -> CalculationPayload:
+def calculate_fund_var_risk(value: FundVarRiskInput) -> CalculationOutput:
     """손실률 절대값에 √250을 곱하고 같은 문서의 위험등급표를 적용한다."""
 
     with localcontext() as context:
         context.prec = 28
         annualized_var = abs(value.daily_loss_percentile_percent) * Decimal(250).sqrt()
     grade = classify_var_risk_grade(annualized_var)
-    return CalculationPayload(
+    return CalculationOutput(
         outputs={
             "annualized_var_percent": annualized_var,
             "risk_grade": grade,
@@ -62,14 +61,6 @@ def calculate_fund_var_risk(value: FundVarRiskInput) -> CalculationPayload:
 
 
 FUND_VAR_RISK = CalculatorDefinition(
-    metadata=CalculatorMetadata(
-        calculator_id="fund_var_risk",
-        version="1.0.0",
-        display_name="펀드 97.5% VaR 위험등급",
-        description="일간 손실률을 연환산하고 위험등급 상한표를 적용한다.",
-        status="active",
-        domain_tags=frozenset({"product", "risk"}),
-    ),
     input_model=FundVarRiskInput,
     calculate=calculate_fund_var_risk,
 )

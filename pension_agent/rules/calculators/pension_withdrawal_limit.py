@@ -5,8 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pension_agent.rules.models import CalculationPayload, CalculatorMetadata
-from pension_agent.rules.registry import CalculatorDefinition
+from pension_agent.rules.models import CalculationOutput, CalculatorDefinition
 
 _Money = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
 
@@ -22,13 +21,13 @@ class PensionWithdrawalLimitInput(BaseModel):
 
 def calculate_pension_withdrawal_limit(
     value: PensionWithdrawalLimitInput,
-) -> CalculationPayload:
+) -> CalculationOutput:
     """평가액 ÷ (11 - 수령연차) × 120% 공식을 적용한다."""
 
     with localcontext() as context:
         context.prec = 28
         limit = value.account_valuation_krw / Decimal(11 - value.pension_year) * Decimal("1.2")
-    return CalculationPayload(
+    return CalculationOutput(
         outputs={"withdrawal_limit": limit},
         units={"withdrawal_limit": "KRW"},
         warnings=("출처에는 최종 지급 단위의 반올림·절사 규칙이 명시되지 않았습니다.",),
@@ -36,14 +35,6 @@ def calculate_pension_withdrawal_limit(
 
 
 PENSION_WITHDRAWAL_LIMIT = CalculatorDefinition(
-    metadata=CalculatorMetadata(
-        calculator_id="pension_withdrawal_limit",
-        version="1.0.0",
-        display_name="연금수령한도",
-        description="연금계좌 평가액과 연금수령연차로 연금수령한도를 계산한다.",
-        status="active",
-        domain_tags=frozenset({"pension", "withdrawal_limit"}),
-    ),
     input_model=PensionWithdrawalLimitInput,
     calculate=calculate_pension_withdrawal_limit,
 )

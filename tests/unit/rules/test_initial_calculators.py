@@ -7,19 +7,14 @@ import pytest
 from pension_agent.rules import (
     CalculationRequest,
     InvalidCalculationInputError,
-    build_default_calculation_registry,
-    create_default_calculation_service,
+    calculate,
 )
+from pension_agent.rules.calculators import CALCULATORS
 from pension_agent.rules.calculators.fund_var_risk import classify_var_risk_grade
 
 
-def test_default_registry_contains_domain_neutral_initial_set() -> None:
-    calculator_ids = {
-        definition.metadata.calculator_id
-        for definition in build_default_calculation_registry().definitions()
-    }
-
-    assert calculator_ids == {
+def test_calculator_map_contains_initial_set() -> None:
+    assert CALCULATORS.keys() == {
         "fund_standard_price",
         "fund_var_risk",
         "pension_withdrawal_limit",
@@ -31,7 +26,7 @@ def test_default_registry_contains_domain_neutral_initial_set() -> None:
     [(1, Decimal(12_000_000)), (6, Decimal(24_000_000)), (10, Decimal(120_000_000))],
 )
 def test_pension_withdrawal_limit_formula(pension_year: int, expected: Decimal) -> None:
-    result = create_default_calculation_service().calculate(
+    result = calculate(
         CalculationRequest(
             calculator_id="pension_withdrawal_limit",
             inputs={"account_valuation_krw": 100_000_000, "pension_year": pension_year},
@@ -40,7 +35,6 @@ def test_pension_withdrawal_limit_formula(pension_year: int, expected: Decimal) 
 
     assert result.outputs == {"withdrawal_limit": expected}
     assert result.units == {"withdrawal_limit": "KRW"}
-    assert result.domain_tags == frozenset({"pension", "withdrawal_limit"})
 
 
 @pytest.mark.parametrize("pension_year", [0, 11])
@@ -48,7 +42,7 @@ def test_pension_withdrawal_limit_rejects_year_outside_source_range(
     pension_year: int,
 ) -> None:
     with pytest.raises(InvalidCalculationInputError):
-        create_default_calculation_service().calculate(
+        calculate(
             CalculationRequest(
                 calculator_id="pension_withdrawal_limit",
                 inputs={"account_valuation_krw": 100_000_000, "pension_year": pension_year},
@@ -57,7 +51,7 @@ def test_pension_withdrawal_limit_rejects_year_outside_source_range(
 
 
 def test_fund_standard_price_formula_and_rounding() -> None:
-    result = create_default_calculation_service().calculate(
+    result = calculate(
         CalculationRequest(
             calculator_id="fund_standard_price",
             inputs={
@@ -83,9 +77,7 @@ def test_fund_standard_price_rejects_invalid_balance_or_units(
     inputs: dict[str, int],
 ) -> None:
     with pytest.raises(InvalidCalculationInputError):
-        create_default_calculation_service().calculate(
-            CalculationRequest(calculator_id="fund_standard_price", inputs=inputs)
-        )
+        calculate(CalculationRequest(calculator_id="fund_standard_price", inputs=inputs))
 
 
 @pytest.mark.parametrize(
@@ -105,7 +97,7 @@ def test_var_risk_grade_boundaries(annualized_var: Decimal, grade: int) -> None:
 
 
 def test_fund_var_uses_absolute_loss_and_returns_grade() -> None:
-    result = create_default_calculation_service().calculate(
+    result = calculate(
         CalculationRequest(
             calculator_id="fund_var_risk",
             inputs={"daily_loss_percentile_percent": "-1"},
@@ -118,7 +110,7 @@ def test_fund_var_uses_absolute_loss_and_returns_grade() -> None:
 
 
 def test_initial_calculators_are_json_serializable_without_binary_float() -> None:
-    result = create_default_calculation_service().calculate(
+    result = calculate(
         CalculationRequest(
             calculator_id="pension_withdrawal_limit",
             inputs={"account_valuation_krw": "100000000", "pension_year": 1},

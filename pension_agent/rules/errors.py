@@ -18,23 +18,7 @@ class CalculationError(RuntimeError):
 
 
 class CalculatorNotFoundError(CalculationError):
-    """요청한 계산기 또는 버전을 Registry에서 찾을 수 없는 경우."""
-
-
-class CalculatorNotActiveError(CalculationError):
-    """등록된 계산기가 실행 가능한 active 상태가 아닌 경우."""
-
-
-class CalculatorVersionRequiredError(CalculationError):
-    """실행 가능한 버전이 여러 개라 요청에서 버전을 지정해야 하는 경우."""
-
-
-class CalculatorPermissionDeniedError(CalculationError):
-    """계산 권한이 없거나 계산기의 허용 목록에 포함되지 않은 경우."""
-
-
-class CalculatorRegistrationError(CalculationError):
-    """중복되거나 계약을 위반한 계산기를 등록하려는 경우."""
+    """요청한 계산기를 찾을 수 없는 경우."""
 
 
 class InvalidCalculationInputError(CalculationError):
