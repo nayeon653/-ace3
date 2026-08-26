@@ -378,7 +378,15 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         == (
             {"lookup_product_codes", "search_documents", "submit_domain_result"}
             if domain == "product"
-            else {"search_documents", "submit_domain_result"}
+            else (
+                {
+                    "search_documents",
+                    "calculate_pension_withdrawal_limit",
+                    "submit_domain_result",
+                }
+                if domain == "tax_payout"
+                else {"search_documents", "submit_domain_result"}
+            )
         )
         for names, _kwargs in model.bindings
     )
@@ -1862,6 +1870,87 @@ async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
     )
     assert "10" not in result["decision"]["conclusion"]
     assert result["calculations"] == []
+
+
+@pytest.mark.anyio
+async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="연금수령한도",
+                    content="평가액을 수령연차에 따른 산식으로 계산합니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "연금수령한도 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "10000000",
+                            "pension_year": 1,
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 계산값은 999원입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [
+                                "550e8400-e29b-41d4-a716-446655440000"
+                            ],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "평가액 1천만원인 연금계좌의 1년차 수령한도는?",
+            "objective": "연금수령한도 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert "1200000.0 KRW" in result["decision"]["conclusion"]
+    assert "999" not in result["decision"]["conclusion"]
+    assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
+    assert result["calculations"][0]["outputs"] == {"withdrawal_limit": "1200000.0"}
 
 
 @pytest.mark.anyio
