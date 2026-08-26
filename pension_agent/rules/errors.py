@@ -29,8 +29,8 @@ class CalculatorVersionRequiredError(CalculationError):
     """실행 가능한 버전이 여러 개라 요청에서 버전을 지정해야 하는 경우."""
 
 
-class CalculatorConsumerNotAllowedError(CalculationError):
-    """요청 소비자가 계산기의 허용 목록에 포함되지 않은 경우."""
+class CalculatorPermissionDeniedError(CalculationError):
+    """계산 권한이 없거나 계산기의 허용 목록에 포함되지 않은 경우."""
 
 
 class CalculatorRegistrationError(CalculationError):

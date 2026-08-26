@@ -9,7 +9,7 @@ LLM Agent가 아니며 모델, 검색, 파싱 라이브러리를 호출하지 �
 ```text
 CalculationRequest
   -> Calculator Registry
-  -> active 버전·적용일·소비자 권한 확인
+  -> active 버전·적용일·Domain permission 확인
   -> Pydantic 입력 검증
   -> 등록된 Python callable 실행
   -> CalculationResult
@@ -28,7 +28,11 @@ formula catalog 또는 HTML 보고서를 읽지 않는다.
 | `inputs` | 예 | 계산기별 Pydantic 입력 모델에 전달할 값 |
 | `version` | 아니요 | `major.minor.patch` 규칙 버전 |
 | `effective_on` | 아니요 | 적용 기간이 여러 개인 규칙의 기준일 |
-| `consumer` | 아니요 | adapter 연결 후 allowlist 검증에 사용할 소비자 ID |
+
+`permission`은 `CalculationRequest`에 포함하지 않는다. 신뢰된 Domain adapter가 Search
+Service와 동일한 공용 `Permission`을 `CalculationService.calculate(..., permission=...)`의
+키워드 인자로 주입한다. 계산기에 `allowed_permissions`가 설정되어 있으면 permission 누락과
+허용 목록 밖의 권한을 모두 거부한다.
 
 버전을 생략했을 때 active 버전이 하나면 그 버전을 사용한다. active 버전이 여러 개면
 `version` 또는 하나로 결정할 수 있는 `effective_on`이 필요하다. 명시한 버전은 active여야
@@ -65,7 +69,8 @@ active 메타데이터에는 하나 이상의 `RuleSource`가 필요하다. 출�
 - `CalculatorDefinition`은 메타데이터, Pydantic 입력 모델과 Python callable을 묶는다.
 - 같은 `(calculator_id, version)`은 한 번만 등록할 수 있다.
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
-- `allowed_consumers`를 설정한 계산기는 요청에 `consumer`가 있을 때 allowlist를 검증한다.
+- `allowed_permissions`를 설정한 계산기는 permission 누락과 allowlist에 없는 권한을 모두
+  거부한다.
 - 어떤 Agent가 어떤 계산기를 소비할지는 이 컴포넌트가 아니라 후속 adapter 스펙이
   결정한다.
 - `rules`는 `agent`, `retrieval`, `ingest`를 import하지 않는다.
@@ -77,7 +82,7 @@ active 메타데이터에는 하나 이상의 `RuleSource`가 필요하다. 출�
 | `CalculatorNotFoundError` | 계산기 ID 또는 버전이 등록되지 않음 |
 | `CalculatorNotActiveError` | active이거나 적용일에 맞는 규칙이 없음 |
 | `CalculatorVersionRequiredError` | active 후보가 여러 개라 하나로 결정할 수 없음 |
-| `CalculatorConsumerNotAllowedError` | 제공된 소비자가 allowlist에 없음 |
+| `CalculatorPermissionDeniedError` | permission이 누락되었거나 allowlist에 없음 |
 | `InvalidCalculationInputError` | Pydantic 입력 검증 실패 |
 | `CalculationExecutionError` | 검증 후 산술 조건을 만족하지 못함 |
 

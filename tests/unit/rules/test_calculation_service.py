@@ -4,18 +4,19 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from pension_agent.core import Permission
 from pension_agent.rules import (
     CalculationPayload,
     CalculationRegistry,
     CalculationRequest,
     CalculationService,
-    CalculatorConsumerNotAllowedError,
     CalculatorDefinition,
     CalculatorMetadata,
     CalculatorNotActiveError,
     CalculatorNotFoundError,
+    CalculatorPermissionDeniedError,
     CalculatorRegistrationError,
     CalculatorVersionRequiredError,
     InvalidCalculationInputError,
@@ -47,7 +48,7 @@ def _definition(
     status: str = "active",
     effective_from: date | None = None,
     effective_to: date | None = None,
-    allowed_consumers: frozenset[str] | None = None,
+    allowed_permissions: frozenset[Permission] | None = None,
 ) -> CalculatorDefinition:
     metadata = CalculatorMetadata(
         calculator_id="double_amount",
@@ -58,7 +59,7 @@ def _definition(
         domain_tags=frozenset({"test"}),
         effective_from=effective_from,
         effective_to=effective_to,
-        allowed_consumers=allowed_consumers,
+        allowed_permissions=allowed_permissions,
         sources=(_source(),),
     )
 
@@ -93,6 +94,17 @@ def test_service_returns_normalized_result_with_provenance() -> None:
 def test_service_rejects_unknown_calculator() -> None:
     with pytest.raises(CalculatorNotFoundError):
         _service().calculate(CalculationRequest(calculator_id="missing", inputs={}))
+
+
+def test_calculation_request_rejects_permission_from_payload() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        CalculationRequest.model_validate(
+            {
+                "calculator_id": "double_amount",
+                "inputs": {"amount": 1},
+                "permission": "tax_payout",
+            }
+        )
 
 
 def test_service_rejects_inactive_calculator() -> None:
@@ -154,21 +166,28 @@ def test_registry_selects_version_by_effective_date() -> None:
     assert result.calculator_version == "2.0.0"
 
 
-def test_registry_enforces_consumer_allowlist_only_when_consumer_is_supplied() -> None:
-    service = _service(_definition(allowed_consumers=frozenset({"tax_payout"})))
+def test_registry_requires_allowed_permission_when_allowlist_is_configured() -> None:
+    service = _service(_definition(allowed_permissions=frozenset({Permission.TAX_PAYOUT})))
 
-    standalone = service.calculate(
-        CalculationRequest(calculator_id="double_amount", inputs={"amount": 1})
+    with pytest.raises(CalculatorPermissionDeniedError):
+        service.calculate(CalculationRequest(calculator_id="double_amount", inputs={"amount": 1}))
+
+    allowed = service.calculate(
+        CalculationRequest(
+            calculator_id="double_amount",
+            inputs={"amount": 1},
+        ),
+        permission=Permission.TAX_PAYOUT,
     )
-    assert standalone.outputs == {"doubled": Decimal(2)}
+    assert allowed.outputs == {"doubled": Decimal(2)}
 
-    with pytest.raises(CalculatorConsumerNotAllowedError):
+    with pytest.raises(CalculatorPermissionDeniedError):
         service.calculate(
             CalculationRequest(
                 calculator_id="double_amount",
                 inputs={"amount": 1},
-                consumer="product",
-            )
+            ),
+            permission=Permission.PRODUCT,
         )
 
 

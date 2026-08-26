@@ -8,6 +8,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from pension_agent.core import Permission
+
 RuleStatus = Literal["candidate", "draft", "reviewed", "active", "retired", "blocked"]
 CalculationScalar = Decimal | int | str | bool | None
 _Identifier = Annotated[
@@ -54,7 +56,7 @@ class CalculatorMetadata(BaseModel):
     domain_tags: frozenset[_Identifier] = Field(min_length=1)
     effective_from: date | None = None
     effective_to: date | None = None
-    allowed_consumers: frozenset[_Identifier] | None = None
+    allowed_permissions: frozenset[Permission] | None = None
     sources: tuple[RuleSource, ...] = ()
 
     @model_validator(mode="after")
@@ -84,7 +86,6 @@ class CalculationRequest(BaseModel):
     inputs: dict[str, Any]
     version: _Version | None = None
     effective_on: date | None = None
-    consumer: _Identifier | None = None
 
 
 class CalculationPayload(BaseModel):

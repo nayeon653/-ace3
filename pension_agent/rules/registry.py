@@ -9,10 +9,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from pension_agent.core import Permission
 from pension_agent.rules.errors import (
-    CalculatorConsumerNotAllowedError,
     CalculatorNotActiveError,
     CalculatorNotFoundError,
+    CalculatorPermissionDeniedError,
     CalculatorRegistrationError,
     CalculatorVersionRequiredError,
 )
@@ -51,9 +52,9 @@ class CalculationRegistry:
         *,
         version: str | None = None,
         effective_on: date | None = None,
-        consumer: str | None = None,
+        permission: Permission | None = None,
     ) -> CalculatorDefinition:
-        """상태·적용일·소비 권한을 만족하는 계산기 하나를 반환한다."""
+        """상태·적용일·Domain permission을 만족하는 계산기 하나를 반환한다."""
 
         all_versions = [
             definition
@@ -84,9 +85,9 @@ class CalculationRegistry:
             raise CalculatorVersionRequiredError("계산기 버전 또는 적용일을 지정해야 합니다.")
 
         definition = active[0]
-        allowed = definition.metadata.allowed_consumers
-        if consumer is not None and allowed is not None and consumer not in allowed:
-            raise CalculatorConsumerNotAllowedError("이 소비자는 계산기를 사용할 수 없습니다.")
+        allowed = definition.metadata.allowed_permissions
+        if allowed is not None and permission not in allowed:
+            raise CalculatorPermissionDeniedError("이 권한으로 계산기를 사용할 수 없습니다.")
         return definition
 
     def definitions(self) -> tuple[CalculatorDefinition, ...]:

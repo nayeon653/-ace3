@@ -32,8 +32,10 @@ Registry는 사람이 원문을 검토해 active로 승인한 명시적 Python c
 문자열 수식, DSL과 `eval`은 지원하지 않는다. 계산 결과에는 입력·출력뿐 아니라 계산기
 버전, 도메인 태그와 원문 provenance를 포함한다.
 
-Tax/Payout, Product와 Policy의 소비 여부와 allowlist는 실제 사용 사례를 확인한 후 도메인별
-adapter 이슈에서 결정한다. Main Supervisor는 Calculation Service를 직접 호출하지 않는다.
+Tax/Payout, Product와 Policy의 소비 여부와 `allowed_permissions`는 실제 사용 사례를 확인한
+후 도메인별 adapter 이슈에서 결정한다. permission은 계산 요청 payload가 아니라 신뢰된
+adapter 호출 경계에서 주입한다. Main Supervisor는 Calculation Service를 직접 호출하지
+않는다.
 
 ## 고려한 대안
 
@@ -56,7 +58,7 @@ adapter 이슈에서 결정한다. Main Supervisor는 Calculation Service를 직
 
 - 계산 함수와 Agent adapter를 독립적으로 개발·검토할 수 있다.
 - 같은 실행·버전·출처 계약을 여러 도메인이 재사용할 수 있다.
-- 소비 권한은 후속 adapter에서 최소 allowlist로 제한할 수 있다.
+- 소비 권한은 후속 adapter에서 최소 `allowed_permissions`로 제한할 수 있다.
 - 실제 소비자가 아직 없으므로 초기 Service는 단위 테스트와 직접 Python 호출로만 검증된다.
 - Agent 연결 전에는 외부 API의 계산 기능이나 `DomainResult.calculations` 동작이 바뀌지 않는다.
 

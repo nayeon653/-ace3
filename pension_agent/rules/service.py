@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
+from pension_agent.core import Permission
 from pension_agent.rules.errors import (
     CalculationExecutionError,
     InputIssue,
@@ -19,14 +20,19 @@ class CalculationService:
     def __init__(self, registry: CalculationRegistry) -> None:
         self._registry = registry
 
-    def calculate(self, request: CalculationRequest) -> CalculationResult:
+    def calculate(
+        self,
+        request: CalculationRequest,
+        *,
+        permission: Permission | None = None,
+    ) -> CalculationResult:
         """요청을 검증된 입력 모델로 변환하고 provenance를 포함해 반환한다."""
 
         definition = self._registry.resolve(
             request.calculator_id,
             version=request.version,
             effective_on=request.effective_on,
-            consumer=request.consumer,
+            permission=permission,
         )
         try:
             inputs = definition.input_model.model_validate(request.inputs)
