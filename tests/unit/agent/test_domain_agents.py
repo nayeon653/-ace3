@@ -1936,9 +1936,7 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                             "conclusion": "임의 계산값은 999원입니다.",
                             "missing_conditions": [],
                             "warnings": [],
-                            "evidence_chunk_ids": [
-                                "550e8400-e29b-41d4-a716-446655440000"
-                            ],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
                         },
                         "id": "submit-call",
                         "type": "tool_call",
@@ -2033,9 +2031,7 @@ async def test_product_agent_records_and_uses_verified_standard_price_calculatio
                             "conclusion": "임의 기준가격은 1원입니다.",
                             "missing_conditions": [],
                             "warnings": [],
-                            "evidence_chunk_ids": [
-                                "550e8400-e29b-41d4-a716-446655440000"
-                            ],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
                         },
                         "id": "submit-call",
                         "type": "tool_call",
@@ -2062,9 +2058,7 @@ async def test_product_agent_records_and_uses_verified_standard_price_calculatio
     assert "9000.00 KRW/1,000 units" in result["decision"]["conclusion"]
     assert "1원" not in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "fund_standard_price"
-    assert result["calculations"][0]["outputs"] == {
-        "standard_price_per_1000_units": "9000.00"
-    }
+    assert result["calculations"][0]["outputs"] == {"standard_price_per_1000_units": "9000.00"}
 
 
 @pytest.mark.anyio

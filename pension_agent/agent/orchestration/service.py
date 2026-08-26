@@ -298,9 +298,7 @@ def _stabilize_calculation_answer(
 
     calculation_domains = [result for result in domain_results if result["calculations"]]
     calculations = [
-        calculation
-        for result in calculation_domains
-        for calculation in result["calculations"]
+        calculation for result in calculation_domains for calculation in result["calculations"]
     ]
     if not calculations:
         return answer

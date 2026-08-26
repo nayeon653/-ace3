@@ -25,9 +25,7 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
                 f"위험등급: {outputs['risk_grade']}등급 ({outputs['risk_label']})"
             )
         else:
-            rendered = ", ".join(
-                f"{key}={_value(outputs, units, key)}" for key in outputs
-            )
+            rendered = ", ".join(f"{key}={_value(outputs, units, key)}" for key in outputs)
             lines.append(f"{calculator_id}: {rendered}")
     return "\n".join(f"- {line}" for line in lines)
 
