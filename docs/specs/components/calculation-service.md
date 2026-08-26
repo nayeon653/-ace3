@@ -90,6 +90,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 검색 청크에서 가져온 계산 입력은 해당 청크를 최종 `DomainResult.evidence`에 자동 포함한다.
 출처 청크가 최종 evidence에 없으면 공통 계약 검증에 실패한다. `AnswerService`는 계산만 있는
 답변을 검증된 Python 결과로 교체하고 복합 답변에는 같은 결과를 결정론적으로 덧붙인다.
+일부 계산만 성공한 `conditional`·`undetermined` 결과는 상태와 누락 조건을 유지한다.
 
 ## 검증 위치
 

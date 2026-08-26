@@ -416,11 +416,9 @@ def _build_tax_payout_result(
     normalized_warnings.extend(search_result.limitations)
     normalized_conclusion = conclusion.strip()
     if calculations:
-        status = "determined"
         normalized_conclusion = "검증된 Python 계산 결과:\n" + format_calculation_summary(
             calculations
         )
-        normalized_missing = []
         normalized_warnings = [
             value for value in normalized_warnings if not _NUMERIC_CLAIM_PATTERN.search(value)
         ]

@@ -35,6 +35,7 @@ from pension_agent.agent.product import (
     create_product_agent,
     load_product_agent_prompt,
 )
+from pension_agent.agent.product.react import _build_product_result
 from pension_agent.agent.search import (
     SearchChunkPayload,
     SearchRequest,
@@ -45,6 +46,7 @@ from pension_agent.agent.tax_payout import (
     create_tax_payout_agent,
     load_tax_payout_agent_prompt,
 )
+from pension_agent.agent.tax_payout.react import _build_tax_payout_result
 from pension_agent.config import DomainAgentConfig
 from pension_agent.core import DocumentType
 from pension_agent.retrieval import load_product_catalog
@@ -2083,6 +2085,91 @@ async def test_product_agent_records_and_uses_verified_standard_price_calculatio
     assert "1원" not in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "fund_standard_price"
     assert result["calculations"][0]["outputs"] == {"standard_price_per_1000_units": "9000.00"}
+
+
+@pytest.mark.parametrize(
+    ("builder", "document_type", "calculation"),
+    [
+        (
+            _build_tax_payout_result,
+            DocumentType.PENSION_REFERENCE,
+            {
+                "calculator_id": "pension_withdrawal_limit",
+                "inputs": {"account_valuation_krw": "10000000", "pension_year": 1},
+                "input_sources": {
+                    "account_valuation_krw": {
+                        "origin": "question",
+                        "text": "평가액 1천만원",
+                        "chunk_id": None,
+                    },
+                    "pension_year": {
+                        "origin": "question",
+                        "text": "1년차",
+                        "chunk_id": None,
+                    },
+                },
+                "outputs": {"withdrawal_limit": "1200000.0"},
+                "units": {"withdrawal_limit": "KRW"},
+                "warnings": [],
+            },
+        ),
+        (
+            _build_product_result,
+            DocumentType.FUND_PROSPECTUS,
+            {
+                "calculator_id": "fund_standard_price",
+                "inputs": {
+                    "total_assets_krw": "1000000",
+                    "total_liabilities_krw": "100000",
+                    "total_units": "100000",
+                },
+                "input_sources": {
+                    "total_assets_krw": {
+                        "origin": "question",
+                        "text": "자산 100만원",
+                        "chunk_id": None,
+                    },
+                    "total_liabilities_krw": {
+                        "origin": "question",
+                        "text": "부채 10만원",
+                        "chunk_id": None,
+                    },
+                    "total_units": {
+                        "origin": "question",
+                        "text": "총좌수 10만좌",
+                        "chunk_id": None,
+                    },
+                },
+                "outputs": {"standard_price_per_1000_units": "9000.00"},
+                "units": {"standard_price_per_1000_units": "KRW/1,000 units"},
+                "warnings": [],
+            },
+        ),
+    ],
+)
+def test_partial_calculation_preserves_missing_conditions(
+    builder: Callable[..., DomainResult],
+    document_type: DocumentType,
+    calculation: Any,
+) -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = builder(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(document_type, chunk_id=chunk_id)],
+        ),
+        calculations=[calculation],
+        status="conditional",
+        conclusion="지원되는 항목만 계산했습니다.",
+        missing_conditions=["지원되지 않은 추가 계산식"],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == ["지원되지 않은 추가 계산식"]
+    assert "검증된 Python 계산 결과" in result["decision"]["conclusion"]
+    validate_domain_result(result)
 
 
 @pytest.mark.anyio

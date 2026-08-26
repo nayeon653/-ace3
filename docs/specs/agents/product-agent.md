@@ -64,6 +64,8 @@ Product Catalog Query Planner에 질문 원문과 판단 목표를 전달하고 
 구절 포함 여부와 정규화 수치 일치를 검증한다. 검색 청크에서 가져온 입력은 해당 `chunk_id`를
 계산 결과에 기록하고 최종 evidence에 자동 포함한다. 계산한 결과는 state에서 직접
 `DomainResult.calculations`로 전달하고 자유 형식 제출값으로 받지 않는다.
+복합 질문에서 일부 계산만 성공하면 성공한 계산 결과를 보존하되 전체 상태를 강제로
+`determined`로 바꾸지 않고, 계산하지 못한 항목의 `missing_conditions`를 유지한다.
 
 ### `submit_domain_result`
 

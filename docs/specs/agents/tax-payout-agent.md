@@ -62,6 +62,8 @@ DomainRequest
 - Tool이 지원하는 연금수령한도만 확정 계산하며 Python 결과로 결론을 교체한다.
 - 지원하지 않는 계산이나 입력이 부족한 질문은 `conditional` 또는 `undetermined`로
   판단하고 필요한 입력을 누락 조건으로 남긴다.
+- 복합 질문에서 연금수령한도만 계산되더라도 미계산 항목이 있으면 전체 상태와 누락 조건을
+  보존한다.
 - 근거 ID가 없으면 `not_applicable` 이외의 판단을 `undetermined`로 보정한다.
 - 검색 제한사항은 `warnings`에 포함한다.
 
