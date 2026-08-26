@@ -1812,12 +1812,8 @@ async def test_model_generated_source_hint_is_rejected_before_search_service() -
 
 @pytest.mark.anyio
 async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
-    search = FakeSearchService(
-        SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
-        )
-    )
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
     model = ToolCallingFakeModel(
         responses=[
             AIMessage(
@@ -1841,9 +1837,26 @@ async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
                             "conclusion": "세율은 10%입니다.",
                             "missing_conditions": [],
                             "warnings": [],
-                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                            "evidence_chunk_ids": [chunk.chunk_id],
                         },
-                        "id": "submit-call",
+                        "id": "first-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "세율은 여전히 10%로 확정됩니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "second-submit",
                         "type": "tool_call",
                     }
                 ],
@@ -1862,10 +1875,12 @@ async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
     )
     assert "10" not in result["decision"]["conclusion"]
     assert result["calculations"] == []
+    assert len(search.calls) == 1
+    assert model.invocation_count == 3
 
 
 @pytest.mark.anyio
-async def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() -> None:
+async def test_tax_agent_keeps_conclusion_when_only_missing_or_warnings_have_numbers() -> None:
     search = FakeSearchService(
         SearchResult(
             execution_status="completed",
@@ -1873,24 +1888,388 @@ async def test_tax_agent_blocks_numeric_claims_from_all_untrusted_text_fields() 
             limitations=["한도는 900만원입니다.", "자료 범위가 제한적입니다."],
         )
     )
+    conclusion = "가입 유형에 따라 세액공제 조건이 달라지며, 자세한 조건은 근거 문서를 확인해야 합니다."
+    model = _model(
+        conclusion=conclusion,
+        missing_conditions=["연봉 5천만원 여부"],
+        warnings=["세율은 10%입니다.", "일반적인 주의가 필요합니다."],
+    )
     agent = create_tax_payout_agent(
-        model=_model(
-            conclusion="계산 결과를 확인해야 합니다.",
-            missing_conditions=["연봉 5천만원 여부"],
-            warnings=["세율은 10%입니다.", "일반적인 주의가 필요합니다."],
-        ),
+        model=model,
         search_service=cast(SearchRunner, search),
     )
-    result = await agent({"question": "공제액은?", "objective": "공제액 판단"})
+    result = await agent({"question": "공제 조건은?", "objective": "공제 조건 판단"})
 
     serialized = str(result)
-    assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["missing_conditions"] == ["결정론적 계산 Tool 결과"]
+    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["conclusion"] == conclusion
+    assert result["decision"]["missing_conditions"] == []
     assert "10%" not in serialized
     assert "900만원" not in serialized
     assert "5천만원" not in serialized
     assert "일반적인 주의가 필요합니다." in result["warnings"]
     assert "자료 범위가 제한적입니다." in result["warnings"]
+    assert "근거 없이 제출된 확정 수치는 결과에서 제거했습니다." in result["warnings"]
+    assert model.invocation_count == 2
+
+
+@pytest.mark.anyio
+async def test_tax_agent_undetermined_uses_generic_missing_condition_when_all_are_numeric() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+        )
+    )
+    agent = create_tax_payout_agent(
+        model=_model(
+            decision_status="undetermined",
+            conclusion="정확한 초과분은 확인이 어렵습니다.",
+            missing_conditions=["초과분 900만원 여부"],
+        ),
+        search_service=cast(SearchRunner, search),
+    )
+    result = await agent(
+        {
+            "question": "연금수령한도를 초과하면 어떻게 과세되나요?",
+            "objective": "연금수령한도 초과 과세 판단",
+        }
+    )
+
+    assert result["decision"]["status"] == "undetermined"
+    assert result["decision"]["conclusion"] == "정확한 초과분은 확인이 어렵습니다."
+    assert result["decision"]["missing_conditions"] == ["제공 문서의 관련 근거 또는 필수 조건"]
+
+
+@pytest.mark.anyio
+async def test_tax_agent_conditional_missing_falls_back_to_user_condition() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+        )
+    )
+    conclusion = "가입 기간과 연령 조건을 충족하는지에 따라 과세 여부가 달라집니다."
+    agent = create_tax_payout_agent(
+        model=_model(
+            decision_status="conditional",
+            conclusion=conclusion,
+            missing_conditions=["55세 이상 여부"],
+        ),
+        search_service=cast(SearchRunner, search),
+    )
+    result = await agent(
+        {"question": "55세에 연금을 받으면 세율이 어떻게 되나요?", "objective": "연령별 세율 판단"}
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["conclusion"] == conclusion
+    assert result["decision"]["missing_conditions"] == ["판단에 필요한 사용자 조건"]
+    assert "결정론적 계산 Tool 결과" not in result["decision"]["missing_conditions"]
+    assert "근거 없이 제출된 확정 수치는 결과에서 제거했습니다." in result["warnings"]
+    assert "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다." not in result["warnings"]
+
+
+@pytest.mark.anyio
+async def test_tax_agent_does_not_treat_topic_words_alone_as_numeric_claim() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+        )
+    )
+    conclusion = "적용 세율과 공제 한도는 가입 유형과 소득 구간에 따라 달라집니다."
+    agent = create_tax_payout_agent(
+        model=_model(conclusion=conclusion),
+        search_service=cast(SearchRunner, search),
+    )
+    result = await agent(
+        {"question": "세율과 한도는 어떻게 정해지나요?", "objective": "세율·한도 결정 조건 판단"}
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["conclusion"] == conclusion
+
+
+@pytest.mark.anyio
+async def test_tax_agent_numeric_claim_does_not_upgrade_undetermined_to_conditional() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "중도해지 과세 근거 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "undetermined",
+                            "conclusion": (
+                                "중도해지 시 세금이 부과되나 정확한 금액은 10% 내외로 다양합니다."
+                            ),
+                            "missing_conditions": ["가입 기간"],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "first-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "undetermined",
+                            "conclusion": (
+                                "정확한 금액은 여전히 10% 내외로 확정하기 어렵습니다."
+                            ),
+                            "missing_conditions": ["가입 기간"],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "second-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+    result = await agent(
+        {"question": "중도해지하면 세금이 얼마나 나오나요?", "objective": "중도해지 과세 판단"}
+    )
+
+    assert result["decision"]["status"] == "undetermined"
+    assert result["decision"]["conclusion"] == (
+        "제공 근거만으로는 확정 수치를 포함한 결론을 판단할 수 없습니다."
+    )
+    assert result["decision"]["missing_conditions"] == ["가입 기간"]
+    assert "10%" not in str(result)
+    assert "결정론적 계산 Tool 결과" not in result["decision"]["missing_conditions"]
+    assert "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다." not in result["warnings"]
+    assert "근거 없이 제출된 확정 수치는 결과에서 제거했습니다." in result["warnings"]
+    assert model.invocation_count == 3
+
+
+@pytest.mark.anyio
+async def test_tax_agent_not_applicable_is_not_overridden_by_numeric_guard() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+        )
+    )
+    agent = create_tax_payout_agent(
+        model=_model(
+            decision_status="not_applicable",
+            conclusion="이 펀드의 위험 등급은 3등급이며 보수는 연 1.5%입니다.",
+            warnings=["최근 수익률은 10%였습니다."],
+        ),
+        search_service=cast(SearchRunner, search),
+    )
+    result = await agent({"question": "이 펀드의 위험은?", "objective": "펀드 위험 판단"})
+
+    assert result["decision"] == {
+        "status": "not_applicable",
+        "conclusion": "이 질문에는 해당 도메인 판단이 적용되지 않습니다.",
+        "missing_conditions": [],
+    }
+    assert result["warnings"] == []
+    assert result["evidence"] == []
+
+
+@pytest.mark.anyio
+async def test_tax_agent_not_applicable_accepted_without_search() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "not_applicable",
+                            "conclusion": "이 펀드의 위험은 Product Agent의 책임입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": "이 펀드의 위험은?", "objective": "펀드 위험 판단"})
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"] == {
+        "status": "not_applicable",
+        "conclusion": "이 질문에는 해당 도메인 판단이 적용되지 않습니다.",
+        "missing_conditions": [],
+    }
+    assert result["evidence"] == []
+    assert result["warnings"] == []
+    assert search.calls == []
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_tax_agent_determined_still_requires_search_before_submit() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    conclusion = "가입 유형에 따라 세액공제 조건이 달라집니다."
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": conclusion,
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "early-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "세액공제 조건 근거 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": conclusion,
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": "세액공제 조건은?", "objective": "세액공제 조건 판단"})
+
+    assert result["decision"]["status"] == "determined"
+    assert len(search.calls) == 1
+    assert model.invocation_count == 3
+
+
+@pytest.mark.anyio
+async def test_tax_agent_accepts_qualitative_resubmit_after_numeric_conclusion() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    qualitative_conclusion = "소득 기준과 납입 한도를 충족해야 세액공제를 받을 수 있습니다."
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "세액공제 조건 근거 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "세액공제율은 16.5%입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "numeric-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": qualitative_conclusion,
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "qualitative-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": "세액공제 조건은?", "objective": "세액공제 조건 판단"})
+
+    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["conclusion"] == qualitative_conclusion
+    assert "16.5" not in str(result)
+    assert len(search.calls) == 1
+    assert model.invocation_count == 3
 
 
 @pytest.mark.anyio
@@ -2166,3 +2545,7 @@ def test_domain_prompts_are_packaged_and_tax_prompt_blocks_numeric_generation() 
     tax_prompt = load_tax_payout_agent_prompt()
     assert "확정 세금, 금액, 세율, 한도를 생성하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt
+    assert "Product Agent 책임이므로" in tax_prompt
+    assert "Policy Agent 책임이므로" in tax_prompt
+    assert "검색된 청크 전체가 아니라 결론에 실제 인용한 최소" in tax_prompt
+    assert "근거 부족 판단을 계산 필요 판단으로 바꾸지 않는다" in tax_prompt
