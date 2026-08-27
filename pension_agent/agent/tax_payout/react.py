@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import operator
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,7 +23,14 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.types import Command
 from pydantic import Field, ValidationError
 
+from pension_agent.agent.calculation import (
+    CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+    calculation_evidence_chunk_ids,
+    create_pension_withdrawal_limit_tool,
+    format_calculation_summary,
+)
 from pension_agent.agent.contracts import (
+    CalculationResult,
     DecisionStatus,
     DomainRequest,
     DomainResult,
@@ -64,6 +72,7 @@ class TaxPayoutAgentState(AgentState):
     question: NotRequired[str]
     objective: NotRequired[str]
     search_result: NotRequired[SearchResult]
+    calculations: NotRequired[Annotated[list[CalculationResult], operator.add]]
     domain_result: NotRequired[DomainResult]
     numeric_resubmit_used: NotRequired[bool]
 
@@ -96,6 +105,7 @@ class TaxPayoutReactAgent:
             {
                 "question": request["question"],
                 "objective": request["objective"],
+                "calculations": [],
                 "messages": [{"role": "user", "content": _request_text(request)}],
             },
             context=ExecutionContext(deadline=deadline),
@@ -123,11 +133,15 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
         last_message = state.get("messages", [])[-1]
         if not isinstance(last_message, AIMessage) or last_message.tool_calls:
             return None
-        instruction = (
-            "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
-            if state.get("search_result") is not None
-            else "search_documents Tool로 제공 문서 근거를 검색하세요."
-        )
+        if state.get("calculations"):
+            instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+        elif state.get("search_result") is not None:
+            instruction = (
+                "연금수령한도 계산이면 calculate_pension_withdrawal_limit Tool을 호출하고, "
+                "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+            )
+        else:
+            instruction = "search_documents Tool로 제공 문서 근거를 검색하세요."
         return {
             "jump_to": "model",
             "messages": [
@@ -157,6 +171,37 @@ class SingleTaxPayoutSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
         if tool_calls == last_message.tool_calls:
             return None
         return {"messages": [last_message.model_copy(update={"tool_calls": tool_calls})]}
+
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.after_model(state, runtime)
+
+
+class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
+    """검색·계산·결과 제출 순서에서 현재 허용된 Tool 호출 하나만 남긴다."""
+
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        last_message = state.get("messages", [])[-1]
+        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+            return None
+        allowed_tools: tuple[str, ...]
+        if state.get("search_result") is None:
+            # not_applicable 제출은 search_documents 없이도 허용해야 한다 — 도메인
+            # 외 질문에는 검색을 강제하지 않는다. status 검증(search_result 필수)은
+            # submit_domain_result 안에서 계속 수행한다.
+            allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
+        elif state.get("calculations"):
+            allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
+        else:
+            allowed_tools = (
+                CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+                SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+            )
+        allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
+        kept_calls = allowed_calls[:1]
+        if kept_calls == last_message.tool_calls:
+            return None
+        return {"messages": [last_message.model_copy(update={"tool_calls": kept_calls})]}
 
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.after_model(state, runtime)
@@ -192,9 +237,14 @@ def create_tax_payout_react_agent(
 ) -> TaxPayoutReactAgent:
     """TaxPayout 패키지가 소유하는 ReAct graph를 만든다."""
 
+    calculation_tool = create_pension_withdrawal_limit_tool()
     graph = create_agent(
         model=model,
-        tools=(_create_tax_payout_search_tool(search_service), _create_tax_payout_result_tool()),
+        tools=(
+            _create_tax_payout_search_tool(search_service),
+            calculation_tool,
+            _create_tax_payout_result_tool(),
+        ),
         system_prompt=system_prompt,
         state_schema=TaxPayoutAgentState,
         context_schema=ExecutionContext,
@@ -210,10 +260,16 @@ def create_tax_payout_react_agent(
                 exit_behavior="continue",
             ),
             ToolCallLimitMiddleware(
+                tool_name=calculation_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
                 tool_name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                 run_limit=config.max_submit_calls,
                 exit_behavior="continue",
             ),
+            EnforceTaxPayoutToolSequence(),
         ),
         name="tax_payout_agent",
     )
@@ -330,8 +386,12 @@ def _create_tax_payout_result_tool() -> Any:
                 {"error": "search_documents Tool을 먼저 호출해야 합니다."},
                 ensure_ascii=False,
             )
-        if _NUMERIC_CLAIM_PATTERN.search(conclusion.strip()) and not runtime.state.get(
-            "numeric_resubmit_used", False
+        # calculations가 있으면 conclusion은 곧 검증된 Python 요약으로 교체되므로
+        # 재제출 요청은 계산 Tool 없이 숫자를 직접 제출한 경우에만 의미가 있다.
+        if (
+            not runtime.state.get("calculations")
+            and _NUMERIC_CLAIM_PATTERN.search(conclusion.strip())
+            and not runtime.state.get("numeric_resubmit_used", False)
         ):
             return Command(
                 update={
@@ -351,6 +411,7 @@ def _create_tax_payout_result_tool() -> Any:
         try:
             result = _build_tax_payout_result(
                 search_result=search_result,
+                calculations=list(runtime.state.get("calculations", [])),
                 status=status,
                 conclusion=conclusion,
                 missing_conditions=missing_conditions,
@@ -397,6 +458,7 @@ def _not_applicable_tax_payout_result() -> DomainResult:
 def _build_tax_payout_result(
     *,
     search_result: SearchResult,
+    calculations: list[CalculationResult],
     status: DecisionStatus,
     conclusion: str,
     missing_conditions: list[str],
@@ -409,12 +471,26 @@ def _build_tax_payout_result(
             search_result.error or "검색을 완료하지 못했습니다.",
             execution_status=search_result.execution_status,
         )
-    selected_chunks = _select_evidence(search_result, evidence_chunk_ids)
+    required_evidence_ids = calculation_evidence_chunk_ids(calculations)
+    selected_chunks = _select_evidence(
+        search_result,
+        list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
+    )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_warnings.extend(search_result.limitations)
     normalized_conclusion = conclusion.strip()
-    if status != "not_applicable":
+    if calculations:
+        normalized_conclusion = "검증된 Python 계산 결과:\n" + format_calculation_summary(
+            calculations
+        )
+        normalized_warnings = [
+            value for value in normalized_warnings if not _NUMERIC_CLAIM_PATTERN.search(value)
+        ]
+        normalized_warnings.extend(
+            warning for calculation in calculations for warning in calculation["warnings"]
+        )
+    elif status != "not_applicable":
         status, normalized_conclusion, normalized_missing, normalized_warnings = (
             _apply_numeric_claim_guard(
                 status=status,
@@ -428,11 +504,13 @@ def _build_tax_payout_result(
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
         normalized_missing = ["제공 문서의 관련 근거"]
         normalized_warnings.append("검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.")
+        calculations = []
     if status == "not_applicable":
         normalized_conclusion = _NOT_APPLICABLE_CONCLUSION
         normalized_missing = []
         normalized_warnings = []
         selected_chunks = []
+        calculations = []
     return {
         "domain": "tax_payout",
         "execution_status": "completed",
@@ -442,7 +520,7 @@ def _build_tax_payout_result(
             "missing_conditions": normalized_missing,
         },
         "evidence": [_evidence_from_chunk(chunk) for chunk in selected_chunks],
-        "calculations": [],
+        "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
 

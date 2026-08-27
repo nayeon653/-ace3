@@ -71,7 +71,7 @@ def create_product_agent(
     catalog_matcher: ProductCatalogMatcher | None = None,
     catalog_query_planner: ProductCatalogQueryPlanner | None = None,
 ) -> GuardedDomainRunner:
-    """ReAct와 카탈로그 계획 모델을 분리해 상품 근거를 조회한다."""
+    """ReAct와 카탈로그 계획 모델을 분리해 상품 근거와 계산 결과를 만든다."""
 
     selected_catalog = catalog or load_product_catalog()
     if catalog_matcher is not None and catalog_query_planner is not None:

@@ -16,6 +16,7 @@
 | Domain Agent | [Product Agent](agents/product-agent.md) | `agent/product/` |
 | 보조 LLM 컴포넌트 | [Product Catalog Query Planner](agents/product-catalog-query-planner.md) | `agent/product/catalog_query.py` |
 | 결정론적 검색 컴포넌트 | [Search Service](components/search-service.md) | `agent/search/` |
+| 결정론적 계산 컴포넌트 | [Calculation Service](components/calculation-service.md) | `rules/` |
 
 Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 검증으로 검색 계획과
 결과를 만든다. Product Catalog Query Planner는 독립 Domain Agent가 아니라 Product Agent의
@@ -46,8 +47,8 @@ DomainRequest { question, objective }
 - `failed`와 `timeout`에는 정제된 `error`가 필요하며 `decision`, 근거와 계산을 포함하지 않는다.
 - `determined`와 `not_applicable`에는 누락 조건을 포함하지 않는다.
 - `conditional`과 `undetermined`에는 하나 이상의 구체적인 누락 조건이 필요하다.
-- 확정 수치는 Python 계산 결과만 사용할 수 있다. 현재 계산 Tool 구현 범위는
-  [Tax/Payout Agent의 제한](agents/tax-payout-agent.md#현재-제한)에 명시한다.
+- 확정 수치는 Python 계산 결과만 사용할 수 있다. 공용 Calculation Service의 active 함수와
+  Agent 연결 상태는 [Calculation Service 스펙](components/calculation-service.md)에 명시한다.
 - 검색 결과 전체가 아니라 결론에 실제 사용한 청크만 `evidence`로 제출한다.
 
 실행 가능한 타입과 검증의 최종 기준은

@@ -63,6 +63,7 @@
 - `decision.status=undetermined`: 근거 또는 조건 부족으로 판단할 수 없다.
 - `decision.status=not_applicable`: 질문에 해당 도메인 판단을 적용하지 않는다.
 - `warnings`는 사용자가 알아야 할 제한이나 주의사항으로 설명한다.
+- `calculations`는 Python이 검증한 계산 결과다. `calculator_id`, `outputs`, `units`의 값을 바꾸거나 다시 계산하지 않는다.
 - `catalog_result`는 Python이 검증한 카탈로그 조회 결과다. 개수와 상품 목록을 바꾸거나
   추정하지 않고, `return_mode`에 따라 `total_count`와 각 상품의 `official_name`,
   `provider`, `product_code`를 정확히 사용한다.
