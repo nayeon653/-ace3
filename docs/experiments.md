@@ -208,3 +208,57 @@ append-only. 실패한 실험도 남긴다 — 같은 시도를 반복하지 않
   - 결정론적 세제·수령 계산기 구현
   - 계산 Tool과 Tax/Payout Agent 연결
 - 관련 PR/이슈: `test/106-tax-payout-baseline` 브랜치, 이슈 #106.
+
+## 2026-08-27 Tax/Payout Agent 숫자 보호·도메인 경계 개선 (#108)
+
+- 가설: `_NUMERIC_CLAIM_PATTERN`을 실제 숫자·%·단위 표현으로 좁히고, 필드별
+  숫자 가드와 1회 정성적 재제출 유도, `not_applicable` 검색 선행 면제를
+  추가하면 #106에서 발견한 화제어 오탐, `undetermined` 의미 손실, 도메인
+  경계 실패가 해소되면서 기준 질문 8개 전체가 `execution_status: completed`로
+  종료된다.
+- 방법: `pension_agent/agent/tax_payout/react.py`의 `_NUMERIC_CLAIM_PATTERN`에서
+  `세율`·`공제율`·`공제액`·`금액`·`한도` 화제어를 제거하고 숫자·%·퍼센트·
+  프로·만원·억원만 남겼다. `_apply_numeric_claim_guard`로 conclusion·
+  missing_conditions·warnings를 필드별로 검사해 `undetermined`는 어떤
+  경우에도 `conditional`로 승격하지 않도록 분리했다. `submit_domain_result`에
+  `numeric_resubmit_used` 상태를 추가해 숫자 포함 conclusion을 처음 제출하면
+  즉시 대체하지 않고 1회 정성적 재제출을 요청한 뒤, 재제출에도 숫자가 남으면
+  그때 안전 fallback을 적용하도록 바꿨다. `status == "not_applicable"`을
+  `search_documents` 호출 여부 확인보다 먼저 처리해 도메인 외 질문은 검색
+  없이 즉시 종료되게 했다. `pension_agent/prompts/domain/tax-payout-agent.md`에
+  Product/Policy Agent 책임 경계와 최소 evidence 인용 지침을 추가했다.
+  `tests/unit/agent/test_domain_agents.py`에 필드별 숫자 가드, `undetermined`
+  보존, 1회 재제출, `not_applicable` 검색 생략을 검증하는 단위 테스트를
+  추가했다. 개선 후에는 `notebooks/agent/tax_payout_agent_playground.ipynb`로
+  HCX-005 + Qdrant 실제 연결에서 기존 예시 2개와 기준 질문 8개를 재실행하고,
+  8개 전체를 LangSmith trace로 읽기 전용 조회해 모델·Tool 호출 횟수와 evidence
+  선택을 확인했다. 실제 연결 주소, API key, workspace ID는 기록하지 않는다.
+- 결과: (수치 — 재평가 실행 결과)
+  - 개선 전(#106 기준): 기준 질문 8개 중 7개 `completed`, Q8은 실행 실패
+    (failed).
+  - 개선 후(#108, 이번 재평가): 기준 질문 8개 전체가 `execution_status:
+    completed`. 예외(exception), 모델·Tool 호출 한도 초과, `submit_domain_result`
+    3회 이상 반복 없음.
+  - Q7·Q8(Product/Policy 영역 질문): `search_documents` 호출 없이 모델 호출
+    1회·`submit_domain_result` 1회로 `not_applicable`로 즉시 종료.
+  - Q3(중도해지 세금): 1차 제출에 숫자가 남아 재제출 요청을 받았고, 2차
+    제출에서 숫자 없는 정성 결론으로 재작성되어 `determined`로 수락됨.
+  - Q4(퇴직금 IRP 연금 수령 과세): 1차 제출에 숫자가 남아 재제출 요청을
+    받았고, 2차 제출에서 숫자 없는 정성 결론으로 재작성되어 `conditional`로
+    수락됨.
+  - Q1·Q2·Q5·Q6: 1차 제출뿐 아니라 재제출 기회를 준 2차 제출에도 실제 숫자
+    (세율·금액 등)가 남아 있어, numeric guard가 안전 fallback(`conditional` +
+    "확정 수치 판단에는 결정론적 계산 Tool 결과가 필요합니다")으로 대체함.
+    Q1은 이 과정에서 모델 호출이 4회 발생해 8개 중 가장 많았다.
+  - 8개 전체에서 최종 evidence의 chunk ID는 예외 없이 해당 질문의
+    `search_documents` 검색 결과 chunk ID 집합의 부분집합이었다.
+- 결론: **채택**. #106에서 지적된 화제어 오탐, `undetermined` 의미 손실,
+  도메인 경계 미비 문제를 해결했고 재평가에서 8개 전체가 `completed`로
+  종료됨을 확인했다. 남은 한계:
+  1. 결정론적 세제·수령 계산기(`pension_agent/rules/`)는 이번 이슈 범위 밖이며
+     아직 구현되지 않았다 — 계산 Tool 결과가 필요한 질문(Q1·Q2·Q5·Q6)은
+     여전히 `conditional` 안내로 그친다.
+  2. Q1의 모델 호출 4회는 다른 질문(3회 이하) 대비 많아 향후 비용 최적화
+     후보다 — 1차 제출 실패 후 모델이 자유 형식 텍스트로 응답해 tool 강제
+     재프롬프트가 추가로 필요했던 경로다.
+- 관련 PR/이슈: `fix/108-tax-payout-decision-quality` 브랜치, 이슈 #108.

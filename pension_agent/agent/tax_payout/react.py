@@ -47,12 +47,23 @@ SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 SUBMIT_DOMAIN_RESULT_TOOL_NAME = "submit_domain_result"
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
-_NUMERIC_CLAIM_PATTERN = re.compile(
-    r"(?:\d|%|퍼센트|프로|만\s*원|억\s*원|세율|공제율|공제액|금액|한도)"
-)
+# 실제 확정 수치(숫자·%·퍼센트·금액 단위)만 매칭한다. "세율"·"한도"·"금액"·"공제액" 같은
+# 화제어만으로는 매칭하지 않는다 — 조건·정성적 비교 설명까지 계산 필요로 오인하지 않기 위함.
+_NUMERIC_CLAIM_PATTERN = re.compile(r"(?:\d|%|퍼센트|프로|만\s*원|억\s*원)")
 _CALCULATOR_REQUIRED_CONCLUSION = "확정 수치 판단에는 결정론적 계산 Tool 결과가 필요합니다."
 _CALCULATOR_REQUIRED_CONDITION = "결정론적 계산 Tool 결과"
+_NUMERIC_CLAIM_UNDETERMINED_CONCLUSION = (
+    "제공 근거만으로는 확정 수치를 포함한 결론을 판단할 수 없습니다."
+)
+_UNDETERMINED_MISSING_FALLBACK = "제공 문서의 관련 근거 또는 필수 조건"
+_CONDITIONAL_MISSING_FALLBACK = "판단에 필요한 사용자 조건"
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
+_NUMERIC_CLAIM_REMOVED_WARNING = "근거 없이 제출된 확정 수치는 결과에서 제거했습니다."
+_NUMERIC_CLAIM_RESUBMIT_INSTRUCTION = (
+    "conclusion에 근거 없는 확정 수치가 있습니다. 조건·정성적 비교 질문이면 숫자 없이 다시 "
+    "제출하고, 정확한 계산이 필요한 질문이면 status를 conditional로 하고 missing_conditions에 "
+    "결정론적 계산 Tool 결과를 남겨 다시 제출하세요."
+)
 
 
 class TaxPayoutAgentState(AgentState):
@@ -63,6 +74,7 @@ class TaxPayoutAgentState(AgentState):
     search_result: NotRequired[SearchResult]
     calculations: NotRequired[Annotated[list[CalculationResult], operator.add]]
     domain_result: NotRequired[DomainResult]
+    numeric_resubmit_used: NotRequired[bool]
 
 
 class TaxPayoutGraph(Protocol):
@@ -174,7 +186,10 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
             return None
         allowed_tools: tuple[str, ...]
         if state.get("search_result") is None:
-            allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME,)
+            # not_applicable 제출은 search_documents 없이도 허용해야 한다 — 도메인
+            # 외 질문에는 검색을 강제하지 않는다. status 검증(search_result 필수)은
+            # submit_domain_result 안에서 계속 수행한다.
+            allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
         elif state.get("calculations"):
             allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
         else:
@@ -350,11 +365,48 @@ def _create_tax_payout_result_tool() -> Any:
         ],
         runtime: ToolRuntime[ExecutionContext, TaxPayoutAgentState],
     ) -> Command | str:
+        if runtime.tool_call_id is None:
+            raise ValueError("최종 TaxPayout Agent 결과 제출 Tool 호출 ID가 없습니다.")
+        if status == "not_applicable":
+            return Command(
+                update={
+                    "domain_result": _not_applicable_tax_payout_result(),
+                    "messages": [
+                        ToolMessage(
+                            content=json.dumps({"status": "accepted"}, ensure_ascii=False),
+                            tool_call_id=runtime.tool_call_id,
+                            name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                        )
+                    ],
+                }
+            )
         search_result = runtime.state.get("search_result")
         if search_result is None:
             return json.dumps(
                 {"error": "search_documents Tool을 먼저 호출해야 합니다."},
                 ensure_ascii=False,
+            )
+        # calculations가 있으면 conclusion은 곧 검증된 Python 요약으로 교체되므로
+        # 재제출 요청은 계산 Tool 없이 숫자를 직접 제출한 경우에만 의미가 있다.
+        if (
+            not runtime.state.get("calculations")
+            and _NUMERIC_CLAIM_PATTERN.search(conclusion.strip())
+            and not runtime.state.get("numeric_resubmit_used", False)
+        ):
+            return Command(
+                update={
+                    "numeric_resubmit_used": True,
+                    "messages": [
+                        ToolMessage(
+                            content=json.dumps(
+                                {"error": _NUMERIC_CLAIM_RESUBMIT_INSTRUCTION},
+                                ensure_ascii=False,
+                            ),
+                            tool_call_id=runtime.tool_call_id,
+                            name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                        )
+                    ],
+                }
             )
         try:
             result = _build_tax_payout_result(
@@ -372,8 +424,6 @@ def _create_tax_payout_result_tool() -> Any:
                 {"error": "최종 세제·수령 판단 결과가 공통 계약을 위반했습니다."},
                 ensure_ascii=False,
             )
-        if runtime.tool_call_id is None:
-            raise ValueError("최종 TaxPayout Agent 결과 제출 Tool 호출 ID가 없습니다.")
         return Command(
             update={
                 "domain_result": result,
@@ -388,6 +438,21 @@ def _create_tax_payout_result_tool() -> Any:
         )
 
     return submit_domain_result
+
+
+def _not_applicable_tax_payout_result() -> DomainResult:
+    return {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "not_applicable",
+            "conclusion": _NOT_APPLICABLE_CONCLUSION,
+            "missing_conditions": [],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
+    }
 
 
 def _build_tax_payout_result(
@@ -425,17 +490,15 @@ def _build_tax_payout_result(
         normalized_warnings.extend(
             warning for calculation in calculations for warning in calculation["warnings"]
         )
-    elif any(
-        _NUMERIC_CLAIM_PATTERN.search(value)
-        for value in (normalized_conclusion, *normalized_missing, *normalized_warnings)
-    ):
-        status = "conditional"
-        normalized_conclusion = _CALCULATOR_REQUIRED_CONCLUSION
-        normalized_missing = [_CALCULATOR_REQUIRED_CONDITION]
-        normalized_warnings = [
-            value for value in normalized_warnings if not _NUMERIC_CLAIM_PATTERN.search(value)
-        ]
-        normalized_warnings.append(_NUMERIC_CLAIM_WARNING)
+    elif status != "not_applicable":
+        status, normalized_conclusion, normalized_missing, normalized_warnings = (
+            _apply_numeric_claim_guard(
+                status=status,
+                conclusion=normalized_conclusion,
+                missing_conditions=normalized_missing,
+                warnings=normalized_warnings,
+            )
+        )
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
@@ -460,6 +523,56 @@ def _build_tax_payout_result(
         "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
+
+
+def _apply_numeric_claim_guard(
+    *,
+    status: DecisionStatus,
+    conclusion: str,
+    missing_conditions: list[str],
+    warnings: list[str],
+) -> tuple[DecisionStatus, str, list[str], list[str]]:
+    """근거 없는 확정 수치를 필드별로 검사해 제거한다.
+
+    conclusion·missing_conditions·warnings를 각각 검사하고, 숫자가 없는 필드는
+    그대로 보존한다 — warning이나 missing_conditions에만 숫자가 있다는 이유로
+    정상 conclusion과 status까지 바꾸지 않는다. `undetermined`(근거 부족)는
+    어떤 경우에도 `conditional`(계산 필요)로 승격하지 않는다 — "근거가
+    부족하다"와 "계산만 하면 된다"는 의미가 다르다.
+    """
+
+    conclusion_has_claim = bool(_NUMERIC_CLAIM_PATTERN.search(conclusion))
+    kept_missing = [
+        value for value in missing_conditions if not _NUMERIC_CLAIM_PATTERN.search(value)
+    ]
+    kept_warnings = [value for value in warnings if not _NUMERIC_CLAIM_PATTERN.search(value)]
+    if not (
+        conclusion_has_claim
+        or len(kept_missing) != len(missing_conditions)
+        or len(kept_warnings) != len(warnings)
+    ):
+        return status, conclusion, missing_conditions, warnings
+
+    if status == "undetermined":
+        return (
+            status,
+            _NUMERIC_CLAIM_UNDETERMINED_CONCLUSION if conclusion_has_claim else conclusion,
+            kept_missing or [_UNDETERMINED_MISSING_FALLBACK],
+            [*kept_warnings, _NUMERIC_CLAIM_REMOVED_WARNING],
+        )
+
+    if conclusion_has_claim:
+        return (
+            "conditional",
+            _CALCULATOR_REQUIRED_CONCLUSION,
+            [_CALCULATOR_REQUIRED_CONDITION],
+            [*kept_warnings, _NUMERIC_CLAIM_WARNING],
+        )
+
+    result_missing = kept_missing
+    if status == "conditional" and not result_missing:
+        result_missing = [_CONDITIONAL_MISSING_FALLBACK]
+    return status, conclusion, result_missing, [*kept_warnings, _NUMERIC_CLAIM_REMOVED_WARNING]
 
 
 def _select_evidence(search_result: SearchResult, evidence_chunk_ids: list[str]) -> list[Any]:
