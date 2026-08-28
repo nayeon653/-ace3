@@ -9,6 +9,7 @@ from langgraph.types import Command
 from pension_agent.agent.calculation import (
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
+    create_pension_tax_credit_tool,
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
 )
@@ -177,6 +178,139 @@ async def test_calculation_tool_rejects_wrong_field_or_multi_value_source(
         account_valuation_source=account_source,
         pension_year_source="1년차",
         runtime=_runtime(),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_tax_credit_tool_calculates_regular_contribution_with_salary() -> None:
+    result = await create_pension_tax_credit_tool().coroutine(
+        pension_savings_net_contribution_krw=Decimal(6_000_000),
+        retirement_pension_net_contribution_krw=Decimal(3_000_000),
+        pension_savings_net_contribution_source="연금저축 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        runtime=_runtime(
+            question="연금저축 600만원, 퇴직연금 300만원 납입, 총급여 5천만원"
+        ),
+        income_basis="salary",
+        income_basis_source="총급여",
+        income_amount_krw=Decimal(50_000_000),
+        income_amount_source="총급여 5천만원",
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "pension_tax_credit"
+    assert calculation["inputs"].keys() == {
+        "pension_savings_net_contribution_krw",
+        "retirement_pension_net_contribution_krw",
+        "income_basis",
+        "income_amount_krw",
+    }
+    assert Decimal(calculation["outputs"]["eligible_contribution_krw"]) == Decimal(9_000_000)
+    assert Decimal(calculation["outputs"]["credit_rate_percent"]) == Decimal("16.5")
+    assert Decimal(calculation["outputs"]["theoretical_credit_krw"]) == Decimal(1_485_000)
+
+
+@pytest.mark.anyio
+async def test_pension_tax_credit_tool_returns_two_rate_scenarios_without_income() -> None:
+    result = await create_pension_tax_credit_tool().coroutine(
+        pension_savings_net_contribution_krw=Decimal(6_000_000),
+        retirement_pension_net_contribution_krw=Decimal(3_000_000),
+        pension_savings_net_contribution_source="연금저축 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        runtime=_runtime(question="연금저축 600만원, 퇴직연금 300만원 납입"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"].keys() == {
+        "pension_savings_net_contribution_krw",
+        "retirement_pension_net_contribution_krw",
+    }
+    assert Decimal(calculation["outputs"]["lower_income_rate_percent"]) == Decimal("16.5")
+    assert Decimal(calculation["outputs"]["other_income_rate_percent"]) == Decimal("13.2")
+
+
+@pytest.mark.anyio
+async def test_pension_tax_credit_tool_calculates_isa_transfer_and_preserves_sources() -> None:
+    result = await create_pension_tax_credit_tool().coroutine(
+        pension_savings_net_contribution_krw=Decimal(36_000_000),
+        retirement_pension_net_contribution_krw=Decimal(3_000_000),
+        pension_savings_net_contribution_source="연금저축 3,600만원",
+        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        runtime=_runtime(
+            question=(
+                "연금저축 3,600만원, 퇴직연금 300만원 납입, "
+                "ISA 만기자금 3,000만원 전환, 전년도 사용액 0원"
+            )
+        ),
+        pension_savings_isa_transfer_krw=Decimal(30_000_000),
+        pension_savings_isa_transfer_source="ISA 만기자금 3,000만원",
+        prior_same_maturity_isa_extra_eligible_contribution_used_krw=Decimal(0),
+        prior_same_maturity_isa_extra_eligible_contribution_used_source="전년도 사용액 0원",
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert Decimal(calculation["outputs"]["eligible_contribution_krw"]) == Decimal(12_000_000)
+    assert calculation["input_sources"]["pension_savings_isa_transfer_krw"] == {
+        "origin": "question",
+        "text": "ISA 만기자금 3,000만원",
+        "chunk_id": None,
+    }
+
+
+@pytest.mark.anyio
+async def test_pension_tax_credit_tool_rejects_isa_transfer_without_prior_used_amount() -> None:
+    result = await create_pension_tax_credit_tool().coroutine(
+        pension_savings_net_contribution_krw=Decimal(36_000_000),
+        retirement_pension_net_contribution_krw=Decimal(3_000_000),
+        pension_savings_net_contribution_source="연금저축 3,600만원",
+        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        runtime=_runtime(
+            question=(
+                "연금저축 3,600만원, 퇴직연금 300만원 납입, ISA 만기자금 3,000만원 전환"
+            )
+        ),
+        pension_savings_isa_transfer_krw=Decimal(30_000_000),
+        pension_savings_isa_transfer_source="ISA 만기자금 3,000만원",
+    )
+
+    assert isinstance(result, str)
+
+
+@pytest.mark.anyio
+async def test_pension_tax_credit_tool_rejects_mismatched_optional_value_and_source() -> None:
+    result = await create_pension_tax_credit_tool().coroutine(
+        pension_savings_net_contribution_krw=Decimal(6_000_000),
+        retirement_pension_net_contribution_krw=Decimal(3_000_000),
+        pension_savings_net_contribution_source="연금저축 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        runtime=_runtime(),
+        income_amount_krw=Decimal(50_000_000),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_tax_credit_tool_rejects_income_basis_source_mismatch() -> None:
+    result = await create_pension_tax_credit_tool().coroutine(
+        pension_savings_net_contribution_krw=Decimal(6_000_000),
+        retirement_pension_net_contribution_krw=Decimal(3_000_000),
+        pension_savings_net_contribution_source="연금저축 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        runtime=_runtime(
+            question="연금저축 600만원, 퇴직연금 300만원 납입, 종합소득금액 5천만원"
+        ),
+        income_basis="salary",
+        income_basis_source="종합소득금액",
+        income_amount_krw=Decimal(50_000_000),
+        income_amount_source="종합소득금액 5천만원",
     )
 
     assert isinstance(result, str)

@@ -32,6 +32,19 @@ _SOURCE_REQUIREMENTS = {
     "total_liabilities_krw": (("부채총액", "총부채", "부채"), ("원",)),
     "total_units": (("총좌수", "좌수"), ("좌",)),
     "daily_loss_percentile_percent": (("손실률",), ("%", "퍼센트")),
+    "pension_savings_net_contribution_krw": (("연금저축",), ("원",)),
+    "retirement_pension_net_contribution_krw": (("퇴직연금", "IRP"), ("원",)),
+    "pension_savings_isa_transfer_krw": (("연금저축", "ISA"), ("원",)),
+    "retirement_pension_isa_transfer_krw": (("퇴직연금", "ISA"), ("원",)),
+    "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (
+        ("전년도", "기존", "ISA"),
+        ("원",),
+    ),
+    "remaining_tax_before_pension_credit_krw": (("잔여", "산출세액"), ("원",)),
+}
+_INCOME_BASIS_LABELS: dict[str, tuple[str, ...]] = {
+    "salary": ("총급여",),
+    "comprehensive_income": ("종합소득금액",),
 }
 
 
@@ -51,22 +64,47 @@ def validated_input_sources(
     validated: dict[str, CalculationInputSource] = {}
     for field, value in inputs.items():
         source = _normalize_text(input_sources[field])
-        requirements = _SOURCE_REQUIREMENTS.get(field)
-        if requirements is None:
-            return None
-        labels, units = requirements
-        if not any(label in source for label in labels) or not any(
-            unit in source for unit in units
-        ):
-            return None
-        quantities = _quantities(source)
-        if len(quantities) != 1 or quantities[0] != _decimal(value):
-            return None
+        if field == "income_basis":
+            if not _matches_income_basis_label(value, source):
+                return None
+        elif field == "income_amount_krw":
+            if not _matches_income_amount_source(source, inputs.get("income_basis")):
+                return None
+            if not _matches_single_quantity(source, value):
+                return None
+        else:
+            requirements = _SOURCE_REQUIREMENTS.get(field)
+            if requirements is None:
+                return None
+            labels, units = requirements
+            if not any(label in source for label in labels) or not any(
+                unit in source for unit in units
+            ):
+                return None
+            if not _matches_single_quantity(source, value):
+                return None
         matched_source = _match_trusted_source(source, question=question, chunks=chunks)
         if matched_source is None:
             return None
         validated[field] = matched_source
     return validated
+
+
+def _matches_income_basis_label(value: Any, source: str) -> bool:
+    labels = _INCOME_BASIS_LABELS.get(str(value))
+    return labels is not None and any(label in source for label in labels)
+
+
+def _matches_income_amount_source(source: str, income_basis: Any) -> bool:
+    if "원" not in source:
+        return False
+    labels = _INCOME_BASIS_LABELS.get(str(income_basis))
+    return labels is not None and any(label in source for label in labels)
+
+
+def _matches_single_quantity(source: str, value: Any) -> bool:
+    quantities = _quantities(source)
+    return len(quantities) == 1 and quantities[0] == _decimal(value)
 
 
 def calculation_evidence_chunk_ids(calculations: list[CalculationResult]) -> list[str]:
