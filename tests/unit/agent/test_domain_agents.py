@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, ClassVar, cast
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from langchain_core.outputs import ChatResult
 from langchain_core.runnables import Runnable
 from langsmith import RunTree, get_current_run_tree, tracing_context
 
+from pension_agent.agent.calculation import format_calculation_summary
 from pension_agent.agent.contracts import (
     DomainName,
     DomainResult,
@@ -397,6 +399,7 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                 {
                     "search_documents",
                     "calculate_pension_withdrawal_limit",
+                    "calculate_pension_tax_credit",
                     "submit_domain_result",
                 }
                 if domain == "tax_payout"
@@ -2003,6 +2006,428 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
 
 
 @pytest.mark.anyio
+async def test_tax_agent_records_and_uses_verified_tax_credit_calculation() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="세액공제",
+                    content=(
+                        "연금저축 600만원, 퇴직연금 300만원 납입, "
+                        "총급여 5천만원에 대한 세액공제 규칙입니다."
+                    ),
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "세액공제 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_tax_credit",
+                        "args": {
+                            "pension_savings_net_contribution_krw": "6000000",
+                            "retirement_pension_net_contribution_krw": "3000000",
+                            "pension_savings_net_contribution_source": "연금저축 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                            "income_basis": "salary",
+                            "income_basis_source": "총급여",
+                            "income_amount_krw": "50000000",
+                            "income_amount_source": "총급여 5천만원",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 세액은 999원입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "세액공제 대상액과 세액을 계산해줘",
+            "objective": "연금계좌 세액공제 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert "999" not in result["decision"]["conclusion"]
+    assert "연금계좌 세액공제 대상액" in result["decision"]["conclusion"]
+    assert "이론상 세액" in result["decision"]["conclusion"]
+    assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
+    assert Decimal(
+        result["calculations"][0]["outputs"]["eligible_contribution_krw"]
+    ) == Decimal(9_000_000)
+    assert [chunk["chunk_id"] for chunk in result["evidence"]] == [
+        "550e8400-e29b-41d4-a716-446655440000"
+    ]
+
+
+@pytest.mark.anyio
+async def test_tax_agent_summarizes_both_income_scenarios_without_income_input() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="세액공제",
+                    content="연금저축 600만원, 퇴직연금 300만원 납입에 대한 세액공제 규칙입니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "세액공제 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_tax_credit",
+                        "args": {
+                            "pension_savings_net_contribution_krw": "6000000",
+                            "retirement_pension_net_contribution_krw": "3000000",
+                            "pension_savings_net_contribution_source": "연금저축 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"}
+    )
+
+    conclusion = result["decision"]["conclusion"]
+    assert "16.5%" in conclusion
+    assert "13.2%" in conclusion
+
+
+@pytest.mark.anyio
+async def test_tax_agent_keeps_only_first_calculation_tool_when_two_are_requested() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="연금수령한도",
+                    content="평가액 1천만원, 수령연차 1년차에 대한 산식입니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "연금수령한도 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "10000000",
+                            "pension_year": 1,
+                            "account_valuation_source": "평가액 1천만원",
+                            "pension_year_source": "1년차",
+                        },
+                        "id": "withdrawal-call",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "calculate_pension_tax_credit",
+                        "args": {
+                            "pension_savings_net_contribution_krw": "6000000",
+                            "retirement_pension_net_contribution_krw": "3000000",
+                            "pension_savings_net_contribution_source": "연금저축 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                        },
+                        "id": "tax-credit-call",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "결과를 제출합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": "연금수령한도는?", "objective": "연금수령한도 계산"})
+
+    assert len(result["calculations"]) == 1
+    assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
+
+
+@pytest.mark.anyio
+async def test_tax_agent_allows_only_submit_after_a_calculation_is_recorded() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="세액공제",
+                    content="연금저축 600만원, 퇴직연금 300만원 납입에 대한 세액공제 규칙입니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "세액공제 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_tax_credit",
+                        "args": {
+                            "pension_savings_net_contribution_krw": "6000000",
+                            "retirement_pension_net_contribution_krw": "3000000",
+                            "pension_savings_net_contribution_source": "연금저축 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                        },
+                        "id": "tax-credit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "10000000",
+                            "pension_year": 1,
+                            "account_valuation_source": "평가액 1천만원",
+                            "pension_year_source": "1년차",
+                        },
+                        "id": "withdrawal-call",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "결과를 제출합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"}
+    )
+
+    assert len(result["calculations"]) == 1
+    assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
+    assert result["decision"]["status"] == "determined"
+
+
+def test_pension_tax_credit_summary_does_not_claim_usable_credit_is_refund() -> None:
+    summary = format_calculation_summary(
+        [
+            {
+                "calculator_id": "pension_tax_credit",
+                "inputs": {
+                    "pension_savings_net_contribution_krw": "6000000",
+                    "retirement_pension_net_contribution_krw": "3000000",
+                    "income_basis": "salary",
+                    "income_amount_krw": "50000000",
+                    "remaining_tax_before_pension_credit_krw": "1000000",
+                },
+                "input_sources": {},
+                "outputs": {
+                    "regular_eligible_contribution_krw": "9000000",
+                    "isa_extra_remaining_cap_krw": "3000000",
+                    "isa_extra_limit_krw": "0.00",
+                    "isa_extra_eligible_contribution_krw": "0",
+                    "eligible_contribution_krw": "9000000",
+                    "credit_rate_percent": "16.5",
+                    "theoretical_credit_krw": "1485000",
+                    "usable_credit_krw": "1000000",
+                },
+                "units": {
+                    "eligible_contribution_krw": "KRW",
+                    "credit_rate_percent": "%",
+                    "theoretical_credit_krw": "KRW",
+                    "usable_credit_krw": "KRW",
+                },
+                "warnings": [],
+            }
+        ]
+    )
+
+    assert "환급액" not in summary
+    assert "잔여 산출세액 기준 사용 가능 세액: 1000000 KRW" in summary
+    assert "이론상 세액: 1485000 KRW" in summary
+    assert "ISA" not in summary
+
+
+def test_pension_tax_credit_summary_keeps_isa_section_when_extra_limit_is_zero() -> None:
+    summary = format_calculation_summary(
+        [
+            {
+                "calculator_id": "pension_tax_credit",
+                "inputs": {
+                    "pension_savings_net_contribution_krw": "36000000",
+                    "retirement_pension_net_contribution_krw": "3000000",
+                    "pension_savings_isa_transfer_krw": "30000000",
+                    "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (
+                        "3000000"
+                    ),
+                },
+                "input_sources": {},
+                "outputs": {
+                    "regular_eligible_contribution_krw": "9000000",
+                    "isa_extra_remaining_cap_krw": "0",
+                    "isa_extra_limit_krw": "0.00",
+                    "isa_extra_eligible_contribution_krw": "0",
+                    "eligible_contribution_krw": "9000000",
+                    "lower_income_rate_percent": "16.5",
+                    "lower_income_theoretical_credit_krw": "1485000",
+                    "other_income_rate_percent": "13.2",
+                    "other_income_theoretical_credit_krw": "1188000",
+                },
+                "units": {
+                    "eligible_contribution_krw": "KRW",
+                    "isa_extra_limit_krw": "KRW",
+                    "isa_extra_eligible_contribution_krw": "KRW",
+                    "isa_extra_remaining_cap_krw": "KRW",
+                },
+                "warnings": [],
+            }
+        ]
+    )
+
+    assert "ISA 추가한도: 0.00 KRW" in summary
+    assert "ISA 추가 공제대상액: 0 KRW" in summary
+    assert "잔여 ISA 추가한도: 0 KRW" in summary
+
+
+@pytest.mark.anyio
 async def test_product_agent_records_and_uses_verified_standard_price_calculation() -> None:
     search = FakeSearchService(
         SearchResult(
@@ -2854,6 +3279,7 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "{{PRODUCT_CATALOG_JSON}}" not in product_prompt
     tax_prompt = load_tax_payout_agent_prompt()
     assert "calculate_pension_withdrawal_limit" in tax_prompt
+    assert "calculate_pension_tax_credit" in tax_prompt
     assert "지원하지 않는 세금, 금액, 세율이나 한도를 직접 계산하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt
     assert "Product Agent 책임이므로" in tax_prompt
