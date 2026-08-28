@@ -43,8 +43,8 @@ class PensionTaxCreditInput(BaseModel):
     pension_savings_net_contribution_krw: _Money
     retirement_pension_net_contribution_krw: _Money
 
-    pension_savings_isa_transfer_krw: _Money | None = None
-    retirement_pension_isa_transfer_krw: _Money | None = None
+    pension_savings_isa_transfer_krw: _Money
+    retirement_pension_isa_transfer_krw: _Money
     prior_same_maturity_isa_extra_eligible_contribution_used_krw: _IsaPriorUsed | None = None
 
     income_basis: IncomeBasis | None = None
@@ -64,16 +64,8 @@ class PensionTaxCreditInput(BaseModel):
     def validate_related_fields(self) -> Self:
         """ISA 전환액과 소득 관련 필드의 상호 조건을 검증한다."""
 
-        savings_isa_transfer = (
-            self.pension_savings_isa_transfer_krw
-            if self.pension_savings_isa_transfer_krw is not None
-            else Decimal(0)
-        )
-        retirement_isa_transfer = (
-            self.retirement_pension_isa_transfer_krw
-            if self.retirement_pension_isa_transfer_krw is not None
-            else Decimal(0)
-        )
+        savings_isa_transfer = self.pension_savings_isa_transfer_krw
+        retirement_isa_transfer = self.retirement_pension_isa_transfer_krw
         total_isa_transfer = savings_isa_transfer + retirement_isa_transfer
 
         if savings_isa_transfer > self.pension_savings_net_contribution_krw:
@@ -109,16 +101,8 @@ def calculate_pension_tax_credit(
 ) -> CalculationOutput:
     """일반 납입과 ISA 전환 납입의 세액공제 대상액과 세액을 계산한다."""
 
-    savings_isa_transfer = (
-        value.pension_savings_isa_transfer_krw
-        if value.pension_savings_isa_transfer_krw is not None
-        else Decimal(0)
-    )
-    retirement_isa_transfer = (
-        value.retirement_pension_isa_transfer_krw
-        if value.retirement_pension_isa_transfer_krw is not None
-        else Decimal(0)
-    )
+    savings_isa_transfer = value.pension_savings_isa_transfer_krw
+    retirement_isa_transfer = value.retirement_pension_isa_transfer_krw
     prior_isa_used = (
         value.prior_same_maturity_isa_extra_eligible_contribution_used_krw
         if value.prior_same_maturity_isa_extra_eligible_contribution_used_krw is not None

@@ -48,7 +48,10 @@ from pension_agent.agent.tax_payout import (
     create_tax_payout_agent,
     load_tax_payout_agent_prompt,
 )
-from pension_agent.agent.tax_payout.react import _build_tax_payout_result
+from pension_agent.agent.tax_payout.react import (
+    _INCOME_BASIS_MISSING_CONDITION,
+    _build_tax_payout_result,
+)
 from pension_agent.config import DomainAgentConfig
 from pension_agent.core import DocumentType
 from pension_agent.retrieval import load_product_catalog
@@ -2015,7 +2018,8 @@ async def test_tax_agent_records_and_uses_verified_tax_credit_calculation() -> N
                     DocumentType.PENSION_REFERENCE,
                     title="세액공제",
                     content=(
-                        "연금저축 600만원, 퇴직연금 300만원 납입, "
+                        "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
+                        "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원, "
                         "총급여 5천만원에 대한 세액공제 규칙입니다."
                     ),
                 )
@@ -2043,8 +2047,12 @@ async def test_tax_agent_records_and_uses_verified_tax_credit_calculation() -> N
                         "args": {
                             "pension_savings_net_contribution_krw": "6000000",
                             "retirement_pension_net_contribution_krw": "3000000",
-                            "pension_savings_net_contribution_source": "연금저축 600만원",
-                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                            "pension_savings_isa_transfer_krw": "0",
+                            "retirement_pension_isa_transfer_krw": "0",
+                            "pension_savings_net_contribution_source": "연금저축 순납입액 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 순납입액 300만원",
+                            "pension_savings_isa_transfer_source": "연금저축 ISA 전환액 0원",
+                            "retirement_pension_isa_transfer_source": "퇴직연금 ISA 전환액 0원",
                             "income_basis": "salary",
                             "income_basis_source": "총급여",
                             "income_amount_krw": "50000000",
@@ -2108,7 +2116,11 @@ async def test_tax_agent_summarizes_both_income_scenarios_without_income_input()
                 _chunk(
                     DocumentType.PENSION_REFERENCE,
                     title="세액공제",
-                    content="연금저축 600만원, 퇴직연금 300만원 납입에 대한 세액공제 규칙입니다.",
+                    content=(
+                        "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
+                        "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원에 대한 "
+                        "세액공제 규칙입니다."
+                    ),
                 )
             ],
         )
@@ -2134,8 +2146,12 @@ async def test_tax_agent_summarizes_both_income_scenarios_without_income_input()
                         "args": {
                             "pension_savings_net_contribution_krw": "6000000",
                             "retirement_pension_net_contribution_krw": "3000000",
-                            "pension_savings_net_contribution_source": "연금저축 600만원",
-                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                            "pension_savings_isa_transfer_krw": "0",
+                            "retirement_pension_isa_transfer_krw": "0",
+                            "pension_savings_net_contribution_source": "연금저축 순납입액 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 순납입액 300만원",
+                            "pension_savings_isa_transfer_source": "연금저축 ISA 전환액 0원",
+                            "retirement_pension_isa_transfer_source": "퇴직연금 ISA 전환액 0원",
                         },
                         "id": "calculation-call",
                         "type": "tool_call",
@@ -2182,7 +2198,11 @@ async def test_tax_agent_leaves_income_bracket_as_missing_condition_when_omitted
                 _chunk(
                     DocumentType.PENSION_REFERENCE,
                     title="세액공제",
-                    content="연금저축 600만원, 퇴직연금 300만원 납입에 대한 세액공제 규칙입니다.",
+                    content=(
+                        "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
+                        "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원에 대한 "
+                        "세액공제 규칙입니다."
+                    ),
                 )
             ],
         )
@@ -2208,8 +2228,12 @@ async def test_tax_agent_leaves_income_bracket_as_missing_condition_when_omitted
                         "args": {
                             "pension_savings_net_contribution_krw": "6000000",
                             "retirement_pension_net_contribution_krw": "3000000",
-                            "pension_savings_net_contribution_source": "연금저축 600만원",
-                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                            "pension_savings_isa_transfer_krw": "0",
+                            "retirement_pension_isa_transfer_krw": "0",
+                            "pension_savings_net_contribution_source": "연금저축 순납입액 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 순납입액 300만원",
+                            "pension_savings_isa_transfer_source": "연금저축 ISA 전환액 0원",
+                            "retirement_pension_isa_transfer_source": "퇴직연금 ISA 전환액 0원",
                         },
                         "id": "calculation-call",
                         "type": "tool_call",
@@ -2243,7 +2267,10 @@ async def test_tax_agent_leaves_income_bracket_as_missing_condition_when_omitted
     result = await agent({"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"})
 
     assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["missing_conditions"] == ["총급여 또는 종합소득금액 확인"]
+    assert result["decision"]["missing_conditions"] == [
+        "총급여 또는 종합소득금액 확인",
+        _INCOME_BASIS_MISSING_CONDITION,
+    ]
     assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
     conclusion = result["decision"]["conclusion"]
     assert "16.5%" in conclusion
@@ -2296,8 +2323,12 @@ async def test_tax_agent_keeps_only_first_calculation_tool_when_two_are_requeste
                         "args": {
                             "pension_savings_net_contribution_krw": "6000000",
                             "retirement_pension_net_contribution_krw": "3000000",
-                            "pension_savings_net_contribution_source": "연금저축 600만원",
-                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                            "pension_savings_isa_transfer_krw": "0",
+                            "retirement_pension_isa_transfer_krw": "0",
+                            "pension_savings_net_contribution_source": "연금저축 순납입액 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 순납입액 300만원",
+                            "pension_savings_isa_transfer_source": "연금저축 ISA 전환액 0원",
+                            "retirement_pension_isa_transfer_source": "퇴직연금 ISA 전환액 0원",
                         },
                         "id": "tax-credit-call",
                         "type": "tool_call",
@@ -2343,7 +2374,11 @@ async def test_tax_agent_allows_only_submit_after_a_calculation_is_recorded() ->
                 _chunk(
                     DocumentType.PENSION_REFERENCE,
                     title="세액공제",
-                    content="연금저축 600만원, 퇴직연금 300만원 납입에 대한 세액공제 규칙입니다.",
+                    content=(
+                        "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
+                        "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원에 대한 "
+                        "세액공제 규칙입니다."
+                    ),
                 )
             ],
         )
@@ -2369,8 +2404,12 @@ async def test_tax_agent_allows_only_submit_after_a_calculation_is_recorded() ->
                         "args": {
                             "pension_savings_net_contribution_krw": "6000000",
                             "retirement_pension_net_contribution_krw": "3000000",
-                            "pension_savings_net_contribution_source": "연금저축 600만원",
-                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                            "pension_savings_isa_transfer_krw": "0",
+                            "retirement_pension_isa_transfer_krw": "0",
+                            "pension_savings_net_contribution_source": "연금저축 순납입액 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 순납입액 300만원",
+                            "pension_savings_isa_transfer_source": "연금저축 ISA 전환액 0원",
+                            "retirement_pension_isa_transfer_source": "퇴직연금 ISA 전환액 0원",
                         },
                         "id": "tax-credit-call",
                         "type": "tool_call",
@@ -2416,7 +2455,7 @@ async def test_tax_agent_allows_only_submit_after_a_calculation_is_recorded() ->
 
     assert len(result["calculations"]) == 1
     assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
-    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["status"] == "conditional"
 
 
 def test_pension_tax_credit_summary_does_not_claim_usable_credit_is_refund() -> None:
@@ -2496,6 +2535,148 @@ def test_pension_tax_credit_summary_keeps_isa_section_when_extra_limit_is_zero()
     assert "ISA 추가한도: 0.00 KRW" in summary
     assert "ISA 추가 공제대상액: 0 KRW" in summary
     assert "잔여 ISA 추가한도: 0 KRW" in summary
+
+
+def _pension_tax_credit_rate_scenarios_calculation(
+    *, extra_inputs: dict[str, Any] | None = None
+) -> Any:
+    return {
+        "calculator_id": "pension_tax_credit",
+        "inputs": {
+            "pension_savings_net_contribution_krw": "6000000",
+            "retirement_pension_net_contribution_krw": "3000000",
+            **(extra_inputs or {}),
+        },
+        "input_sources": {},
+        "outputs": {
+            "eligible_contribution_krw": "9000000",
+            "lower_income_rate_percent": "16.5",
+            "lower_income_theoretical_credit_krw": "1485000",
+            "other_income_rate_percent": "13.2",
+            "other_income_theoretical_credit_krw": "1188000",
+        },
+        "units": {"eligible_contribution_krw": "KRW"},
+        "warnings": [],
+    }
+
+
+def _pension_tax_credit_single_rate_calculation() -> Any:
+    return {
+        "calculator_id": "pension_tax_credit",
+        "inputs": {
+            "pension_savings_net_contribution_krw": "6000000",
+            "retirement_pension_net_contribution_krw": "3000000",
+            "income_basis": "salary",
+            "income_amount_krw": "50000000",
+        },
+        "input_sources": {},
+        "outputs": {
+            "eligible_contribution_krw": "9000000",
+            "credit_rate_percent": "16.5",
+            "theoretical_credit_krw": "1485000",
+        },
+        "units": {"eligible_contribution_krw": "KRW"},
+        "warnings": [],
+    }
+
+
+def test_pension_tax_credit_income_guard_overrides_determined_status_with_empty_missing() -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_tax_payout_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[_pension_tax_credit_rate_scenarios_calculation()],
+        status="determined",
+        conclusion="임의 결론",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [_INCOME_BASIS_MISSING_CONDITION]
+
+
+def test_pension_tax_credit_income_guard_preserves_existing_missing_conditions() -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_tax_payout_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[_pension_tax_credit_rate_scenarios_calculation()],
+        status="conditional",
+        conclusion="임의 결론",
+        missing_conditions=["기존 누락 조건"],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [
+        "기존 누락 조건",
+        _INCOME_BASIS_MISSING_CONDITION,
+    ]
+
+
+def test_pension_tax_credit_income_guard_does_not_duplicate_missing_condition() -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_tax_payout_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[_pension_tax_credit_rate_scenarios_calculation()],
+        status="conditional",
+        conclusion="임의 결론",
+        missing_conditions=[_INCOME_BASIS_MISSING_CONDITION],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["missing_conditions"] == [_INCOME_BASIS_MISSING_CONDITION]
+
+
+def test_pension_tax_credit_income_guard_keeps_model_status_when_income_provided() -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_tax_payout_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[_pension_tax_credit_single_rate_calculation()],
+        status="determined",
+        conclusion="임의 결론",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["missing_conditions"] == []
+
+
+def test_pension_tax_credit_income_guard_keeps_both_rate_scenario_summary() -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_tax_payout_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[_pension_tax_credit_rate_scenarios_calculation()],
+        status="determined",
+        conclusion="임의 결론",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    conclusion = result["decision"]["conclusion"]
+    assert "16.5%" in conclusion
+    assert "13.2%" in conclusion
+    assert result["calculations"] == [_pension_tax_credit_rate_scenarios_calculation()]
 
 
 @pytest.mark.anyio

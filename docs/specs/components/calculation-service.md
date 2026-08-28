@@ -51,23 +51,24 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 ### `pension_tax_credit` 계약
 
 **필수 입력**: `pension_savings_net_contribution_krw`(연금저축 순납입액),
-`retirement_pension_net_contribution_krw`(퇴직연금 순납입액).
+`retirement_pension_net_contribution_krw`(퇴직연금 순납입액), `pension_savings_isa_transfer_krw`,
+`retirement_pension_isa_transfer_krw`(ISA 만기자금 전환액, 명시적 `0` 허용).
 
-**선택 입력**: `pension_savings_isa_transfer_krw`, `retirement_pension_isa_transfer_krw`
-(ISA 만기자금 전환액), `prior_same_maturity_isa_extra_eligible_contribution_used_krw`
+**선택 입력**: `prior_same_maturity_isa_extra_eligible_contribution_used_krw`
 (같은 만기자금의 전년도 추가 공제대상액 사용분, 0~300만원), `income_basis`(`salary` 또는
 `comprehensive_income`), `income_amount_krw`(소득금액), `remaining_tax_before_pension_credit_krw`
 (연금계좌 세액공제 적용 직전 잔여 산출세액).
 
-**생략/0/null 계약**: 선택 입력은 필드 자체를 생략하는 것과 값 `0`을 명시적으로 전달하는
-것을 다르게 취급한다. 생략은 "정보 없음"이고 `0`은 "확인된 값이 0"이라는 뜻이다. Pydantic
-입력 모델은 명시적 `null` 전달을 거부한다(`reject_explicit_null` 검증기) — 값이 없으면
-필드를 아예 포함하지 않아야 한다. ISA 전환액이 하나라도 0보다 크면
-`prior_same_maturity_isa_extra_eligible_contribution_used_krw`가 필수이고, ISA 전환액이
-모두 0/생략이면 이 필드를 포함할 수 없다. `income_basis`와 `income_amount_krw`는 항상
-함께 있거나 함께 생략해야 하며, `remaining_tax_before_pension_credit_krw`는 소득 기준이
-있을 때만 허용한다. `CalculationResult.inputs`에는 실제로 전달된(생략되지 않은) 필드만
-남는다(`exclude_unset`).
+**생략/0/null 계약**: `pension_savings_isa_transfer_krw`, `retirement_pension_isa_transfer_krw`는
+필수이므로 생략하면 입력 오류이고, 명시적 `0`은 허용한다. 나머지 선택 입력은 필드 자체를
+생략하는 것과 값 `0`을 명시적으로 전달하는 것을 다르게 취급한다. 생략은 "정보 없음"이고
+`0`은 "확인된 값이 0"이라는 뜻이다. Pydantic 입력 모델은 명시적 `null` 전달을 거부한다
+(`reject_explicit_null` 검증기) — 값이 없으면 필드를 아예 포함하지 않아야 한다. ISA
+전환액이 하나라도 0보다 크면 `prior_same_maturity_isa_extra_eligible_contribution_used_krw`가
+필수이고, ISA 전환액이 모두 0이면 이 필드를 포함할 수 없다. `income_basis`와
+`income_amount_krw`는 항상 함께 있거나 함께 생략해야 하며,
+`remaining_tax_before_pension_credit_krw`는 소득 기준이 있을 때만 허용한다.
+`CalculationResult.inputs`에는 실제로 전달된(생략되지 않은) 필드만 남는다(`exclude_unset`).
 
 **산식**: 일반 공제대상액은 `min(연금저축 순납입액, 600만원) + 퇴직연금 순납입액`을
 `900만원`으로 제한한 값이다. ISA 추가공제는 `ISA 전환액 합 × 10%`와

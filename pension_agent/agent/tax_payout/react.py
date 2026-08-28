@@ -59,6 +59,7 @@ _NUMERIC_CLAIM_UNDETERMINED_CONCLUSION = (
 )
 _UNDETERMINED_MISSING_FALLBACK = "제공 문서의 관련 근거 또는 필수 조건"
 _CONDITIONAL_MISSING_FALLBACK = "판단에 필요한 사용자 조건"
+_INCOME_BASIS_MISSING_CONDITION = "총급여 또는 종합소득금액 확인 필요"
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
 _NUMERIC_CLAIM_REMOVED_WARNING = "근거 없이 제출된 확정 수치는 결과에서 제거했습니다."
 _NUMERIC_CLAIM_RESUBMIT_INSTRUCTION = (
@@ -501,6 +502,10 @@ def _build_tax_payout_result(
         normalized_warnings.extend(
             warning for calculation in calculations for warning in calculation["warnings"]
         )
+        if _has_unconditioned_pension_tax_credit_rate_scenarios(calculations):
+            status = "conditional"
+            if _INCOME_BASIS_MISSING_CONDITION not in normalized_missing:
+                normalized_missing = [*normalized_missing, _INCOME_BASIS_MISSING_CONDITION]
     elif status != "not_applicable":
         status, normalized_conclusion, normalized_missing, normalized_warnings = (
             _apply_numeric_claim_guard(
@@ -534,6 +539,21 @@ def _build_tax_payout_result(
         "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
+
+
+def _has_unconditioned_pension_tax_credit_rate_scenarios(
+    calculations: list[CalculationResult],
+) -> bool:
+    """소득 기준 없이 두 세율 시나리오만 반환된 세액공제 계산이 있는지 확인한다."""
+
+    return any(
+        calculation["calculator_id"] == "pension_tax_credit"
+        and "income_basis" not in calculation["inputs"]
+        and "income_amount_krw" not in calculation["inputs"]
+        and "lower_income_rate_percent" in calculation["outputs"]
+        and "other_income_rate_percent" in calculation["outputs"]
+        for calculation in calculations
+    )
 
 
 def _apply_numeric_claim_guard(

@@ -13,6 +13,8 @@ from pension_agent.rules.calculators.pension_tax_credit import (
 _BASE_INPUTS: dict[str, object] = {
     "pension_savings_net_contribution_krw": 6_000_000,
     "retirement_pension_net_contribution_krw": 3_000_000,
+    "pension_savings_isa_transfer_krw": 0,
+    "retirement_pension_isa_transfer_krw": 0,
 }
 
 
@@ -27,7 +29,19 @@ def test_accepts_regular_contributions_without_optional_inputs() -> None:
 
     assert value.pension_savings_net_contribution_krw == Decimal(6_000_000)
     assert value.retirement_pension_net_contribution_krw == Decimal(3_000_000)
+    assert value.pension_savings_isa_transfer_krw == Decimal(0)
+    assert value.retirement_pension_isa_transfer_krw == Decimal(0)
     assert value.income_basis is None
+
+
+def test_rejects_omitted_isa_transfer_fields() -> None:
+    with pytest.raises(ValidationError):
+        PensionTaxCreditInput.model_validate(
+            {
+                "pension_savings_net_contribution_krw": 6_000_000,
+                "retirement_pension_net_contribution_krw": 3_000_000,
+            }
+        )
 
 
 def test_accepts_isa_transfer_with_prior_used_amount() -> None:
@@ -36,6 +50,7 @@ def test_accepts_isa_transfer_with_prior_used_amount() -> None:
             "pension_savings_net_contribution_krw": 36_000_000,
             "retirement_pension_net_contribution_krw": 3_000_000,
             "pension_savings_isa_transfer_krw": 30_000_000,
+            "retirement_pension_isa_transfer_krw": 0,
             "prior_same_maturity_isa_extra_eligible_contribution_used_krw": 0,
         }
     )
@@ -79,6 +94,7 @@ def test_rejects_prior_isa_used_outside_limit(prior_used: int) -> None:
                 "pension_savings_net_contribution_krw": 31_000_000,
                 "retirement_pension_net_contribution_krw": 0,
                 "pension_savings_isa_transfer_krw": 30_000_000,
+                "retirement_pension_isa_transfer_krw": 0,
                 "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (prior_used),
             }
         )
@@ -129,6 +145,7 @@ def test_calculates_full_isa_extra_limit() -> None:
             "pension_savings_net_contribution_krw": 36_000_000,
             "retirement_pension_net_contribution_krw": 3_000_000,
             "pension_savings_isa_transfer_krw": 30_000_000,
+            "retirement_pension_isa_transfer_krw": 0,
             "prior_same_maturity_isa_extra_eligible_contribution_used_krw": 0,
             "income_basis": "salary",
             "income_amount_krw": 50_000_000,
@@ -151,6 +168,7 @@ def test_subtracts_prior_isa_extra_eligible_amount() -> None:
             "pension_savings_net_contribution_krw": 36_000_000,
             "retirement_pension_net_contribution_krw": 3_000_000,
             "pension_savings_isa_transfer_krw": 30_000_000,
+            "retirement_pension_isa_transfer_krw": 0,
             "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (2_000_000),
             "income_basis": "salary",
             "income_amount_krw": 50_000_000,
@@ -170,6 +188,7 @@ def test_does_not_exceed_total_net_contribution() -> None:
             "pension_savings_net_contribution_krw": 3_000_000,
             "retirement_pension_net_contribution_krw": 0,
             "pension_savings_isa_transfer_krw": 3_000_000,
+            "retirement_pension_isa_transfer_krw": 0,
             "prior_same_maturity_isa_extra_eligible_contribution_used_krw": 0,
         }
     )
@@ -227,6 +246,8 @@ def test_does_not_round_fractional_tax_amount() -> None:
         {
             "pension_savings_net_contribution_krw": 1,
             "retirement_pension_net_contribution_krw": 0,
+            "pension_savings_isa_transfer_krw": 0,
+            "retirement_pension_isa_transfer_krw": 0,
             "income_basis": "salary",
             "income_amount_krw": 50_000_000,
         }

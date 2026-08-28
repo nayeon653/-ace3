@@ -13,6 +13,7 @@ from pension_agent.agent.calculation import (
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
 )
+from pension_agent.agent.calculation.input_sources import validated_input_sources
 from pension_agent.agent.search import SearchResult
 
 
@@ -189,9 +190,18 @@ async def test_pension_tax_credit_tool_calculates_regular_contribution_with_sala
     result = await create_pension_tax_credit_tool().coroutine(
         pension_savings_net_contribution_krw=Decimal(6_000_000),
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
-        pension_savings_net_contribution_source="연금저축 600만원",
-        retirement_pension_net_contribution_source="퇴직연금 300만원",
-        runtime=_runtime(question="연금저축 600만원, 퇴직연금 300만원 납입, 총급여 5천만원"),
+        pension_savings_isa_transfer_krw=Decimal(0),
+        retirement_pension_isa_transfer_krw=Decimal(0),
+        pension_savings_net_contribution_source="연금저축 순납입액 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 순납입액 300만원",
+        pension_savings_isa_transfer_source="연금저축 ISA 전환액 0원",
+        retirement_pension_isa_transfer_source="퇴직연금 ISA 전환액 0원",
+        runtime=_runtime(
+            question=(
+                "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
+                "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원, 총급여 5천만원"
+            )
+        ),
         income_basis="salary",
         income_basis_source="총급여",
         income_amount_krw=Decimal(50_000_000),
@@ -204,6 +214,8 @@ async def test_pension_tax_credit_tool_calculates_regular_contribution_with_sala
     assert calculation["inputs"].keys() == {
         "pension_savings_net_contribution_krw",
         "retirement_pension_net_contribution_krw",
+        "pension_savings_isa_transfer_krw",
+        "retirement_pension_isa_transfer_krw",
         "income_basis",
         "income_amount_krw",
     }
@@ -217,9 +229,18 @@ async def test_pension_tax_credit_tool_returns_two_rate_scenarios_without_income
     result = await create_pension_tax_credit_tool().coroutine(
         pension_savings_net_contribution_krw=Decimal(6_000_000),
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
-        pension_savings_net_contribution_source="연금저축 600만원",
-        retirement_pension_net_contribution_source="퇴직연금 300만원",
-        runtime=_runtime(question="연금저축 600만원, 퇴직연금 300만원 납입"),
+        pension_savings_isa_transfer_krw=Decimal(0),
+        retirement_pension_isa_transfer_krw=Decimal(0),
+        pension_savings_net_contribution_source="연금저축 순납입액 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 순납입액 300만원",
+        pension_savings_isa_transfer_source="연금저축 ISA 전환액 0원",
+        retirement_pension_isa_transfer_source="퇴직연금 ISA 전환액 0원",
+        runtime=_runtime(
+            question=(
+                "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
+                "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원"
+            )
+        ),
     )
 
     assert isinstance(result, Command)
@@ -227,6 +248,8 @@ async def test_pension_tax_credit_tool_returns_two_rate_scenarios_without_income
     assert calculation["inputs"].keys() == {
         "pension_savings_net_contribution_krw",
         "retirement_pension_net_contribution_krw",
+        "pension_savings_isa_transfer_krw",
+        "retirement_pension_isa_transfer_krw",
     }
     assert Decimal(calculation["outputs"]["lower_income_rate_percent"]) == Decimal("16.5")
     assert Decimal(calculation["outputs"]["other_income_rate_percent"]) == Decimal("13.2")
@@ -237,18 +260,20 @@ async def test_pension_tax_credit_tool_calculates_isa_transfer_and_preserves_sou
     result = await create_pension_tax_credit_tool().coroutine(
         pension_savings_net_contribution_krw=Decimal(36_000_000),
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
-        pension_savings_net_contribution_source="연금저축 3,600만원",
-        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        pension_savings_net_contribution_source="연금저축 순납입액 3,600만원",
+        retirement_pension_net_contribution_source="퇴직연금 순납입액 300만원",
         runtime=_runtime(
             question=(
-                "연금저축 3,600만원, 퇴직연금 300만원 납입, "
-                "ISA 만기자금 3,000만원 전환, 전년도 사용액 0원"
+                "연금저축 순납입액 3,600만원, 퇴직연금 순납입액 300만원 납입, "
+                "연금저축 ISA 만기자금 3,000만원 전환, 퇴직연금 ISA 전환액 0원, 전년도 ISA 사용액 0원"
             )
         ),
         pension_savings_isa_transfer_krw=Decimal(30_000_000),
-        pension_savings_isa_transfer_source="ISA 만기자금 3,000만원",
+        pension_savings_isa_transfer_source="연금저축 ISA 만기자금 3,000만원",
+        retirement_pension_isa_transfer_krw=Decimal(0),
+        retirement_pension_isa_transfer_source="퇴직연금 ISA 전환액 0원",
         prior_same_maturity_isa_extra_eligible_contribution_used_krw=Decimal(0),
-        prior_same_maturity_isa_extra_eligible_contribution_used_source="전년도 사용액 0원",
+        prior_same_maturity_isa_extra_eligible_contribution_used_source="전년도 ISA 사용액 0원",
     )
 
     assert isinstance(result, Command)
@@ -256,7 +281,12 @@ async def test_pension_tax_credit_tool_calculates_isa_transfer_and_preserves_sou
     assert Decimal(calculation["outputs"]["eligible_contribution_krw"]) == Decimal(12_000_000)
     assert calculation["input_sources"]["pension_savings_isa_transfer_krw"] == {
         "origin": "question",
-        "text": "ISA 만기자금 3,000만원",
+        "text": "연금저축 ISA 만기자금 3,000만원",
+        "chunk_id": None,
+    }
+    assert calculation["input_sources"]["retirement_pension_isa_transfer_krw"] == {
+        "origin": "question",
+        "text": "퇴직연금 ISA 전환액 0원",
         "chunk_id": None,
     }
 
@@ -266,13 +296,18 @@ async def test_pension_tax_credit_tool_rejects_isa_transfer_without_prior_used_a
     result = await create_pension_tax_credit_tool().coroutine(
         pension_savings_net_contribution_krw=Decimal(36_000_000),
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
-        pension_savings_net_contribution_source="연금저축 3,600만원",
-        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        pension_savings_net_contribution_source="연금저축 순납입액 3,600만원",
+        retirement_pension_net_contribution_source="퇴직연금 순납입액 300만원",
         runtime=_runtime(
-            question=("연금저축 3,600만원, 퇴직연금 300만원 납입, ISA 만기자금 3,000만원 전환")
+            question=(
+                "연금저축 순납입액 3,600만원, 퇴직연금 순납입액 300만원 납입, "
+                "연금저축 ISA 만기자금 3,000만원 전환, 퇴직연금 ISA 전환액 0원"
+            )
         ),
         pension_savings_isa_transfer_krw=Decimal(30_000_000),
-        pension_savings_isa_transfer_source="ISA 만기자금 3,000만원",
+        pension_savings_isa_transfer_source="연금저축 ISA 만기자금 3,000만원",
+        retirement_pension_isa_transfer_krw=Decimal(0),
+        retirement_pension_isa_transfer_source="퇴직연금 ISA 전환액 0원",
     )
 
     assert isinstance(result, str)
@@ -283,8 +318,12 @@ async def test_pension_tax_credit_tool_rejects_mismatched_optional_value_and_sou
     result = await create_pension_tax_credit_tool().coroutine(
         pension_savings_net_contribution_krw=Decimal(6_000_000),
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
-        pension_savings_net_contribution_source="연금저축 600만원",
-        retirement_pension_net_contribution_source="퇴직연금 300만원",
+        pension_savings_isa_transfer_krw=Decimal(0),
+        retirement_pension_isa_transfer_krw=Decimal(0),
+        pension_savings_net_contribution_source="연금저축 순납입액 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 순납입액 300만원",
+        pension_savings_isa_transfer_source="연금저축 ISA 0원",
+        retirement_pension_isa_transfer_source="퇴직연금 ISA 0원",
         runtime=_runtime(),
         income_amount_krw=Decimal(50_000_000),
     )
@@ -298,9 +337,18 @@ async def test_pension_tax_credit_tool_rejects_income_basis_source_mismatch() ->
     result = await create_pension_tax_credit_tool().coroutine(
         pension_savings_net_contribution_krw=Decimal(6_000_000),
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
-        pension_savings_net_contribution_source="연금저축 600만원",
-        retirement_pension_net_contribution_source="퇴직연금 300만원",
-        runtime=_runtime(question="연금저축 600만원, 퇴직연금 300만원 납입, 종합소득금액 5천만원"),
+        pension_savings_isa_transfer_krw=Decimal(0),
+        retirement_pension_isa_transfer_krw=Decimal(0),
+        pension_savings_net_contribution_source="연금저축 순납입액 600만원",
+        retirement_pension_net_contribution_source="퇴직연금 순납입액 300만원",
+        pension_savings_isa_transfer_source="연금저축 ISA 전환액 0원",
+        retirement_pension_isa_transfer_source="퇴직연금 ISA 전환액 0원",
+        runtime=_runtime(
+            question=(
+                "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
+                "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원, 종합소득금액 5천만원"
+            )
+        ),
         income_basis="salary",
         income_basis_source="종합소득금액",
         income_amount_krw=Decimal(50_000_000),
@@ -309,6 +357,115 @@ async def test_pension_tax_credit_tool_rejects_income_basis_source_mismatch() ->
 
     assert isinstance(result, str)
     assert "출처" in result
+
+
+def test_pension_tax_credit_rejects_source_reused_from_wrong_field() -> None:
+    result = validated_input_sources(
+        inputs={"pension_savings_isa_transfer_krw": Decimal(10_000_000)},
+        input_sources={"pension_savings_isa_transfer_krw": "연금저축 순납입액 1,000만원"},
+        state={"question": "연금저축 순납입액 1,000만원"},
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["pension_savings_isa_transfer_krw", "retirement_pension_isa_transfer_krw"],
+)
+def test_pension_tax_credit_rejects_isa_source_without_account_type(field: str) -> None:
+    result = validated_input_sources(
+        inputs={field: Decimal(10_000_000)},
+        input_sources={field: "ISA 만기자금 1,000만원"},
+        state={"question": "ISA 만기자금 1,000만원"},
+    )
+
+    assert result is None
+
+
+def test_pension_tax_credit_accepts_account_qualified_isa_sources() -> None:
+    question = "연금저축 ISA 만기자금 전환액 600만원, IRP ISA 만기자금 전환액 400만원"
+
+    savings_result = validated_input_sources(
+        inputs={"pension_savings_isa_transfer_krw": Decimal(6_000_000)},
+        input_sources={"pension_savings_isa_transfer_krw": "연금저축 ISA 만기자금 전환액 600만원"},
+        state={"question": question},
+    )
+    retirement_result = validated_input_sources(
+        inputs={"retirement_pension_isa_transfer_krw": Decimal(4_000_000)},
+        input_sources={"retirement_pension_isa_transfer_krw": "IRP ISA 만기자금 전환액 400만원"},
+        state={"question": question},
+    )
+
+    assert savings_result is not None
+    assert retirement_result is not None
+
+
+def test_pension_tax_credit_rejects_cross_phrase_token_reuse() -> None:
+    source = "연금저축 ISA 만기자금 전환액 600만원, IRP 순납입액 400만원"
+
+    result = validated_input_sources(
+        inputs={"retirement_pension_isa_transfer_krw": Decimal(4_000_000)},
+        input_sources={"retirement_pension_isa_transfer_krw": source},
+        state={"question": source},
+    )
+
+    assert result is None
+
+
+def test_pension_tax_credit_matches_isa_transfer_within_shared_source_phrase() -> None:
+    source = "연금저축 ISA 만기자금 전환액 600만원, IRP ISA 만기자금 전환액 400만원"
+
+    savings_result = validated_input_sources(
+        inputs={"pension_savings_isa_transfer_krw": Decimal(6_000_000)},
+        input_sources={"pension_savings_isa_transfer_krw": source},
+        state={"question": source},
+    )
+    retirement_result = validated_input_sources(
+        inputs={"retirement_pension_isa_transfer_krw": Decimal(4_000_000)},
+        input_sources={"retirement_pension_isa_transfer_krw": source},
+        state={"question": source},
+    )
+
+    assert savings_result is not None
+    assert retirement_result is not None
+
+
+@pytest.mark.parametrize(
+    ("field", "source", "value"),
+    [
+        (
+            "prior_same_maturity_isa_extra_eligible_contribution_used_krw",
+            "전년도 300만원",
+            Decimal(3_000_000),
+        ),
+        (
+            "prior_same_maturity_isa_extra_eligible_contribution_used_krw",
+            "ISA 300만원",
+            Decimal(3_000_000),
+        ),
+        (
+            "remaining_tax_before_pension_credit_krw",
+            "잔여 100만원",
+            Decimal(1_000_000),
+        ),
+        (
+            "remaining_tax_before_pension_credit_krw",
+            "산출세액 100만원",
+            Decimal(1_000_000),
+        ),
+    ],
+)
+def test_pension_tax_credit_rejects_partially_matching_source(
+    field: str, source: str, value: Decimal
+) -> None:
+    result = validated_input_sources(
+        inputs={field: value},
+        input_sources={field: source},
+        state={"question": source},
+    )
+
+    assert result is None
 
 
 def test_calculation_summary_preserves_verified_values() -> None:

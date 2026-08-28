@@ -97,6 +97,14 @@ def create_pension_tax_credit_tool() -> BaseTool:
             Decimal,
             Field(ge=0, description="퇴직연금 순납입액(원)"),
         ],
+        pension_savings_isa_transfer_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="연금저축 ISA 만기자금 전환액(원)"),
+        ],
+        retirement_pension_isa_transfer_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="퇴직연금 ISA 만기자금 전환액(원)"),
+        ],
         pension_savings_net_contribution_source: Annotated[
             str,
             Field(
@@ -113,31 +121,23 @@ def create_pension_tax_credit_tool() -> BaseTool:
                 description="퇴직연금 순납입액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
             ),
         ],
-        runtime: ToolRuntime[ExecutionContext, Any],
-        pension_savings_isa_transfer_krw: Annotated[
-            Decimal | None,
-            Field(ge=0, description="연금저축 ISA 만기자금 전환액(원)"),
-        ] = None,
         pension_savings_isa_transfer_source: Annotated[
-            str | None,
+            str,
             Field(
                 min_length=1,
                 max_length=120,
                 description="연금저축 ISA 전환액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
             ),
-        ] = None,
-        retirement_pension_isa_transfer_krw: Annotated[
-            Decimal | None,
-            Field(ge=0, description="퇴직연금 ISA 만기자금 전환액(원)"),
-        ] = None,
+        ],
         retirement_pension_isa_transfer_source: Annotated[
-            str | None,
+            str,
             Field(
                 min_length=1,
                 max_length=120,
                 description="퇴직연금 ISA 전환액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
             ),
-        ] = None,
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
         prior_same_maturity_isa_extra_eligible_contribution_used_krw: Annotated[
             Decimal | None,
             Field(
@@ -191,16 +191,6 @@ def create_pension_tax_credit_tool() -> BaseTool:
     ) -> Command | str:
         optional_entries: tuple[tuple[str, Any, str | None], ...] = (
             (
-                "pension_savings_isa_transfer_krw",
-                pension_savings_isa_transfer_krw,
-                pension_savings_isa_transfer_source,
-            ),
-            (
-                "retirement_pension_isa_transfer_krw",
-                retirement_pension_isa_transfer_krw,
-                retirement_pension_isa_transfer_source,
-            ),
-            (
                 "prior_same_maturity_isa_extra_eligible_contribution_used_krw",
                 prior_same_maturity_isa_extra_eligible_contribution_used_krw,
                 prior_same_maturity_isa_extra_eligible_contribution_used_source,
@@ -216,10 +206,14 @@ def create_pension_tax_credit_tool() -> BaseTool:
         inputs: dict[str, Any] = {
             "pension_savings_net_contribution_krw": pension_savings_net_contribution_krw,
             "retirement_pension_net_contribution_krw": retirement_pension_net_contribution_krw,
+            "pension_savings_isa_transfer_krw": pension_savings_isa_transfer_krw,
+            "retirement_pension_isa_transfer_krw": retirement_pension_isa_transfer_krw,
         }
         input_sources: dict[str, str] = {
             "pension_savings_net_contribution_krw": pension_savings_net_contribution_source,
             "retirement_pension_net_contribution_krw": retirement_pension_net_contribution_source,
+            "pension_savings_isa_transfer_krw": pension_savings_isa_transfer_source,
+            "retirement_pension_isa_transfer_krw": retirement_pension_isa_transfer_source,
         }
         for field, value, source in optional_entries:
             if (value is None) != (source is None):
