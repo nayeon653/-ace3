@@ -2091,9 +2091,9 @@ async def test_tax_agent_records_and_uses_verified_tax_credit_calculation() -> N
     assert "연금계좌 세액공제 대상액" in result["decision"]["conclusion"]
     assert "이론상 세액" in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
-    assert Decimal(
-        result["calculations"][0]["outputs"]["eligible_contribution_krw"]
-    ) == Decimal(9_000_000)
+    assert Decimal(result["calculations"][0]["outputs"]["eligible_contribution_krw"]) == Decimal(
+        9_000_000
+    )
     assert [chunk["chunk_id"] for chunk in result["evidence"]] == [
         "550e8400-e29b-41d4-a716-446655440000"
     ]
@@ -2166,10 +2166,85 @@ async def test_tax_agent_summarizes_both_income_scenarios_without_income_input()
         search_service=cast(SearchRunner, search),
     )
 
-    result = await agent(
-        {"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"}
+    result = await agent({"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"})
+
+    conclusion = result["decision"]["conclusion"]
+    assert "16.5%" in conclusion
+    assert "13.2%" in conclusion
+
+
+@pytest.mark.anyio
+async def test_tax_agent_leaves_income_bracket_as_missing_condition_when_omitted() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="세액공제",
+                    content="연금저축 600만원, 퇴직연금 300만원 납입에 대한 세액공제 규칙입니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "세액공제 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_tax_credit",
+                        "args": {
+                            "pension_savings_net_contribution_krw": "6000000",
+                            "retirement_pension_net_contribution_krw": "3000000",
+                            "pension_savings_net_contribution_source": "연금저축 600만원",
+                            "retirement_pension_net_contribution_source": "퇴직연금 300만원",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "conditional",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": ["총급여 또는 종합소득금액 확인"],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
     )
 
+    result = await agent({"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"})
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == ["총급여 또는 종합소득금액 확인"]
+    assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
     conclusion = result["decision"]["conclusion"]
     assert "16.5%" in conclusion
     assert "13.2%" in conclusion
@@ -2337,9 +2412,7 @@ async def test_tax_agent_allows_only_submit_after_a_calculation_is_recorded() ->
         search_service=cast(SearchRunner, search),
     )
 
-    result = await agent(
-        {"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"}
-    )
+    result = await agent({"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"})
 
     assert len(result["calculations"]) == 1
     assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
@@ -2395,9 +2468,7 @@ def test_pension_tax_credit_summary_keeps_isa_section_when_extra_limit_is_zero()
                     "pension_savings_net_contribution_krw": "36000000",
                     "retirement_pension_net_contribution_krw": "3000000",
                     "pension_savings_isa_transfer_krw": "30000000",
-                    "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (
-                        "3000000"
-                    ),
+                    "prior_same_maturity_isa_extra_eligible_contribution_used_krw": ("3000000"),
                 },
                 "input_sources": {},
                 "outputs": {

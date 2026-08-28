@@ -60,8 +60,7 @@ def _pension_tax_credit_lines(
         )
         if "usable_credit_krw" in outputs:
             lines.append(
-                "잔여 산출세액 기준 사용 가능 세액: "
-                f"{_value(outputs, units, 'usable_credit_krw')}"
+                f"잔여 산출세액 기준 사용 가능 세액: {_value(outputs, units, 'usable_credit_krw')}"
             )
     else:
         lines.append(

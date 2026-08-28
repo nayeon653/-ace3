@@ -140,7 +140,9 @@ def create_pension_tax_credit_tool() -> BaseTool:
         ] = None,
         prior_same_maturity_isa_extra_eligible_contribution_used_krw: Annotated[
             Decimal | None,
-            Field(ge=0, le=3_000_000, description="같은 만기자금의 전년도 추가 공제대상액 사용분(원)"),
+            Field(
+                ge=0, le=3_000_000, description="같은 만기자금의 전년도 추가 공제대상액 사용분(원)"
+            ),
         ] = None,
         prior_same_maturity_isa_extra_eligible_contribution_used_source: Annotated[
             str | None,

@@ -41,11 +41,51 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | 계산기 ID | 산식·규칙 | 검증 문서 |
 |---|---|---|
 | `pension_withdrawal_limit` | 평가액 ÷ (11 - 수령연차) × 120%, 1~10년차 | `doc2.pdf` 1쪽 |
+| `pension_tax_credit` | 일반 납입 한도(연금저축 600만원·통합 900만원), 소득 경계 16.5%/13.2%, ISA 추가공제(전환액 10%·동일 만기 누적 300만원) | `doc41.docx` 1쪽, `doc6.docx` 3쪽 |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 
 검증 문서 정보는 개발 기록이며 런타임 결과에 직렬화하지 않는다. 문서에 없는 표시
 자릿수나 최종 지급 단위 반올림은 임의로 적용하지 않고 warning에 남긴다.
+
+### `pension_tax_credit` 계약
+
+**필수 입력**: `pension_savings_net_contribution_krw`(연금저축 순납입액),
+`retirement_pension_net_contribution_krw`(퇴직연금 순납입액).
+
+**선택 입력**: `pension_savings_isa_transfer_krw`, `retirement_pension_isa_transfer_krw`
+(ISA 만기자금 전환액), `prior_same_maturity_isa_extra_eligible_contribution_used_krw`
+(같은 만기자금의 전년도 추가 공제대상액 사용분, 0~300만원), `income_basis`(`salary` 또는
+`comprehensive_income`), `income_amount_krw`(소득금액), `remaining_tax_before_pension_credit_krw`
+(연금계좌 세액공제 적용 직전 잔여 산출세액).
+
+**생략/0/null 계약**: 선택 입력은 필드 자체를 생략하는 것과 값 `0`을 명시적으로 전달하는
+것을 다르게 취급한다. 생략은 "정보 없음"이고 `0`은 "확인된 값이 0"이라는 뜻이다. Pydantic
+입력 모델은 명시적 `null` 전달을 거부한다(`reject_explicit_null` 검증기) — 값이 없으면
+필드를 아예 포함하지 않아야 한다. ISA 전환액이 하나라도 0보다 크면
+`prior_same_maturity_isa_extra_eligible_contribution_used_krw`가 필수이고, ISA 전환액이
+모두 0/생략이면 이 필드를 포함할 수 없다. `income_basis`와 `income_amount_krw`는 항상
+함께 있거나 함께 생략해야 하며, `remaining_tax_before_pension_credit_krw`는 소득 기준이
+있을 때만 허용한다. `CalculationResult.inputs`에는 실제로 전달된(생략되지 않은) 필드만
+남는다(`exclude_unset`).
+
+**산식**: 일반 공제대상액은 `min(연금저축 순납입액, 600만원) + 퇴직연금 순납입액`을
+`900만원`으로 제한한 값이다. ISA 추가공제는 `ISA 전환액 합 × 10%`와
+`max(300만원 - 전년도 사용액, 0)` 중 작은 값이며, 총 공제대상액은 `전체 순납입액`과
+`일반 공제대상액 + ISA 추가공제` 중 작은 값으로 다시 제한한다(`isa_extra_limit_krw`는
+계산된 ISA 추가한도, `isa_extra_eligible_contribution_krw`는 총액 제한 이후 실제 인정된
+값으로 구분해 반환한다). 소득 기준이 있으면 `총급여 5,500만원` 또는 `종합소득금액
+4,500만원` 이하일 때 `16.5%`, 초과하면 `13.2%`를 적용한다. 소득 기준이 없으면 두 세율
+시나리오(`lower_income_*`/`other_income_*`)를 모두 반환한다.
+
+**이론상 세액과 사용 가능 세액**: `theoretical_credit_krw`(또는 두 시나리오의
+`*_theoretical_credit_krw`)는 공제대상액에 세율을 곱한 이론상 수치일 뿐이다.
+`remaining_tax_before_pension_credit_krw`가 있을 때만 `usable_credit_krw`
+(`min(이론상 세액, 잔여 산출세액)`)를 추가로 반환하며, 이는 실제 환급액이 아니다.
+
+**반올림**: 원 단위 세액의 반올림·절사 규칙은 검증 문서에 없으므로 임의로 적용하지 않고
+`CalculationOutput.warnings`에 남긴다(계산 결과가 실제 환급액이 아니라는 warning도 함께
+포함).
 
 ## 실행 제한과 오류
 
@@ -77,7 +117,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 
 | 소비자 | 허용 계산기 |
 |---|---|
-| Tax/Payout Agent | `pension_withdrawal_limit` |
+| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_tax_credit` |
 | Product Agent | `fund_standard_price`, `fund_var_risk` |
 | Policy Agent | 없음 |
 | Main Supervisor | 직접 호출 금지 |
@@ -96,4 +136,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 
 - `tests/unit/rules/test_calculation_service.py`
 - `tests/unit/rules/test_initial_calculators.py`
+- `tests/unit/rules/test_pension_tax_credit.py`
+- `tests/unit/agent/test_calculation_tools.py`
+- `tests/unit/agent/test_domain_agents.py`
 - `tests/test_agent_import_boundaries.py`

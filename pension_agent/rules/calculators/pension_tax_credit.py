@@ -45,9 +45,7 @@ class PensionTaxCreditInput(BaseModel):
 
     pension_savings_isa_transfer_krw: _Money | None = None
     retirement_pension_isa_transfer_krw: _Money | None = None
-    prior_same_maturity_isa_extra_eligible_contribution_used_krw: (
-        _IsaPriorUsed | None
-    ) = None
+    prior_same_maturity_isa_extra_eligible_contribution_used_krw: _IsaPriorUsed | None = None
 
     income_basis: IncomeBasis | None = None
     income_amount_krw: _Money | None = None
@@ -79,18 +77,12 @@ class PensionTaxCreditInput(BaseModel):
         total_isa_transfer = savings_isa_transfer + retirement_isa_transfer
 
         if savings_isa_transfer > self.pension_savings_net_contribution_krw:
-            raise ValueError(
-                "연금저축 ISA 전환액은 연금저축 순납입액을 초과할 수 없습니다."
-            )
+            raise ValueError("연금저축 ISA 전환액은 연금저축 순납입액을 초과할 수 없습니다.")
 
         if retirement_isa_transfer > self.retirement_pension_net_contribution_krw:
-            raise ValueError(
-                "퇴직연금 ISA 전환액은 퇴직연금 순납입액을 초과할 수 없습니다."
-            )
+            raise ValueError("퇴직연금 ISA 전환액은 퇴직연금 순납입액을 초과할 수 없습니다.")
 
-        prior_isa_used = (
-            self.prior_same_maturity_isa_extra_eligible_contribution_used_krw
-        )
+        prior_isa_used = self.prior_same_maturity_isa_extra_eligible_contribution_used_krw
 
         if total_isa_transfer > 0 and prior_isa_used is None:
             raise ValueError(
@@ -98,25 +90,16 @@ class PensionTaxCreditInput(BaseModel):
             )
 
         if total_isa_transfer == 0 and prior_isa_used is not None:
-            raise ValueError(
-                "ISA 전환액이 없으면 기존 추가 공제대상액을 입력할 수 없습니다."
-            )
+            raise ValueError("ISA 전환액이 없으면 기존 추가 공제대상액을 입력할 수 없습니다.")
 
         has_income_basis = self.income_basis is not None
         has_income_amount = self.income_amount_krw is not None
 
         if has_income_basis != has_income_amount:
-            raise ValueError(
-                "소득 기준과 소득금액은 함께 입력하거나 함께 생략해야 합니다."
-            )
+            raise ValueError("소득 기준과 소득금액은 함께 입력하거나 함께 생략해야 합니다.")
 
-        if (
-            self.remaining_tax_before_pension_credit_krw is not None
-            and not has_income_basis
-        ):
-            raise ValueError(
-                "잔여 세액을 입력하려면 소득 기준과 소득금액이 필요합니다."
-            )
+        if self.remaining_tax_before_pension_credit_krw is not None and not has_income_basis:
+            raise ValueError("잔여 세액을 입력하려면 소득 기준과 소득금액이 필요합니다.")
 
         return self
 
@@ -138,8 +121,7 @@ def calculate_pension_tax_credit(
     )
     prior_isa_used = (
         value.prior_same_maturity_isa_extra_eligible_contribution_used_krw
-        if value.prior_same_maturity_isa_extra_eligible_contribution_used_krw
-        is not None
+        if value.prior_same_maturity_isa_extra_eligible_contribution_used_krw is not None
         else Decimal(0)
     )
 
@@ -219,11 +201,7 @@ def calculate_pension_tax_credit(
                 if value.income_basis == "salary"
                 else _LOWER_COMPREHENSIVE_INCOME_THRESHOLD
             )
-            credit_rate = (
-                _LOWER_CREDIT_RATE
-                if income_amount <= threshold
-                else _OTHER_CREDIT_RATE
-            )
+            credit_rate = _LOWER_CREDIT_RATE if income_amount <= threshold else _OTHER_CREDIT_RATE
             theoretical_credit = eligible_contribution * credit_rate
 
             outputs.update(

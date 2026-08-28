@@ -191,9 +191,7 @@ async def test_pension_tax_credit_tool_calculates_regular_contribution_with_sala
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
         pension_savings_net_contribution_source="연금저축 600만원",
         retirement_pension_net_contribution_source="퇴직연금 300만원",
-        runtime=_runtime(
-            question="연금저축 600만원, 퇴직연금 300만원 납입, 총급여 5천만원"
-        ),
+        runtime=_runtime(question="연금저축 600만원, 퇴직연금 300만원 납입, 총급여 5천만원"),
         income_basis="salary",
         income_basis_source="총급여",
         income_amount_krw=Decimal(50_000_000),
@@ -271,9 +269,7 @@ async def test_pension_tax_credit_tool_rejects_isa_transfer_without_prior_used_a
         pension_savings_net_contribution_source="연금저축 3,600만원",
         retirement_pension_net_contribution_source="퇴직연금 300만원",
         runtime=_runtime(
-            question=(
-                "연금저축 3,600만원, 퇴직연금 300만원 납입, ISA 만기자금 3,000만원 전환"
-            )
+            question=("연금저축 3,600만원, 퇴직연금 300만원 납입, ISA 만기자금 3,000만원 전환")
         ),
         pension_savings_isa_transfer_krw=Decimal(30_000_000),
         pension_savings_isa_transfer_source="ISA 만기자금 3,000만원",
@@ -304,9 +300,7 @@ async def test_pension_tax_credit_tool_rejects_income_basis_source_mismatch() ->
         retirement_pension_net_contribution_krw=Decimal(3_000_000),
         pension_savings_net_contribution_source="연금저축 600만원",
         retirement_pension_net_contribution_source="퇴직연금 300만원",
-        runtime=_runtime(
-            question="연금저축 600만원, 퇴직연금 300만원 납입, 종합소득금액 5천만원"
-        ),
+        runtime=_runtime(question="연금저축 600만원, 퇴직연금 300만원 납입, 종합소득금액 5천만원"),
         income_basis="salary",
         income_basis_source="종합소득금액",
         income_amount_krw=Decimal(50_000_000),

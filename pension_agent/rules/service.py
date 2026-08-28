@@ -40,9 +40,7 @@ def calculate(request: CalculationRequest) -> CalculationResult:
     try:
         output = definition.calculate(inputs)
     except (ArithmeticError, ValueError):
-        raise CalculationExecutionError(
-            "계산 산술 조건을 만족하지 못했습니다."
-        ) from None
+        raise CalculationExecutionError("계산 산술 조건을 만족하지 못했습니다.") from None
 
     return CalculationResult(
         calculator_id=request.calculator_id,

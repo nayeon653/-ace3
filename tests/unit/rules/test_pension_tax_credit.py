@@ -19,9 +19,7 @@ _BASE_INPUTS: dict[str, object] = {
 def _create_input(
     extra_inputs: dict[str, object] | None = None,
 ) -> PensionTaxCreditInput:
-    return PensionTaxCreditInput.model_validate(
-        {**_BASE_INPUTS, **(extra_inputs or {})}
-    )
+    return PensionTaxCreditInput.model_validate({**_BASE_INPUTS, **(extra_inputs or {})})
 
 
 def test_accepts_regular_contributions_without_optional_inputs() -> None:
@@ -81,9 +79,7 @@ def test_rejects_prior_isa_used_outside_limit(prior_used: int) -> None:
                 "pension_savings_net_contribution_krw": 31_000_000,
                 "retirement_pension_net_contribution_krw": 0,
                 "pension_savings_isa_transfer_krw": 30_000_000,
-                "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (
-                    prior_used
-                ),
+                "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (prior_used),
             }
         )
 
@@ -112,9 +108,7 @@ def test_calculates_regular_eligible_contribution() -> None:
         )
     )
 
-    assert result.outputs["regular_eligible_contribution_krw"] == Decimal(
-        9_000_000
-    )
+    assert result.outputs["regular_eligible_contribution_krw"] == Decimal(9_000_000)
     assert result.outputs["eligible_contribution_krw"] == Decimal(9_000_000)
     assert result.outputs["credit_rate_percent"] == Decimal("16.5")
     assert result.outputs["theoretical_credit_krw"] == Decimal(1_485_000)
@@ -124,13 +118,9 @@ def test_returns_both_rate_scenarios_when_income_is_missing() -> None:
     result = calculate_pension_tax_credit(_create_input())
 
     assert result.outputs["lower_income_rate_percent"] == Decimal("16.5")
-    assert result.outputs["lower_income_theoretical_credit_krw"] == Decimal(
-        1_485_000
-    )
+    assert result.outputs["lower_income_theoretical_credit_krw"] == Decimal(1_485_000)
     assert result.outputs["other_income_rate_percent"] == Decimal("13.2")
-    assert result.outputs["other_income_theoretical_credit_krw"] == Decimal(
-        1_188_000
-    )
+    assert result.outputs["other_income_theoretical_credit_krw"] == Decimal(1_188_000)
 
 
 def test_calculates_full_isa_extra_limit() -> None:
@@ -147,14 +137,10 @@ def test_calculates_full_isa_extra_limit() -> None:
 
     result = calculate_pension_tax_credit(value)
 
-    assert result.outputs["regular_eligible_contribution_krw"] == Decimal(
-        9_000_000
-    )
+    assert result.outputs["regular_eligible_contribution_krw"] == Decimal(9_000_000)
     assert result.outputs["isa_extra_remaining_cap_krw"] == Decimal(3_000_000)
     assert result.outputs["isa_extra_limit_krw"] == Decimal(3_000_000)
-    assert result.outputs["isa_extra_eligible_contribution_krw"] == Decimal(
-        3_000_000
-    )
+    assert result.outputs["isa_extra_eligible_contribution_krw"] == Decimal(3_000_000)
     assert result.outputs["eligible_contribution_krw"] == Decimal(12_000_000)
     assert result.outputs["theoretical_credit_krw"] == Decimal(1_980_000)
 
@@ -165,9 +151,7 @@ def test_subtracts_prior_isa_extra_eligible_amount() -> None:
             "pension_savings_net_contribution_krw": 36_000_000,
             "retirement_pension_net_contribution_krw": 3_000_000,
             "pension_savings_isa_transfer_krw": 30_000_000,
-            "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (
-                2_000_000
-            ),
+            "prior_same_maturity_isa_extra_eligible_contribution_used_krw": (2_000_000),
             "income_basis": "salary",
             "income_amount_krw": 50_000_000,
         }
