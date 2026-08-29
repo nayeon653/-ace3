@@ -9,6 +9,8 @@ from langgraph.types import Command
 from pension_agent.agent.calculation import (
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
+    create_non_pension_withdrawal_tax_tool,
+    create_pension_income_tax_tool,
     create_pension_tax_credit_tool,
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
@@ -357,6 +359,232 @@ async def test_pension_tax_credit_tool_rejects_income_basis_source_mismatch() ->
 
     assert isinstance(result, str)
     assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_income_tax_tool_calculates_ordinary_with_all_inputs() -> None:
+    question = (
+        "일반 연금수령; 수령자 나이 55세; 비종신 연금; "
+        "연금수령 과세대상 금액 100만원; 연간 사적연금 과세대상 합계 1,000만원"
+    )
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="ordinary",
+        recipient_age=55,
+        pension_treatment_source="일반 연금수령",
+        recipient_age_source="수령자 나이 55세",
+        runtime=_runtime(question=question),
+        target_taxable_amount_krw=Decimal(1_000_000),
+        target_taxable_amount_krw_source="연금수령 과세대상 금액 100만원",
+        is_lifetime_annuity=False,
+        is_lifetime_annuity_source="비종신 연금",
+        annual_private_pension_taxable_income_krw=Decimal(10_000_000),
+        annual_private_pension_taxable_income_krw_source=("연간 사적연금 과세대상 합계 1,000만원"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "pension_income_tax"
+    assert calculation["outputs"]["base_rate_percent"] == "5.500"
+    assert calculation["outputs"]["tax_krw"] == "55000.000"
+    assert calculation["input_sources"]["target_taxable_amount_krw"] == {
+        "origin": "question",
+        "text": "연금수령 과세대상 금액 100만원",
+        "chunk_id": None,
+    }
+
+
+@pytest.mark.anyio
+async def test_pension_income_tax_tool_keeps_unknown_threshold_when_annual_omitted() -> None:
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="ordinary",
+        recipient_age=55,
+        pension_treatment_source="일반 연금수령",
+        recipient_age_source="수령자 나이 55세",
+        runtime=_runtime(question="일반 연금수령, 수령자 나이 55세, 확정기간 연금"),
+        is_lifetime_annuity=False,
+        is_lifetime_annuity_source="확정기간 연금",
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"] == {
+        "base_rate_percent": "5.500",
+        "annual_threshold_status": "unknown",
+    }
+
+
+@pytest.mark.anyio
+async def test_pension_income_tax_tool_allows_unavoidable_below_age_55() -> None:
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="unavoidable",
+        recipient_age=54,
+        pension_treatment_source="부득이한 사유 연금수령",
+        recipient_age_source="수령자 연령 54세",
+        runtime=_runtime(question="부득이한 사유 연금수령, 수령자 연령 54세"),
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"]["base_rate_percent"] == "5.500"
+
+
+@pytest.mark.anyio
+async def test_non_pension_withdrawal_tax_tool_calculates_taxable_amount() -> None:
+    result = await create_non_pension_withdrawal_tax_tool().coroutine(
+        runtime=_runtime(question="중도해지 운용수익 과세대상 금액 100만원"),
+        taxable_amount_krw=Decimal(1_000_000),
+        taxable_amount_krw_source="중도해지 운용수익 과세대상 금액 100만원",
+    )
+
+    assert isinstance(result, Command)
+    outputs = result.update["calculations"][0]["outputs"]
+    assert outputs["base_rate_percent"] == "16.5"
+    assert outputs["tax_krw"] == "165000.000"
+
+
+@pytest.mark.anyio
+async def test_non_pension_withdrawal_tax_tool_returns_rate_without_amount() -> None:
+    result = await create_non_pension_withdrawal_tax_tool().coroutine(
+        runtime=_runtime(question="연금외수령 세율은 얼마인가요?"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"] == {}
+    assert calculation["input_sources"] == {}
+    assert calculation["outputs"] == {"base_rate_percent": "16.5"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("value", "source"),
+    [(Decimal(1_000_000), None), (None, "중도해지 과세대상 금액 100만원")],
+)
+async def test_non_pension_tool_rejects_mismatched_optional_value_and_source(
+    value: Decimal | None, source: str | None
+) -> None:
+    result = await create_non_pension_withdrawal_tax_tool().coroutine(
+        runtime=_runtime(question="중도해지 과세대상 금액 100만원"),
+        taxable_amount_krw=value,
+        taxable_amount_krw_source=source,
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_income_tool_rejects_mismatched_optional_value_and_source() -> None:
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="ordinary",
+        recipient_age=55,
+        pension_treatment_source="일반 연금수령",
+        recipient_age_source="수령자 나이 55세",
+        runtime=_runtime(question="일반 연금수령, 수령자 나이 55세"),
+        target_taxable_amount_krw=Decimal(1_000_000),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_income_tool_rejects_treatment_source_mismatch() -> None:
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="ordinary",
+        recipient_age=55,
+        pension_treatment_source="부득이한 사유 연금수령",
+        recipient_age_source="수령자 나이 55세",
+        runtime=_runtime(question="부득이한 사유 연금수령, 수령자 나이 55세"),
+        is_lifetime_annuity=False,
+        is_lifetime_annuity_source="비종신 연금",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_income_tool_rejects_wrong_age_value_in_source() -> None:
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="ordinary",
+        recipient_age=55,
+        pension_treatment_source="일반 연금수령",
+        recipient_age_source="수령자 나이 54세",
+        runtime=_runtime(question="일반 연금수령, 수령자 나이 54세, 비종신 연금"),
+        is_lifetime_annuity=False,
+        is_lifetime_annuity_source="비종신 연금",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_income_tool_rejects_lifetime_source_mismatch() -> None:
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="ordinary",
+        recipient_age=55,
+        pension_treatment_source="일반 연금수령",
+        recipient_age_source="수령자 나이 55세",
+        runtime=_runtime(question="일반 연금수령, 수령자 나이 55세, 확정기간 연금"),
+        is_lifetime_annuity=True,
+        is_lifetime_annuity_source="확정기간 연금",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.parametrize(
+    ("field", "source", "value"),
+    [
+        (
+            "target_taxable_amount_krw",
+            "연간 사적연금 과세대상 합계 1,000만원",
+            Decimal(10_000_000),
+        ),
+        (
+            "annual_private_pension_taxable_income_krw",
+            "연금수령 과세대상 금액 100만원",
+            Decimal(1_000_000),
+        ),
+    ],
+)
+def test_pension_income_provenance_rejects_misassigned_money_meaning(
+    field: str, source: str, value: Decimal
+) -> None:
+    result = validated_input_sources(
+        inputs={field: value},
+        input_sources={field: source},
+        state={"question": source},
+    )
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_non_pension_tool_rejects_general_contribution_as_taxable_source() -> None:
+    result = await create_non_pension_withdrawal_tax_tool().coroutine(
+        runtime=_runtime(question="연금저축 일반 납입액 100만원"),
+        taxable_amount_krw=Decimal(1_000_000),
+        taxable_amount_krw_source="연금저축 일반 납입액 100만원",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_income_tool_returns_rules_cross_validation_error() -> None:
+    result = await create_pension_income_tax_tool().coroutine(
+        pension_treatment="ordinary",
+        recipient_age=55,
+        pension_treatment_source="일반 연금수령",
+        recipient_age_source="수령자 나이 55세",
+        runtime=_runtime(question="일반 연금수령, 수령자 나이 55세"),
+    )
+
+    assert isinstance(result, str)
+    assert "계산 입력" in result
 
 
 def test_pension_tax_credit_rejects_source_reused_from_wrong_field() -> None:
