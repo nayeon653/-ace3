@@ -3,7 +3,8 @@
 ## 목적과 책임
 
 Tax/Payout Agent는 연금 세액공제, 과세와 수령 조건을 제공 문서 근거로 판단한다.
-검증된 평가액과 수령연차가 있으면 Python Calculation Tool로 연금수령한도를 계산한다.
+검증된 입력이 있으면 Python Calculation Tool로 연금수령한도 또는 연금계좌 세액공제
+대상액·세액을 계산한다(질문에 맞는 계산 Tool 하나만 호출).
 
 세액공제 적용 조건, 연금 과세, 수령 방식(일시금/분할)에 따른 과세, 중도해지 과세는 이
 Agent의 책임이다. 상품의 위험·비용·수익률은 Product, 계좌 이전·가입·해지 절차 자체는
@@ -47,6 +48,37 @@ warning이 `calculations`에 포함된다.
 - Calculation Service의 `pension_withdrawal_limit`만 호출한다.
 - 호출은 한 번으로 제한한다.
 
+### `calculate_pension_tax_credit`
+
+- 검색된 문서 근거가 있는 경우에만 실행한다.
+- 필수 입력은 연금저축 순납입액, 퇴직연금 순납입액, 연금저축 ISA 만기자금 전환액,
+  퇴직연금 ISA 만기자금 전환액(모두 원 단위)이며, 네 입력 모두 각각 값과 `source`가
+  필요하다. ISA 전환이 없으면 두 전환액을 명시적 `0`으로 전달한다. 질문 또는 검색
+  근거에서 ISA 전환 여부 자체를 확인할 수 없으면 이 Tool을 호출하지 않고 확정 세액을
+  만들지 않는다.
+- 선택 입력은 전년도 동일 만기자금 추가 공제대상액 사용분, 소득 기준
+  (`income_basis`)·소득금액(`income_amount_krw`), 잔여 산출세액이며 값과 `source`가
+  모두 있을 때만 함께 전달하고 하나만 있으면 호출하지 않는다. ISA 전환액이 하나라도
+  0보다 크면 전년도 동일 만기자금 추가 공제대상액 사용분이 필수이고, 둘 다 0이면 이
+  필드를 생략한다.
+- 각 입력의 `source`는 그 금액과 같은 구절 안에서 계좌 의미(연금저축 / 퇴직연금·IRP)와
+  행위 의미(순납입 / ISA 전환·만기자금 등)를 함께 포함해야 한다. 문서 전체나 다른
+  구절에 흩어진 키워드와 금액만으로는 통과하지 않는다. 소득 기준의 `source`는 `총급여`
+  또는 `종합소득금액` 표현을, 소득금액의 `source`는 `income_basis`와 같은 표현을
+  포함해야 한다.
+- 출력은 `regular_eligible_contribution_krw`, `isa_extra_remaining_cap_krw`,
+  `isa_extra_limit_krw`, `isa_extra_eligible_contribution_krw`,
+  `eligible_contribution_krw`이며, 소득 기준이 있으면 `credit_rate_percent`·
+  `theoretical_credit_krw`(잔여 산출세액이 있으면 `usable_credit_krw` 포함)를, 없으면
+  `lower_income_rate_percent`·`lower_income_theoretical_credit_krw`·
+  `other_income_rate_percent`·`other_income_theoretical_credit_krw`를 함께 반환한다.
+  소득 기준 없이 두 세율 시나리오만 반환되면, 모델이 제출한 상태와 무관하게 Python이
+  `status=conditional`과 `총급여 또는 종합소득금액 확인 필요` 누락 조건을 강제한다.
+- `usable_credit_krw`는 잔여 산출세액 기준 사용 가능한 세액이며 실제 환급액이 아니다.
+- Calculation Service의 `pension_tax_credit`만 호출한다.
+- 호출은 한 번으로 제한하며, `calculate_pension_withdrawal_limit`과 같은 실행에서 함께
+  호출하지 않는다(질문에 맞는 계산 Tool 하나만 선택).
+
 ### `submit_domain_result`
 
 `status="not_applicable"`은 검색 없이 바로 제출할 수 있다 — Product·Policy 책임
@@ -64,7 +96,9 @@ DomainRequest
   -> not_applicable ? submit_domain_result(검색 없이 즉시 정규화) : (
        search_documents 1회
        -> 검색 실패/timeout/빈 결과면 Python 안전 종료
-       -> 연금수령한도 질문이고 입력이 충분하면 calculate_pension_withdrawal_limit 1회
+       -> 연금수령한도 질문이고 입력이 충분하면 calculate_pension_withdrawal_limit 1회,
+          연금계좌 세액공제 질문이고 입력이 충분하면 calculate_pension_tax_credit 1회
+          (질문에 맞는 계산 Tool 하나만 호출)
        -> submit_domain_result(계산 없이 conclusion에 확정 수치가 있으면 비수치 재제출 1회 요청)
      )
   -> 검증된 DomainResult
@@ -115,14 +149,17 @@ DomainRequest
 | 모델 호출 | 최대 5회 |
 | 검색 Tool | 최대 1회 |
 | 연금수령한도 Tool | 최대 1회 |
+| 연금 세액공제 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |
 
 ## 현재 제한
 
-- 현재 연결된 계산기는 연금수령한도 하나다.
-- 세액공제와 연금소득세율 계산기는 구현·연결하지 않았다.
+- 현재 연결된 계산기는 연금수령한도와 연금계좌 세액공제 두 개다.
+- 연금소득세율 계산기는 구현·연결하지 않았다.
+- 계산 근거 문서의 파일명·페이지 매핑은 `docs/specs/components/calculation-service.md`
+  에서 관리한다(이 문서에는 중복 기록하지 않는다).
 - 계산 근거 청크를 최종 결과에 제출하지 않으면 실행된 계산도 최종 `calculations`에서
   제거한다.
 

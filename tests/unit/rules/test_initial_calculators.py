@@ -13,10 +13,11 @@ from pension_agent.rules.calculators import CALCULATORS
 from pension_agent.rules.calculators.fund_var_risk import classify_var_risk_grade
 
 
-def test_calculator_map_contains_initial_set() -> None:
+def test_calculator_map_contains_registered_set() -> None:
     assert CALCULATORS.keys() == {
         "fund_standard_price",
         "fund_var_risk",
+        "pension_tax_credit",
         "pension_withdrawal_limit",
     }
 

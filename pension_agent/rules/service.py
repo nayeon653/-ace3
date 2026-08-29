@@ -29,7 +29,11 @@ def calculate(request: CalculationRequest) -> CalculationResult:
                 field=".".join(str(part) for part in error["loc"]),
                 code=error["type"],
             )
-            for error in exc.errors(include_url=False, include_context=False, include_input=False)
+            for error in exc.errors(
+                include_url=False,
+                include_context=False,
+                include_input=False,
+            )
         )
         raise InvalidCalculationInputError(issues) from None
 
@@ -40,7 +44,11 @@ def calculate(request: CalculationRequest) -> CalculationResult:
 
     return CalculationResult(
         calculator_id=request.calculator_id,
-        inputs=inputs.model_dump(mode="python"),
+        inputs=inputs.model_dump(
+            mode="python",
+            exclude_unset=True,
+            exclude_none=True,
+        ),
         outputs=output.outputs,
         units=output.units,
         warnings=output.warnings,

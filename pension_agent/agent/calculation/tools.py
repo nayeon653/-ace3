@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, cast
 
 from langchain.messages import ToolMessage
 from langchain.tools import ToolRuntime, tool
@@ -18,6 +18,7 @@ from pension_agent.agent.execution import ExecutionContext
 from pension_agent.rules import CalculationError, CalculationRequest, calculate
 
 CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME = "calculate_pension_withdrawal_limit"
+CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME = "calculate_pension_tax_credit"
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
 
@@ -74,6 +75,165 @@ def create_pension_withdrawal_limit_tool() -> BaseTool:
         )
 
     return calculate_pension_withdrawal_limit
+
+
+def create_pension_tax_credit_tool() -> BaseTool:
+    """Tax/Payout Agent용 연금계좌 세액공제 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
+        description=(
+            "연금저축·퇴직연금 순납입액과 ISA 만기자금 전환, 소득 정보로 세액공제 "
+            "대상액과 세액을 계산한다. 사용자 질문 또는 검증된 검색 근거에 명시된 "
+            "입력만 사용하며, 선택 입력은 값과 출처를 함께 전달하거나 함께 생략한다."
+        ),
+    )
+    async def calculate_pension_tax_credit(
+        pension_savings_net_contribution_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="연금저축 순납입액(원)"),
+        ],
+        retirement_pension_net_contribution_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="퇴직연금 순납입액(원)"),
+        ],
+        pension_savings_isa_transfer_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="연금저축 ISA 만기자금 전환액(원)"),
+        ],
+        retirement_pension_isa_transfer_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="퇴직연금 ISA 만기자금 전환액(원)"),
+        ],
+        pension_savings_net_contribution_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="연금저축 순납입액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        retirement_pension_net_contribution_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="퇴직연금 순납입액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        pension_savings_isa_transfer_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="연금저축 ISA 전환액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        retirement_pension_isa_transfer_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="퇴직연금 ISA 전환액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+        prior_same_maturity_isa_extra_eligible_contribution_used_krw: Annotated[
+            Decimal | None,
+            Field(
+                ge=0, le=3_000_000, description="같은 만기자금의 전년도 추가 공제대상액 사용분(원)"
+            ),
+        ] = None,
+        prior_same_maturity_isa_extra_eligible_contribution_used_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="전년도 추가 공제대상액 사용분 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ] = None,
+        income_basis: Annotated[
+            Literal["salary", "comprehensive_income"] | None,
+            Field(description="소득 기준. 총급여 또는 종합소득금액"),
+        ] = None,
+        income_basis_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="소득 기준 명칭이 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ] = None,
+        income_amount_krw: Annotated[
+            Decimal | None,
+            Field(ge=0, description="income_basis에 대응하는 소득금액(원)"),
+        ] = None,
+        income_amount_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="소득금액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ] = None,
+        remaining_tax_before_pension_credit_krw: Annotated[
+            Decimal | None,
+            Field(ge=0, description="연금계좌 세액공제 적용 직전 잔여 산출세액(원)"),
+        ] = None,
+        remaining_tax_before_pension_credit_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="잔여 산출세액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ] = None,
+    ) -> Command | str:
+        optional_entries: tuple[tuple[str, Any, str | None], ...] = (
+            (
+                "prior_same_maturity_isa_extra_eligible_contribution_used_krw",
+                prior_same_maturity_isa_extra_eligible_contribution_used_krw,
+                prior_same_maturity_isa_extra_eligible_contribution_used_source,
+            ),
+            ("income_basis", income_basis, income_basis_source),
+            ("income_amount_krw", income_amount_krw, income_amount_source),
+            (
+                "remaining_tax_before_pension_credit_krw",
+                remaining_tax_before_pension_credit_krw,
+                remaining_tax_before_pension_credit_source,
+            ),
+        )
+        inputs: dict[str, Any] = {
+            "pension_savings_net_contribution_krw": pension_savings_net_contribution_krw,
+            "retirement_pension_net_contribution_krw": retirement_pension_net_contribution_krw,
+            "pension_savings_isa_transfer_krw": pension_savings_isa_transfer_krw,
+            "retirement_pension_isa_transfer_krw": retirement_pension_isa_transfer_krw,
+        }
+        input_sources: dict[str, str] = {
+            "pension_savings_net_contribution_krw": pension_savings_net_contribution_source,
+            "retirement_pension_net_contribution_krw": retirement_pension_net_contribution_source,
+            "pension_savings_isa_transfer_krw": pension_savings_isa_transfer_source,
+            "retirement_pension_isa_transfer_krw": retirement_pension_isa_transfer_source,
+        }
+        for field, value, source in optional_entries:
+            if (value is None) != (source is None):
+                return json.dumps(
+                    {"error": "선택 입력값과 출처는 함께 제공해야 합니다."},
+                    ensure_ascii=False,
+                )
+            if value is not None:
+                inputs[field] = value
+                input_sources[field] = cast(str, source)
+
+        return _execute_calculation(
+            calculator_id="pension_tax_credit",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_pension_tax_credit
 
 
 def create_fund_standard_price_tool() -> BaseTool:
