@@ -408,6 +408,7 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                     "calculate_pension_tax_credit",
                     "calculate_pension_income_tax",
                     "calculate_non_pension_withdrawal_tax",
+                    "calculate_deferred_retirement_withdrawal_tax",
                     "submit_domain_result",
                 }
                 if domain == "tax_payout"
@@ -2404,6 +2405,191 @@ async def test_tax_agent_runs_pension_income_tax_paths(
     assert expected_text in result["decision"]["conclusion"]
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("question", "content", "tool_args", "expected_label", "expected_ratio"),
+    [
+        (
+            "이연퇴직소득을 연금으로 받으면 세금은?",
+            (
+                "이연퇴직소득 연금수령; 실제수령연차 10년차; "
+                "해당 인출분에 배분된 이연퇴직소득세 100만원"
+            ),
+            {
+                "receipt_type": "pension",
+                "receipt_type_source": "이연퇴직소득 연금수령",
+                "actual_pension_receipt_year": 10,
+                "actual_pension_receipt_year_source": "실제수령연차 10년차",
+                "allocated_deferred_retirement_tax_krw": "1000000",
+                "allocated_deferred_retirement_tax_krw_source": (
+                    "해당 인출분에 배분된 이연퇴직소득세 100만원"
+                ),
+            },
+            "이연퇴직소득 연금수령 납부 비율",
+            "70.00 %",
+        ),
+        (
+            "이연퇴직소득을 일시금으로 받으면 세금은?",
+            "이연퇴직소득 일시금; 해당 인출분에 배분된 퇴직소득세 100만원",
+            {
+                "receipt_type": "non_pension",
+                "receipt_type_source": "이연퇴직소득 일시금",
+                "allocated_deferred_retirement_tax_krw": "1000000",
+                "allocated_deferred_retirement_tax_krw_source": (
+                    "해당 인출분에 배분된 퇴직소득세 100만원"
+                ),
+            },
+            "이연퇴직소득 연금외수령 납부 비율",
+            "100 %",
+        ),
+    ],
+)
+async def test_tax_agent_runs_deferred_retirement_tax_paths(
+    question: str,
+    content: str,
+    tool_args: dict[str, object],
+    expected_label: str,
+    expected_ratio: str,
+) -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(DocumentType.PENSION_REFERENCE, title="이연퇴직소득세", content=content)
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "이연퇴직소득세 근거 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_deferred_retirement_withdrawal_tax",
+                        "args": tool_args,
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": question, "objective": "이연퇴직소득세 계산"})
+
+    assert result["calculations"][0]["calculator_id"] == ("deferred_retirement_withdrawal_tax")
+    assert expected_label in result["decision"]["conclusion"]
+    assert expected_ratio in result["decision"]["conclusion"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("status", "missing_conditions"),
+    [
+        ("determined", []),
+        ("conditional", ["해당 인출분에 배분된 이연퇴직소득세 확인 필요"]),
+    ],
+)
+async def test_tax_agent_keeps_model_intent_for_omitted_allocated_deferred_tax(
+    status: str, missing_conditions: list[str]
+) -> None:
+    content = "이연퇴직소득 연금수령; 실제수령연차 10년차"
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(DocumentType.PENSION_REFERENCE, title="이연퇴직소득세", content=content)
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "이연퇴직소득세 비율 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_deferred_retirement_withdrawal_tax",
+                        "args": {
+                            "receipt_type": "pension",
+                            "receipt_type_source": "이연퇴직소득 연금수령",
+                            "actual_pension_receipt_year": 10,
+                            "actual_pension_receipt_year_source": "실제수령연차 10년차",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": status,
+                            "conclusion": "이연퇴직소득세 비율 결과입니다.",
+                            "missing_conditions": missing_conditions,
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {"question": "이연퇴직소득세 비율 또는 납부세액은?", "objective": "비율 계산"}
+    )
+
+    assert result["decision"]["status"] == status
+    assert result["decision"]["missing_conditions"] == missing_conditions
+    assert "납부세액" not in result["decision"]["conclusion"]
+
+
 def _tool_call(name: str, call_id: str) -> dict[str, Any]:
     return {"name": name, "args": {}, "id": call_id, "type": "tool_call"}
 
@@ -2665,6 +2851,97 @@ def test_tax_agent_allows_only_submit_after_both_comparison_calculations() -> No
     )
 
     assert kept == ["submit_domain_result"]
+
+
+def test_tax_agent_keeps_only_first_when_deferred_and_other_calculators_are_requested() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_deferred_retirement_withdrawal_tax",
+            "calculate_pension_income_tax",
+        ],
+    )
+
+    assert kept == ["calculate_deferred_retirement_withdrawal_tax"]
+
+
+def test_tax_agent_allows_only_submit_after_deferred_retirement_calculation() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[{"calculator_id": "deferred_retirement_withdrawal_tax"}],
+        tool_names=[
+            "calculate_pension_income_tax",
+            "calculate_deferred_retirement_withdrawal_tax",
+            "submit_domain_result",
+        ],
+    )
+
+    assert kept == ["submit_domain_result"]
+
+
+def test_deferred_retirement_tax_presentation_omits_unavailable_amounts() -> None:
+    summary = format_calculation_summary(
+        [
+            {
+                "calculator_id": "deferred_retirement_withdrawal_tax",
+                "inputs": {
+                    "receipt_type": "pension",
+                    "actual_pension_receipt_year": 10,
+                },
+                "input_sources": {},
+                "outputs": {
+                    "payable_ratio_percent": "70.00",
+                    "reduction_ratio_percent": "30.00",
+                },
+                "units": {
+                    "payable_ratio_percent": "%",
+                    "reduction_ratio_percent": "%",
+                },
+                "warnings": [],
+            }
+        ]
+    )
+
+    assert "납부 비율: 70.00 %" in summary
+    assert "감면 비율: 30.00 %" in summary
+    assert "납부세액" not in summary
+    assert "감면세액" not in summary
+    assert "세후 인출액" not in summary
+    assert "인출 원금" not in summary
+    assert "계좌 전체" not in summary
+
+
+def test_deferred_retirement_tax_presentation_preserves_zero_amounts() -> None:
+    summary = format_calculation_summary(
+        [
+            {
+                "calculator_id": "deferred_retirement_withdrawal_tax",
+                "inputs": {
+                    "receipt_type": "pension",
+                    "actual_pension_receipt_year": 10,
+                    "allocated_deferred_retirement_tax_krw": "0",
+                },
+                "input_sources": {},
+                "outputs": {
+                    "payable_ratio_percent": "70.00",
+                    "reduction_ratio_percent": "30.00",
+                    "tax_payable_krw": "0.00",
+                    "tax_reduction_krw": "0.00",
+                },
+                "units": {
+                    "payable_ratio_percent": "%",
+                    "reduction_ratio_percent": "%",
+                    "tax_payable_krw": "KRW",
+                    "tax_reduction_krw": "KRW",
+                },
+                "warnings": [],
+            }
+        ]
+    )
+
+    assert "납부세액: 0.00 KRW" in summary
+    assert "감면세액: 0.00 KRW" in summary
+    assert "세후 인출액" not in summary
+    assert "계좌 전체" not in summary
 
 
 @pytest.mark.anyio
