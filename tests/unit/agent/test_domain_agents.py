@@ -49,7 +49,10 @@ from pension_agent.agent.tax_payout import (
     load_tax_payout_agent_prompt,
 )
 from pension_agent.agent.tax_payout.react import (
+    _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION,
     _INCOME_BASIS_MISSING_CONDITION,
+    _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
+    EnforceTaxPayoutToolSequence,
     _build_tax_payout_result,
 )
 from pension_agent.config import DomainAgentConfig
@@ -403,6 +406,8 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                     "search_documents",
                     "calculate_pension_withdrawal_limit",
                     "calculate_pension_tax_credit",
+                    "calculate_pension_income_tax",
+                    "calculate_non_pension_withdrawal_tax",
                     "submit_domain_result",
                 }
                 if domain == "tax_payout"
@@ -2278,6 +2283,190 @@ async def test_tax_agent_leaves_income_bracket_as_missing_condition_when_omitted
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("question", "content", "tool_name", "tool_args", "expected_calculator", "expected_text"),
+    [
+        (
+            "일반 연금수령 세금을 계산해줘",
+            (
+                "일반 연금수령; 수령자 나이 55세; 비종신 연금; "
+                "연금수령 과세대상 금액 100만원; "
+                "연간 사적연금 과세대상 합계 1,000만원"
+            ),
+            "calculate_pension_income_tax",
+            {
+                "pension_treatment": "ordinary",
+                "recipient_age": 55,
+                "pension_treatment_source": "일반 연금수령",
+                "recipient_age_source": "수령자 나이 55세",
+                "target_taxable_amount_krw": "1000000",
+                "target_taxable_amount_krw_source": "연금수령 과세대상 금액 100만원",
+                "is_lifetime_annuity": False,
+                "is_lifetime_annuity_source": "비종신 연금",
+                "annual_private_pension_taxable_income_krw": "10000000",
+                "annual_private_pension_taxable_income_krw_source": (
+                    "연간 사적연금 과세대상 합계 1,000만원"
+                ),
+            },
+            "pension_income_tax",
+            "일반 연금수령 적용 기본세율",
+        ),
+        (
+            "54세 부득이한 사유 인출 세율은?",
+            "부득이한 사유 연금수령; 수령자 연령 54세",
+            "calculate_pension_income_tax",
+            {
+                "pension_treatment": "unavoidable",
+                "recipient_age": 54,
+                "pension_treatment_source": "부득이한 사유 연금수령",
+                "recipient_age_source": "수령자 연령 54세",
+            },
+            "pension_income_tax",
+            "부득이한 사유 인출 적용 기본세율",
+        ),
+        (
+            "중도해지 운용수익 세금을 계산해줘",
+            "중도해지 운용수익 과세대상 금액 100만원",
+            "calculate_non_pension_withdrawal_tax",
+            {
+                "taxable_amount_krw": "1000000",
+                "taxable_amount_krw_source": "중도해지 운용수익 과세대상 금액 100만원",
+            },
+            "non_pension_withdrawal_tax",
+            "세액공제 원금·운용수익의 연금외수령",
+        ),
+    ],
+)
+async def test_tax_agent_runs_pension_income_tax_paths(
+    question: str,
+    content: str,
+    tool_name: str,
+    tool_args: dict[str, object],
+    expected_calculator: str,
+    expected_text: str,
+) -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(DocumentType.PENSION_REFERENCE, title="연금 과세", content=content)
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "연금 과세 근거 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": tool_name,
+                        "args": tool_args,
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": question, "objective": "연금 과세 계산"})
+
+    assert result["calculations"][0]["calculator_id"] == expected_calculator
+    assert expected_text in result["decision"]["conclusion"]
+
+
+def _tool_call(name: str, call_id: str) -> dict[str, Any]:
+    return {"name": name, "args": {}, "id": call_id, "type": "tool_call"}
+
+
+def _sequence_result_tool_names(
+    *, calculations: list[dict[str, Any]], tool_names: list[str]
+) -> list[str]:
+    message = AIMessage(
+        content="",
+        tool_calls=[_tool_call(name, f"call-{index}") for index, name in enumerate(tool_names)],
+    )
+    state = {
+        "search_result": SearchResult(execution_status="completed"),
+        "calculations": calculations,
+        "messages": [message],
+    }
+    update = EnforceTaxPayoutToolSequence().after_model(state, None)
+    kept_message = message if update is None else update["messages"][0]
+    return [call["name"] for call in kept_message.tool_calls]
+
+
+def test_tax_agent_keeps_exact_pension_tax_comparison_pair_in_one_model_call() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_pension_income_tax",
+            "calculate_non_pension_withdrawal_tax",
+            "submit_domain_result",
+        ],
+    )
+
+    assert kept == [
+        "calculate_pension_income_tax",
+        "calculate_non_pension_withdrawal_tax",
+    ]
+
+
+def test_tax_agent_allows_remaining_comparison_tool_and_submit_after_first() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[{"calculator_id": "pension_income_tax"}],
+        tool_names=[
+            "calculate_pension_withdrawal_limit",
+            "calculate_non_pension_withdrawal_tax",
+            "submit_domain_result",
+        ],
+    )
+
+    assert kept == ["calculate_non_pension_withdrawal_tax", "submit_domain_result"]
+
+
+def test_tax_agent_allows_only_submit_after_both_comparison_calculations() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[
+            {"calculator_id": "pension_income_tax"},
+            {"calculator_id": "non_pension_withdrawal_tax"},
+        ],
+        tool_names=["calculate_pension_income_tax", "submit_domain_result"],
+    )
+
+    assert kept == ["submit_domain_result"]
+
+
+@pytest.mark.anyio
 async def test_tax_agent_keeps_only_first_calculation_tool_when_two_are_requested() -> None:
     search = FakeSearchService(
         SearchResult(
@@ -2677,6 +2866,139 @@ def test_pension_tax_credit_income_guard_keeps_both_rate_scenario_summary() -> N
     assert "16.5%" in conclusion
     assert "13.2%" in conclusion
     assert result["calculations"] == [_pension_tax_credit_rate_scenarios_calculation()]
+
+
+def _pension_income_calculation(
+    *, threshold_status: str, filing_choice_required: bool | None = None
+) -> Any:
+    outputs: dict[str, Any] = {
+        "base_rate_percent": "5.500",
+        "annual_threshold_status": threshold_status,
+    }
+    inputs: dict[str, Any] = {
+        "pension_treatment": "ordinary",
+        "recipient_age": 55,
+        "is_lifetime_annuity": False,
+    }
+    if threshold_status != "unknown":
+        inputs["annual_private_pension_taxable_income_krw"] = "15000001"
+    if filing_choice_required is not None:
+        outputs["filing_choice_required"] = filing_choice_required
+    if filing_choice_required:
+        outputs.update(
+            {
+                "separate_tax_option_rate_percent": "16.5",
+                "separate_tax_option_tax_krw": "2475000.165",
+                "separate_tax_option_after_tax_krw": "12525000.835",
+            }
+        )
+    return {
+        "calculator_id": "pension_income_tax",
+        "inputs": inputs,
+        "input_sources": {},
+        "outputs": outputs,
+        "units": {"base_rate_percent": "%"},
+        "warnings": [],
+    }
+
+
+def _build_result_with_calculations(
+    calculations: list[Any], *, missing_conditions: list[str] | None = None
+) -> DomainResult:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    return _build_tax_payout_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=calculations,
+        status="determined",
+        conclusion="임의 결론",
+        missing_conditions=missing_conditions or [],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+
+def test_pension_income_unknown_annual_total_forces_conditional_status() -> None:
+    result = _build_result_with_calculations(
+        [_pension_income_calculation(threshold_status="unknown")]
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [
+        _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION
+    ]
+    assert all("금액" not in condition for condition in result["decision"]["missing_conditions"])
+
+
+def test_pension_income_filing_choice_forces_conditional_status() -> None:
+    result = _build_result_with_calculations(
+        [_pension_income_calculation(threshold_status="exceeded", filing_choice_required=True)]
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [
+        _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION
+    ]
+
+
+def test_pension_income_guards_preserve_and_deduplicate_missing_conditions() -> None:
+    result = _build_result_with_calculations(
+        [_pension_income_calculation(threshold_status="exceeded", filing_choice_required=True)],
+        missing_conditions=["기존 조건", _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION],
+    )
+
+    assert result["decision"]["missing_conditions"] == [
+        "기존 조건",
+        _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
+    ]
+
+
+def test_non_pension_rate_only_does_not_force_missing_amount() -> None:
+    calculation = {
+        "calculator_id": "non_pension_withdrawal_tax",
+        "inputs": {},
+        "input_sources": {},
+        "outputs": {"base_rate_percent": "16.5"},
+        "units": {"base_rate_percent": "%"},
+        "warnings": [],
+    }
+
+    result = _build_result_with_calculations([calculation])
+
+    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["missing_conditions"] == []
+
+
+def test_pension_income_presentations_do_not_misstate_tax_meaning() -> None:
+    summary = format_calculation_summary(
+        [
+            _pension_income_calculation(threshold_status="exceeded", filing_choice_required=True),
+            {
+                "calculator_id": "non_pension_withdrawal_tax",
+                "inputs": {"taxable_amount_krw": "1000000"},
+                "input_sources": {},
+                "outputs": {
+                    "base_rate_percent": "16.5",
+                    "tax_krw": "165000.000",
+                    "after_tax_krw": "835000.000",
+                },
+                "units": {
+                    "base_rate_percent": "%",
+                    "tax_krw": "KRW",
+                    "after_tax_krw": "KRW",
+                },
+                "warnings": [],
+            },
+        ]
+    )
+
+    assert "연간 전체 과세대상 사적연금소득 기준 16.5% 분리과세 선택세액" in summary
+    assert "세액공제 원금·운용수익의 연금외수령 적용 기본세율" in summary
+    assert "종합과세 최종세액" not in summary
+    assert "환급액" not in summary
+    assert "초과분 세액" not in summary
 
 
 @pytest.mark.anyio

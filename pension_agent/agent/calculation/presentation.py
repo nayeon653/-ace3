@@ -17,6 +17,10 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
             lines.append(f"연금수령한도: {_value(outputs, units, 'withdrawal_limit')}")
         elif calculator_id == "pension_tax_credit":
             lines.extend(_pension_tax_credit_lines(calculation["inputs"], outputs, units))
+        elif calculator_id == "pension_income_tax":
+            lines.extend(_pension_income_tax_lines(calculation["inputs"], outputs, units))
+        elif calculator_id == "non_pension_withdrawal_tax":
+            lines.extend(_non_pension_withdrawal_tax_lines(outputs, units))
         elif calculator_id == "fund_standard_price":
             lines.append(
                 "펀드 1,000좌당 기준가격: "
@@ -68,6 +72,53 @@ def _pension_tax_credit_lines(
             f"{_value(outputs, units, 'lower_income_theoretical_credit_krw')}, "
             "소득구간 초과 시(13.2%) 이론상 세액: "
             f"{_value(outputs, units, 'other_income_theoretical_credit_krw')}"
+        )
+    return lines
+
+
+def _pension_income_tax_lines(
+    inputs: dict[str, object],
+    outputs: dict[str, object],
+    units: dict[str, str],
+) -> list[str]:
+    treatment = inputs["pension_treatment"]
+    treatment_label = "일반 연금수령" if treatment == "ordinary" else "부득이한 사유 인출"
+    lines = [f"{treatment_label} 적용 기본세율: {_value(outputs, units, 'base_rate_percent')}"]
+    threshold_status = outputs.get("annual_threshold_status")
+    if threshold_status == "unknown":
+        lines.append("연간 사적연금 과세대상 합계 미확인: 확정 세액을 계산하지 않음")
+    elif threshold_status == "within":
+        lines.append("연간 사적연금 과세대상 합계: 1,500만원 이하")
+    elif threshold_status == "exceeded":
+        lines.append("연간 사적연금 과세대상 합계: 1,500만원 초과")
+        lines.append(
+            "연간 전체 과세대상 사적연금소득 기준 16.5% 분리과세 선택세액: "
+            f"{_value(outputs, units, 'separate_tax_option_tax_krw')}, "
+            "분리과세 선택 후 금액: "
+            f"{_value(outputs, units, 'separate_tax_option_after_tax_krw')}"
+        )
+    if "tax_krw" in outputs:
+        lines.append(
+            f"과세대상액 세액: {_value(outputs, units, 'tax_krw')}, "
+            f"세후 금액: {_value(outputs, units, 'after_tax_krw')}"
+        )
+    return lines
+
+
+def _non_pension_withdrawal_tax_lines(
+    outputs: dict[str, object],
+    units: dict[str, str],
+) -> list[str]:
+    lines = [
+        (
+            "세액공제 원금·운용수익의 연금외수령 적용 기본세율: "
+            f"{_value(outputs, units, 'base_rate_percent')}"
+        )
+    ]
+    if "tax_krw" in outputs:
+        lines.append(
+            f"연금외수령 과세대상액 세액: {_value(outputs, units, 'tax_krw')}, "
+            f"세후 금액: {_value(outputs, units, 'after_tax_krw')}"
         )
     return lines
 

@@ -3,8 +3,9 @@
 ## 목적과 책임
 
 Tax/Payout Agent는 연금 세액공제, 과세와 수령 조건을 제공 문서 근거로 판단한다.
-검증된 입력이 있으면 Python Calculation Tool로 연금수령한도 또는 연금계좌 세액공제
-대상액·세액을 계산한다(질문에 맞는 계산 Tool 하나만 호출).
+검증된 입력이 있으면 Python Calculation Tool로 연금수령한도, 연금계좌 세액공제,
+연금수령 세금 또는 연금외수령 세금을 계산한다. 일반적으로 질문에 맞는 Tool 하나만
+호출하고, 연금수령·연금외수령 비교 질문에서는 두 세금 Tool을 각각 한 번 호출할 수 있다.
 
 세액공제 적용 조건, 연금 과세, 수령 방식(일시금/분할)에 따른 과세, 중도해지 과세는 이
 Agent의 책임이다. 상품의 위험·비용·수익률은 Product, 계좌 이전·가입·해지 절차 자체는
@@ -79,6 +80,33 @@ warning이 `calculations`에 포함된다.
 - 호출은 한 번으로 제한하며, `calculate_pension_withdrawal_limit`과 같은 실행에서 함께
   호출하지 않는다(질문에 맞는 계산 Tool 하나만 선택).
 
+### `calculate_pension_income_tax`
+
+- 세액공제를 받은 원금·운용수익의 일반 연금수령과 검증된 부득이한 사유 인출에 사용한다.
+  이연퇴직소득 과세에는 사용하지 않는다.
+- 필수 입력은 `pension_treatment`(`ordinary | unavoidable`)와 `recipient_age`이며 각각
+  값과 원문 `source`가 필요하다. `ordinary`는 55세 이상이고 `is_lifetime_annuity` 값·
+  source가 필수다. `unavoidable`은 55세 미만도 허용하지만 종신 여부와 연간 합계를 받지
+  않는다.
+- 현재 과세대상액, 종신 여부와 연간 사적연금 과세대상 합계는 선택 입력이며 값과 source를
+  함께 전달하거나 함께 생략한다. 연간 합계는 현재 대상액을 포함한 전 금융기관의 과세대상
+  사적연금소득 합계이고, 세액공제를 받지 않은 원금과 퇴직소득은 제외한다.
+- 일반 연금수령에서 연간 합계가 없으면 기본세율과 `annual_threshold_status=unknown`만
+  확정하고 현재 대상액이 있어도 세액을 만들지 않는다. 1,500만원 이하에서는 현재 대상액
+  세액을 계산한다. 초과하면 연간 전체 합계의 16.5% 분리과세 선택세액만 계산하고 현재
+  인출 세액이나 초과분 세액, 종합과세 최종세액으로 표현하지 않는다.
+- 부득이한 사유 인출은 연간 1,500만원 기준을 적용하지 않으며 대상액이 있을 때만 세액을
+  계산한다. 사유의 법률상 적격성은 Agent가 판단한다.
+- 호출은 한 번으로 제한한다.
+
+### `calculate_non_pension_withdrawal_tax`
+
+- 세액공제를 받은 원금·운용수익의 연금외수령에 16.5%를 적용한다. 중도해지·일시금·
+  한도초과라는 문구만으로 재원 적격성을 추론하지 않으며 이연퇴직소득에는 사용하지 않는다.
+- 과세대상액은 선택 입력이다. 값과 source를 함께 생략하면 세율만, 함께 전달하면 세액과
+  세후 금액을 반환한다. 둘 중 하나만 전달할 수 없다.
+- 호출은 한 번으로 제한한다.
+
 ### `submit_domain_result`
 
 `status="not_applicable"`은 검색 없이 바로 제출할 수 있다 — Product·Policy 책임
@@ -96,9 +124,8 @@ DomainRequest
   -> not_applicable ? submit_domain_result(검색 없이 즉시 정규화) : (
        search_documents 1회
        -> 검색 실패/timeout/빈 결과면 Python 안전 종료
-       -> 연금수령한도 질문이고 입력이 충분하면 calculate_pension_withdrawal_limit 1회,
-          연금계좌 세액공제 질문이고 입력이 충분하면 calculate_pension_tax_credit 1회
-          (질문에 맞는 계산 Tool 하나만 호출)
+       -> 질문과 입력에 맞는 Calculation Tool 1회
+          (연금수령·연금외수령 비교만 #113 두 Tool을 각각 1회 허용)
        -> submit_domain_result(계산 없이 conclusion에 확정 수치가 있으면 비수치 재제출 1회 요청)
      )
   -> 검증된 DomainResult
@@ -150,14 +177,15 @@ DomainRequest
 | 검색 Tool | 최대 1회 |
 | 연금수령한도 Tool | 최대 1회 |
 | 연금 세액공제 Tool | 최대 1회 |
+| 연금수령 세금 Tool | 최대 1회 |
+| 연금외수령 세금 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |
 
 ## 현재 제한
 
-- 현재 연결된 계산기는 연금수령한도와 연금계좌 세액공제 두 개다.
-- 연금소득세율 계산기는 구현·연결하지 않았다.
+- 종합과세 최종세액, 이연퇴직소득세와 과세 재원·사유의 법률상 적격성은 계산하지 않는다.
 - 계산 근거 문서의 파일명·페이지 매핑은 `docs/specs/components/calculation-service.md`
   에서 관리한다(이 문서에는 중복 기록하지 않는다).
 - 계산 근거 청크를 최종 결과에 제출하지 않으면 실행된 계산도 최종 `calculations`에서
