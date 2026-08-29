@@ -24,11 +24,13 @@ from langgraph.types import Command
 from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
+    CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
     CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
     calculation_evidence_chunk_ids,
+    create_deferred_retirement_withdrawal_tax_tool,
     create_non_pension_withdrawal_tax_tool,
     create_pension_income_tax_tool,
     create_pension_tax_credit_tool,
@@ -158,8 +160,9 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
                 "연금계좌 세액공제 계산이면 calculate_pension_tax_credit Tool을 호출하고, "
                 "세액공제 원금·운용수익의 연금수령 세금이면 "
                 "calculate_pension_income_tax Tool을, 같은 재원의 연금외수령 세금이면 "
-                "calculate_non_pension_withdrawal_tax Tool을 호출하세요. 이연퇴직소득 "
-                "과세에는 두 연금소득세 Tool을 사용하지 말고, "
+                "calculate_non_pension_withdrawal_tax Tool을 호출하세요. 이연퇴직소득 재원의 "
+                "연금·연금외수령 세금이면 calculate_deferred_retirement_withdrawal_tax Tool을 "
+                "호출하고 두 재원을 혼용하지 마세요. "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
         else:
@@ -236,6 +239,7 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
                 CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
                 CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
                 CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+                CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
@@ -290,6 +294,7 @@ def create_tax_payout_react_agent(
     tax_credit_tool = create_pension_tax_credit_tool()
     pension_income_tax_tool = create_pension_income_tax_tool()
     non_pension_withdrawal_tax_tool = create_non_pension_withdrawal_tax_tool()
+    deferred_retirement_tax_tool = create_deferred_retirement_withdrawal_tax_tool()
     graph = create_agent(
         model=model,
         tools=(
@@ -298,6 +303,7 @@ def create_tax_payout_react_agent(
             tax_credit_tool,
             pension_income_tax_tool,
             non_pension_withdrawal_tax_tool,
+            deferred_retirement_tax_tool,
             _create_tax_payout_result_tool(),
         ),
         system_prompt=system_prompt,
@@ -331,6 +337,11 @@ def create_tax_payout_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=non_pension_withdrawal_tax_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=deferred_retirement_tax_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),
