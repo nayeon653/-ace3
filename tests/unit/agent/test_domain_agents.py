@@ -2441,6 +2441,105 @@ def test_tax_agent_keeps_exact_pension_tax_comparison_pair_in_one_model_call() -
     ]
 
 
+@pytest.mark.anyio
+async def test_tax_agent_preserves_both_pension_tax_comparison_results() -> None:
+    content = (
+        "일반 연금수령; 수령자 나이 55세; 비종신 연금; "
+        "연금수령 과세대상 금액 100만원; "
+        "연간 사적연금 과세대상 합계 1,000만원; "
+        "중도해지 운용수익 과세대상 금액 100만원"
+    )
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(DocumentType.PENSION_REFERENCE, title="수령 방식별 과세", content=content)
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "수령 방식별 과세 비교"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_income_tax",
+                        "args": {
+                            "pension_treatment": "ordinary",
+                            "recipient_age": 55,
+                            "pension_treatment_source": "일반 연금수령",
+                            "recipient_age_source": "수령자 나이 55세",
+                            "target_taxable_amount_krw": "1000000",
+                            "target_taxable_amount_krw_source": ("연금수령 과세대상 금액 100만원"),
+                            "is_lifetime_annuity": False,
+                            "is_lifetime_annuity_source": "비종신 연금",
+                            "annual_private_pension_taxable_income_krw": "10000000",
+                            "annual_private_pension_taxable_income_krw_source": (
+                                "연간 사적연금 과세대상 합계 1,000만원"
+                            ),
+                        },
+                        "id": "pension-income-call",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "calculate_non_pension_withdrawal_tax",
+                        "args": {
+                            "taxable_amount_krw": "1000000",
+                            "taxable_amount_krw_source": (
+                                "중도해지 운용수익 과세대상 금액 100만원"
+                            ),
+                        },
+                        "id": "non-pension-call",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "수령 방식별 결과를 비교합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {"question": "연금수령과 중도해지 세금을 비교해줘", "objective": "세금 비교"}
+    )
+
+    assert {calculation["calculator_id"] for calculation in result["calculations"]} == {
+        "pension_income_tax",
+        "non_pension_withdrawal_tax",
+    }
+    assert len(result["calculations"]) == 2
+    assert [evidence["chunk_id"] for evidence in result["evidence"]] == [
+        "550e8400-e29b-41d4-a716-446655440000"
+    ]
+
+
 def test_tax_agent_allows_remaining_comparison_tool_and_submit_after_first() -> None:
     kept = _sequence_result_tool_names(
         calculations=[{"calculator_id": "pension_income_tax"}],
