@@ -1,0 +1,509 @@
+[
+  {
+    "source_id": 1,
+    "source_question": "[퇴직연금] 실물이전(현물이전)이 가능하게 되었다는데 어떻게 하면 되나요?",
+    "source_answer": "실물이전이란 퇴직연금 계약 이전 진행 과정에서 가입자가 상품을 해지하지 않고 그대로 금융사만 바꿀 수 있도록 도입된 제도입니다.\n\n동일한 퇴직연금 제도별로 상품 그대로 이전할 수 있으며, (개인IRP&rarr;개인IRP, DC&rarr;DC, DB&rarr;DB, 기업형IRP&rarr;기업형IRP) 온라인 접수는 개인 IRP에 한해서 가능하고 퇴직연금 DC는 재직중인 회사를 통해 금융회사 변경 및 실물이전 신청이 가능합니다.\n\n실물이전 신청시 가능한 상품만 실물 그대로 이전되며, 불가 상품은 매도 후 현금으로 이전됩니다. 추가로 보유 자산 전액 이전만 가능합니다. (일부 이전은 불가)\n\n퇴직연금 개인형 IRP 실물이전 신청은 모바일 M-STOCK에서만 신청 가능합니다.\n\n(PC홈페이지 현금이전 신청만 가능)\n\n■ IRP실물이전(현물이전)경로\n\n-  M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 타사 연금가져오기/실물이전 > IRP실물이전\n\n ▶ M-STOCK : 타사연금가져오기/실물이전 바로가기\n\n※ 보유상품 실물이전 가능여부 조회는 제도 시행 이후 이관회사(현재 보유중인 계좌의 금융회사)를 통해 확인이 가능합니다.\n\n※ 현금으로 전액 운용중인 계좌는 실물이전 불가, 현금이전만 가능합니다.\n\n※ 연금저축계좌는 타사 이수관시 실물이전 대상이 아닙니다.",
+    "related_account_types": [
+      "IRP",
+      "DC",
+      "DB"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2327202",
+    "source_message_number": "450"
+  },
+  {
+    "source_id": 2,
+    "source_question": "[퇴직연금] 퇴직연금/IRP 계좌로 입금이 안되는데 어떻게 해야 하죠?",
+    "source_answer": "퇴직연금/IRP계좌에 입금이 안 된다면, 3가지를 확인해보아야 합니다.\n\n1. 입금시간(평일 업무시간 중 입금 가능 08:00~16:00)\n\n2. 납입한도(계좌개설시 한도를 0으로 설정했거나 기존에 설정한 한도 보다 초과하여 입금하는 경우)\n\n3. 계약이전신청을 한 경우(이전신청이 완료되기 전까지 입금불가)\n\n※ IRP계좌로의 입금은 상품(ETF)으로는 불가하며 현금으로만 입금 가능합니다.\n\n※ 매년 퇴직연금/IRP 입금은 12월 마지막 영업일 16:00 전까지 정상입금 되어야 세액공제 가능합니다.\n\n※ IRP계좌번호로 입금해야 하며 퇴직금입금전용계좌번호(IRP계좌번호+01)로 입금시 세액공제가능금액으로 처리되지 않으니 주의하셔야 합니다.\n\n■ 입금한도 변경\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금관리 > 연금입금관리 > 연금한도변경\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금 / IRP 관리 > 퇴직연금/IRP 입금한도\n\n ▶ M-STOCK : 한도변경 바로가기",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2279042",
+    "source_message_number": "291"
+  },
+  {
+    "source_id": 3,
+    "source_question": "[퇴직연금] 위험자산 투자한도 초과 안내(E-mail 및 SMS)를 받았습니다. 무슨 내용인가요?",
+    "source_answer": "퇴직연금/IRP계좌의 경우 퇴직연금 감독규정상(감독규정 제11조 12조) 위험자산으로 분류되는 상품에 전체 자산의 70%(입금기준이 아닌 총 보유자산기준) 까지만 투자가 가능합니다.\n\n주문하시는 화면에서 상품 선택시 '투자한도70%', '투자한도100%' 로 확인이 가능합니다. 초과되지 않게 매수했다 하더라도 운용 중 시장상황에 따라 위험자산이 초과될 경우 고객님께 알림톡(SMS)과 E-mail이 발송 됩니다.\n\n그러나 지금 당장 위험자산을 낮춰주거나 매도해야 하는것은 아니고 현재 보유 상품을 변경하지 않고 유지는 가능합니다, 추후 상품교체시 위험자산 비율로 인해 추가매수가 불가능할 수 있습니다.\n\n■ 위험자산비율 확인경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금계좌현황 > 위험자산 투자비율확인 가능\n\n- 홈페이지(PC) : 연금자산 > MY퇴직연금 > 퇴직연금 잔고 > 아래스크롤 위험자산비율 확인\n\n▶ M-STOCK : 연금계좌현황 바로가기\n\n ※ 위험자산 투자한도 초과 안내 E-mail 및 SMS 발송일 :\n\n    위험자산 투자비율한도 초과 5영업일 경과시 즉시 발송, 초과가 지속되는 경우 매월 마지막 영업일에 발송",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238259",
+    "source_message_number": "84"
+  },
+  {
+    "source_id": 4,
+    "source_question": "[퇴직연금] 퇴직연금IRP계좌에 '거래제한-퇴직전 출금고 거래제한'이라고 되어 있는데 왜 그런가요?",
+    "source_answer": "퇴직연금 IRP계좌는 근로자 퇴직연금보장법에 정해진 중도인출사유 또는 계좌해지, 연금지급 외에 출금이 불가능 합니다.\n\n'거래제한-퇴직전 출금고 거래제한'이라는 내용은 퇴직연금 IRP계좌에서의 자유로운 출금을 제한하기 위해 당사에서 설정해둔 계좌제한사항입니다.\n\n해당 사유로 인해 매매, 거래, 조회 등 계좌 관리하는 데에는 전혀 제약 사항이 없으며, 추후 중도인출 사유로의 출금, 계좌해지, 연금지급 등의 사유로 인한 출금 요청시 정상 출금 또한 가능합니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317922",
+    "source_message_number": "436"
+  },
+  {
+    "source_id": 5,
+    "source_question": "[퇴직연금]퇴직연금에서 유상청약은 어떻게 하나요?",
+    "source_answer": "퇴직연금에서도 유상청약 권리가 발생하면 청약이 가능합니다. 모바일 M-STOCK에서  청약 신청하시거나, 내점/유선청약도 가능합니다.\n\n본배정 수량만 청약 가능하고 초과청약은 불가하며, 청약시점에 청약가능금액(현금성자산)이 있어야 합니다. 투자위험한도(70%)를 체크하고 있어 해당 한도를 초과한 경우 유상증자에 참여하지 못할 수 있습니다.\n\n예약청약은 불가하고 유상청약 후 입고 2영업일 전 권리공매도는 가능합니다.(내점/유선가능)\n\n유상청약 권리인 신주인수권 증서는 추가 매수 불가하며 매도만 가능합니다.\n\n퇴직연금에서 신주인수권 증서를 매도하는 화면은 퇴직연금ETF/ETN/리츠 거래하는 화면에서 '매도' 탭을 선택하고 '잔고' 버튼을 누른 후 보유하신 신주인수권 증서를 선택하셔서 매도 가능합니다.\n\n■ 퇴직연금 유상청약 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금매매 > 퇴직연금 유상청약\n\n ▶ M-STOCK : 퇴직연금 유상청약 바로가기",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2327402",
+    "source_message_number": "47"
+  },
+  {
+    "source_id": 6,
+    "source_question": "[퇴직연금] 타사에서 IRP퇴직연금 수령중에 있는데, 연금저축계좌로 이전하고싶은데 가능한가요?",
+    "source_answer": "연금이 개시된 타사 IRP계좌를 당사의 연금저축 &lsquo;이전용&rsquo; 계좌로 이전하는 것은 가능합니다.\n\n수관이 완료되면 연금 개시는 되어있지만 정기지급은 중단된 상태로 이전되므로, 정기지급을 원한다면 관리점으로 연락하셔서 지급 신청을 다시 해주셔야 합니다.\n\n이전 완료 후에도 개시된 상태는 그대로 유지되므로 추가 입금은 불가합니다.\n\n현재 당사 연금저축/IRP는 연금 개시된 계좌를 수관할 수 있으나, 타사 계약 특성이나 시스템 차이로 이전이 불가할 수도 있습니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317936",
+    "source_message_number": "45"
+  },
+  {
+    "source_id": 7,
+    "source_question": "[퇴직연금] 타사 연금보험을 미래에셋증권 IRP계좌로 이전 신청 했는데 손실 없이 그대로 이전되나요?",
+    "source_answer": "연금수령 조건 (계약 5년 이상 유지, 만 55세 이상)을 갖춘 타사 연금저축보험을 당사 IRP 계좌로 상호 이전할 수 있습니다.\n\n계약 이전의 형태이기 때문에 해지시 발생하는 세금 추징없이 이전됩니다.\n\n다만, 보험사의 경우에는 사업비나 별도의 수수료가 발생될 수 있으므로 관련 여부는 해당 보험사에 따로 확인하셔야 합니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317935",
+    "source_message_number": "44"
+  },
+  {
+    "source_id": 8,
+    "source_question": "[퇴직연금] 타사에 퇴직연금 DC가 있는데, 미래에셋으로 이전 할 수 있는 방법을 알려주세요.",
+    "source_answer": "고객님께서 근무하시는 회사와 계약된 퇴직연금 사업자(금융회사)간 계약이전이 가능합니다.\n\n먼저 고객님의 회사 퇴직연금 담당자(인사팀)를 통하여 당사와의 계약 여부를 확인하셔야하고, 당사와 계약되어 있는게 맞다면 마찬가지로 고객님의 회사 담당자를 통해 계약이전 의사를 밝히고 '실물이전'(2024년 10월 15일부터 가능)과 '현금이전' 중 희망하시는 방식으로 선택하여 진행하시면 됩니다.\n\n당사와 계약되어 있지 않다면 DC계약이전이 불가하므로 회사를 통해 확인 해주시기 바랍니다.",
+    "related_account_types": [
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317934",
+    "source_message_number": "43"
+  },
+  {
+    "source_id": 9,
+    "source_question": "[퇴직연금] 퇴직연금DC/IRP계좌에서 채권거래가 가능한가요?",
+    "source_answer": "당사의 경우 퇴직연금 DC/IRP계좌에서 국내 장내채권 및 해외채권은 거래 불가하며, 국내 장외채권만 거래가 가능합니다.\n\n■퇴직연금계좌내 장외채권 매수 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금매매 > 금융상품 매매 > 장외채권\n\n   (계좌번호를 퇴직연금계좌로 선택시 '장외채권'탭 선택 가능)\n\n▶ M-STOCK : 퇴직연금 장외채권 매매 바로가기\n\n※ 장외채권 매수가능시간은 10:00 ~ 15:00(영업일 기준)입니다. 매수가능시간에만 거래가능한 상품이 제공됩니다.\n\n※ 퇴직연금 계좌 내 장외채권 매수는 온라인(모바일 M-STOCK)만 가능하고, 매도는 온라인 불가하여 지점 방문 또는 유선으로 가능합니다.\n\n※ 퇴직연금/IRP계좌에서 장외채권 매매시 발생하는 수수료는 없습니다.",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317932",
+    "source_message_number": "42"
+  },
+  {
+    "source_id": 10,
+    "source_question": "[퇴직연금] IRP개설시  증빙서류 중 건강보험자격득실확인서는 모바일제출이 가능하던데 진행이 안됩니다.",
+    "source_answer": "IRP계좌 개설 진행 중 \"모바일 제출\" 버튼을 누르시면 건강보험공단 화면으로 자동으로 연동됩니다. 이 때에 증권용 인증서 또는 범용 인증서가 모바일에 등록되어 있는 경우에 한하여 건강보험자격득실확인서를 자동 제출 할 수 있습니다.\n\n또한 건강보험 가입이 지역 가입자로 되어있는 경우에는 모바일 제출로 신청하더라도 계좌개설 서류로 사용할 수 없습니다.\n\nIRP계좌를 비대면으로 개설하시는 과정 중에 모바일 제출을 선택하지 못한 경우, 필수 증빙 서류는 팩스로 발송해주셔야 합니다. (FAX 0504-459-0012)\n\n건강보험공단의 보이는 ARS 서비스를 통해 간편하게 팩스 발송도 가능하오니 참고 부탁드립니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317930",
+    "source_message_number": "41"
+  },
+  {
+    "source_id": 11,
+    "source_question": "[퇴직연금] 미래에셋증권 퇴직연금 부담금 납입결과 안내 라고 왔는데, 어떤내용인가요?",
+    "source_answer": "당사는 퇴직연금계좌에 입금한 고객님께 퇴직연금 부담금납입결과안내장과 SMS를 발송해드리고 있습니다.\n\n해당 서비스에는 가입자 정보, 납입한 금액, 납입일자 등을 확인하실 수 있는 부담금 납입내역, 부담금 운용지시 매수 결과, 적립금 현황이 기재되어 있습니다.\n\n재직중인 회사에서 퇴직금을 적립해줄때도 발송됩니다.\n\n납입한 금액이 정상적으로 처리되었는지 확인하는데에 도움을 드리기 위해 미래에셋증권에서 제공해드리는 서비스입니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317929",
+    "source_message_number": "40"
+  },
+  {
+    "source_id": 12,
+    "source_question": "[퇴직연금] 퇴직연금에 현재 보유한 예금상품 만기나 금리를 알 수 있나요?",
+    "source_answer": "퇴직연금 계좌에 보유 중인 예금을 명세별로 매도 할 수 있고, 예금 만기 확인도 가능하며, 명세별로 적용되는 금리도 확인이 가능합니다. (현재 M-STOCK만 가능)\n\n■ 명세별 예금금리/만기 확인 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금계좌현황 > 금융상품/디폴트옵션 > 보유현황 > 해당예금명선택(상품보유현황으로 확인가능)\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP매매 > 퇴직연금/IRP만기상품예약매수\n\n▶ M-STOCK : 명세별 예금금리/만기 확인 바로가기\n\n홈페이지에서는 만기상품예약매수화면을 통해 명세별 만기는 확인할 수 있습니다. 예금명세별 만기와 금리까지 확인이 필요하다면 M-STOCK으로 이용 부탁드립니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317928",
+    "source_message_number": "39"
+  },
+  {
+    "source_id": 13,
+    "source_question": "[퇴직연금] 퇴직연금/IRP계좌에서 ETF 매매체결시 SMS 알림받는 방법 알려주세요.",
+    "source_answer": "IRP계좌에서 ETF 매매내역통지처 등록 화면 경로를 아래와 같이 안내드립니다.\n\n■ 퇴직연금ETF 체결알리미\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금관리 > 퇴직연금관리 > 퇴직연금 알리미\n\n▶ M-STOCK : 퇴직연금알리미 바로가기\n\n매매내역 통지처 : SMS 알림을 선택하시면 됩니다.\n\n단, 실시간 체결통보가 아닌 일간 체결통보 방식으로 장 종료 후 1회 SMS로 체결내역이 있으니 확인해 보시라는 문구로 발송됩니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317927",
+    "source_message_number": "38"
+  },
+  {
+    "source_id": 14,
+    "source_question": "[퇴직연금] 퇴직연금/IRP계좌에 ELB 신청하려고 하는데 어떻게 하나요?",
+    "source_answer": "ELB 상품의 경우 보통 매주 금요일에 발행됩니다.\n\n발행하는 주의 월요일부터 한도 소진될 때까지 ELB 청약 예약을 유선으로 받고,\n\n예약한 계좌에 한해서 ELB 상품에 대한 청약이 가능합니다.\n\n퇴직연금/IRP계좌의 각 관리점을 통해 유선 예약이 가능합니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317925",
+    "source_message_number": "37"
+  },
+  {
+    "source_id": 15,
+    "source_question": "[퇴직연금] 퇴직연금/IRP계좌에서 ETF 예약 주문 할 수 있나요?",
+    "source_answer": "퇴직연금/IRP계좌에서는 현재 ETF 매매시 예약주문을 이용할 수 없습니다.\n\n정규장 주문만 가능합니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317924",
+    "source_message_number": "36"
+  },
+  {
+    "source_id": 16,
+    "source_question": "[퇴직연금] 사용중지했던 퇴직연금 IRP계좌를 다시 사용 할 수 있나요?",
+    "source_answer": "해지후 지급받은 IRP계좌와 타사로 이전하여 이관해지된 IRP계좌는 재사용이 불가합니다.\n\n신규로 개설 후 이용부탁드립니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317923",
+    "source_message_number": "35"
+  },
+  {
+    "source_id": 17,
+    "source_question": "[퇴직연금] IRP계좌에 보유중인 상품내역에 미래에셋 현금성자산이라고 있는데 어떤 상품인가요?",
+    "source_answer": "개인형 IRP계좌에 상품으로 투자하지 않은 현금성자산은 1일물 CMA나 MMDA에 자동으로 투자되어 현재 연 2.35% ~ 2.75%(변동가능)내외 이자가 매일 정산되어 지급됩니다.\n\n다만, 기준금리 변동에 따라 현금성자산의 금리도 변동되며 금리가 매일 바뀌기 때문에 현금성자산에 대한 당일 매수금리는 매영업일 21시 이후 조회 가능합니다.\n\n- M-STOCK : 왼쪽하단三메뉴 > 자산 뱅킹 > MY자산 > 거래내역 >퇴직연금별 > 구분'현금성자산이자'선택 후 조회\n\n▶ M-STOCK : 퇴직연금 현금성 자산금리 확인 바로가기",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317921",
+    "source_message_number": "33"
+  },
+  {
+    "source_id": 18,
+    "source_question": "[퇴직연금] 은행에 예금을 갖고 있는데 IRP에 동일한 은행상품을 가입하면 예금자보호는 어떻게 되나요?",
+    "source_answer": "퇴직연금 감독규정에 따라 고객님의 다른 예금자 보호대상 금융상품(일반 은행 가입 예금)과는 별개로 1인당 1억원까지 보호됩니다.\n\n일반 계좌와 합산되지는 않지만 퇴직연금 DC, IRP계좌 간에는 합산하여 적용되므로 2개 이상의 퇴직연금에 가입한 경우 합하여 1억원까지 보호됩니다.",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317919",
+    "source_message_number": "32"
+  },
+  {
+    "source_id": 19,
+    "source_question": "[퇴직연금] 예금이 만기 되면 디폴트옵션으로 즉시 자동매수 되나요?",
+    "source_answer": "만기성 상품(예금 등)을 보유한 계좌에 디폴트옵션을 지정한 경우, 만기일이 도래하여 현금결제 된 후에도 직접 매매를 하지 않으시면 6주의 대기 기간을 거친 후에 디폴트옵션 상품으로 매수 됩니다.\n\n(동일한 만기성 상품이 디폴트옵션에 자동매수 이력이 있는 경우 대기기간 없이 바로 매수됩니다.)",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317916",
+    "source_message_number": "31"
+  },
+  {
+    "source_id": 20,
+    "source_question": "[퇴직연금] 예금 만기 시 다시 예금으로 자동매수하는 방법이 있나요?",
+    "source_answer": "만기일 2영업일 전까지 만기상품 예약매수를 신청하실 수 있습니다.\n\n■ 만기상품 예약매수 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 매수상품 사전 지정 > 만기매수상품 지정\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP매매 > 퇴직연금/IRP만기상품예약매수\n\n▶ M-STOCK : 만기매수상품 지정 바로가기\n\n만기상품 예약매수를 저축은행 상품으로 원하실 경우에는 만기 15일 이내의 상품에 한하여 저축은행 예금으로 지정이 가능합니다.\n\n저축은행 예금 매매불가 사유(한도소진, 판매중지 등)가 발생하면 매수 처리가 불가할 수 있으며 매수 불가한 경우, 현금성자산으로 운용됩니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317864",
+    "source_message_number": "30"
+  },
+  {
+    "source_id": 21,
+    "source_question": "[퇴직연금] 예금 만기도래시  자동 재예치 되는 거 아니었나요?",
+    "source_answer": "과거에는 예금이 만기될 경우 동일한 상품으로 자동 재예치되었으나,\n\n디폴트옵션제도가 도입되면서 2023년 7월 12일 부터는 예금 자동 재예치가 불가합니다.\n\n앞으로는 예금 만기 시 가입자가 직접 예금 상품으로 재매수하거나, 다른 투자상품으로 운용지시 해야합니다.\n\n디폴트옵션을 지정하면 예금 만기일로부터 6주 후(최초 만기도래시 적용, 동일상품이 디폴트옵션에 자동매수된 이력이 있다면 만기도래 후 즉시 매수됨) 디폴트옵션 상품으로 자동매수되므로, 가입자가 만기시마다 매번 챙겨야 하는 번거로움 없이 퇴직연금 자산을 관리할 수 있습니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317862",
+    "source_message_number": "29"
+  },
+  {
+    "source_id": 22,
+    "source_question": "[퇴직연금] 디폴트옵션을 지정한 후, ETF나 펀드를 매도하면, 매도 금액이 디폴트옵션에 자동매수 되나요?",
+    "source_answer": "ETF나 펀드를 매도한 자금은 디폴트옵션으로 자동매수 되지 않고 계속해서 현금으로 남습니다.\n\n따라서 ETF/펀드에 자유롭게 투자하실 수 있습니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317861",
+    "source_message_number": "28"
+  },
+  {
+    "source_id": 23,
+    "source_question": "[퇴직연금] 디폴트옵션을 지정해도 ETF/펀드 매매가 가능한가요?",
+    "source_answer": "네, 가능합니다.\n\n디폴트옵션은 가입자가 투자할 상품을 지정하지 않았을 경우 적용되는 제도로, 직접 ETF나 펀드를 매수할 경우에는 디폴트옵션이 적용되지 않습니다.\n\n단, 투자할 상품을 정하지 않은 상태에서(입금매수상품 미지정) 매수자금을 입금하면, 해당 입금액은 디폴트옵션으로 자동 매수될 수 있습니다. (2022년 12월 2일 이전 가입자의 경우에는 해당 없음)\n\n입금매수상품을 '미래에셋증권 현금성자산'으로 선택하여 비율등록을 해두면 입금하는 금액이 현금으로 처리되어 원하시는 상품(ETF등)을 직접 매수 할 수 있습니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317860",
+    "source_message_number": "27"
+  },
+  {
+    "source_id": 24,
+    "source_question": "[퇴직연금] 디폴트옵션을 지정하면 보유중인 현금이 전부 디폴트옵션으로 자동 매수되나요?",
+    "source_answer": "디폴트옵션을 지정한다고 해서 보유중인 현금이 무조건 디폴트옵션 상품으로 매수되는 것은 아닙니다.\n\n디폴트옵션 상품으로 자동 매수되는 경우는 아래 두가지에 한합니다.\n\n1. 신규가입 고객이 투자할 상품을 정하지 않은 상태에서 (입금매수 상품 지정을 하지 않고) 계좌에 입금되는 경우, 그 입금액에 한해 디폴트옵션으로 자동매수(2022년 12월 2일 前 가입자의 경우엔 해당없음)\n\n2. 보유중인 상품 중 만기가 있는 상품의(예금 등) 만기도래로 현금결제된 경우, 그 결제된 금액에 한해 디폴트옵션으로 자동 매수",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317859",
+    "source_message_number": "26"
+  },
+  {
+    "source_id": 25,
+    "source_question": "[퇴직연금] 디폴트옵션, 꼭 지정해야 하나요?",
+    "source_answer": "디폴트옵션지정은 법적 의무사항으로 모든 퇴직연금(DC/IRP) 가입자는 반드시 디폴트옵션을 지정해야 합니다. 디폴트옵션은 가입자의 퇴직연금 적립금이 방치되는 것을 예방함으로써, 퇴직연금제도의 수익률을 더욱 향상시키기 위해 도입된 제도입니다.\n\nDC/IRP적립금을 일정 기간 동안 직접 상품에 등록하지 않은 경우, 고객님께서 직접 사전에 지정해 놓은 상품으로 자동 운용됩니다.\n\n■ 디폴트옵션 지정 경로\n\nM-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 매수상품 사전 지정 > 디폴트옵션 지정\n\n홈페이지(PC) : 연금자산 > 퇴직연금/IRP매매 > 퇴직연금/IRP상품매매 > 디폴트옵션 지정\n\n▶ M-STOCK : 디폴트옵션 지정 바로가기\n\n※ DC의 경우에는 사업장 별로 규약을 개정해야만 근로자들이 디폴트옵션을 지정할 수 있으며, IRP는 규약이 없으므로 바로 디폴트옵션 지정이 가능합니다.",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317752",
+    "source_message_number": "25"
+  },
+  {
+    "source_id": 26,
+    "source_question": "[퇴직연금] 퇴직연금DC에 회사에서 적립해주는 금액이 있는데 세액공제가 되나요?",
+    "source_answer": "퇴직연금(DC)에 회사가 적립한 회사 납입분은 개인의 연말정산 대상에 포함되지 않습니다.\n\n퇴직하시면서 IRP로 지급받은 퇴직연금 수령금액 또한 개인 연말정산 대상에 포함되지 않습니다.\n\n퇴직연금 DC 또는 IRP계좌에서 세액공제를 받기를 희망하신다면 계좌별로 납입 가능 한도 등록 후 직접 추가 입금하셔야 합니다.\n\n■ 납입 한도변경 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금관리 > 연금입금관리 > 연금한도변경\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP 관리 > 퇴직연금/IRP 입금한도\n\n▶ M-STOCK : 한도변경 바로가기\n\n※ 전 금융기관 합산 연간 1,800만원 한도범위 내에서 한도 등록이 가능합니다.\n\n※ 해당화면에 미사용한도가 0원이라면 다른 연금계좌에 기등록된 한도 감액 후 한도 등록이 가능합니다.",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317750",
+    "source_message_number": "24"
+  },
+  {
+    "source_id": 27,
+    "source_question": "[퇴직연금] 퇴직연금 잔고확인은 어떻게 하나요?",
+    "source_answer": "퇴직연금 잔고는 M-STOCK 앱을 이용할 경우 ETF/리츠/인프라 화면의 보유현황은 실시간 체결기준의 평가금액으로 조회됩니다.\n\n금융상품/디폴트옵션 화면의 보유현황은 당일 결제기준 잔고입니다. (펀드는 당일기준가 적용)\n\n단, 홈페이지는 전일자 결제기준 잔고로 조회되는점 양해부탁드립니다.\n\n■ 퇴직연금/IRP잔고조회\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금> 연금계좌현황\n\n- 홈페이지(PC) :  연금자산 > MY퇴직연금 > 퇴직연금잔고\n\n▶ M-STOCK : 연금계좌현황 바로가기\n\n당사에 온라인 회원가입이 되어있지 않더라도 홈페이지에 있는 퇴직연금/IRP 간편조회서비스를 이용하여 총잔고 확인이 가능합니다.(모바일 불가)\n\n■ 퇴직연금/IRP 간편조회\n\n- 홈페이지(PC) :  연금자산 > 퇴직연금/IRP 간편조회",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2317749",
+    "source_message_number": "23"
+  },
+  {
+    "source_id": 28,
+    "source_question": "[퇴직연금] 퇴직연금 MP 구독서비스는 무엇인가요?",
+    "source_answer": "미래에셋 자산배분 포트폴리오를 카카오톡으로 정기적으로 받아 볼 수 있는 구독형 서비스입니다.\n\n 퇴직연금을 직접 투자하고 관리하는데에 어려움을 느끼는 분들, 매번 신경쓸 필요 없이 전문가의 지속적인 관리를 받고자 하는 분들, 복잡한 절차 없이 간편하게 매수하길 원하는 분들이 선택해 보실 수 있는 서비스이며, MP 구독 서비스 신청을 위한 최소 가입금액은 없습니다.\n\n 구독 신청과 취소는 자유롭게 가능하며, 구독 취소 시에도 아무런 패널티 없이 서비스를 중단할 수 있습니다.\n\n■ MP구독서비스 신청 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금포트폴리오 > 퇴직연금 MP구독서비스 > MP구독서비스 가입\n\n ▶ M-STOCK : MP 구독 신청 바로가기\n\n※ MP 구독 서비스 수수료는 무료입니다.\n\n※ 가입자가 보유한 펀드와 현금성 자산이 적거나, 위험자산 투자한도를 초과한 경우 리밸런싱이 진행되지 않을 수 있습니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2287000",
+    "source_message_number": "22"
+  },
+  {
+    "source_id": 29,
+    "source_question": "[퇴직연금] 퇴직연금/IRP 수수료가 궁금합니다",
+    "source_answer": "퇴직연금/IRP 계좌는 1년에 한번 운용, 자산관리 수수료가 부과됩니다.\n\n비대면다이렉트로 개설된 IRP계좌의 경우 수수료는 평생 무료입니다.\n\n비대면으로 개설은 했지만 관리점을 일반 영업점으로 선택한 계좌는 가입자 본인이 입금하는 금액에 대해서만 수수료 무료가 적용되며, 퇴직재원이 입금되면 퇴직재원에 대해서만 수수료가 부과 됩니다.\n\n지점을 방문하시어 개설하신 IRP계좌는 입금 금액의 재원 구분 없이 모두 수수료가 부과됩니다.\n\nDC/DB제도 도입의 경우 적립금 규모별 운용, 자산관리 수수료가 체차적용되며 장기할인도 적용 되고 있습니다.\n\n 홈페이지(PC) :  연금자산 > 사업자공시 > 운용/자산관리 수수료\n\n▶ 운용/자산관리 수수료 바로가기\n\n※ 퇴직연금/IRP에서 ETF매매시 발생하는 수수료는 없습니다.\n\n※ 2024년 9월 9일부터 모바일에서 개인형IRP 관리부점을 다이렉트점으로 변경하는 업무를 신규 오픈하였습니다.\n\n■ IRP 다이렉트 관리점 변경신청 경로\n\nM-STOCK : 왼쪽하단三메뉴 > 서비스 > 계좌/ID관리 > MY계좌관리 > IRP계좌 선택 > 계좌정보 > IRP 다이렉트 관리점 변경 신청\n\n▶ IRP 다이렉트 관리점 변경신청 바로가기",
+    "related_account_types": [
+      "IRP",
+      "DC",
+      "DB"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2279629",
+    "source_message_number": "21"
+  },
+  {
+    "source_id": 30,
+    "source_question": "[퇴직연금] IRP계좌에서 연금은 어떻게 수령하나요?",
+    "source_answer": "퇴직연금 IRP계좌에서 연금을 수령하는 방법으로는\n\n'기간지정 / 금액지정 / 연금수령한도 방식 / 비정기연금'이 있습니다.\n\n① '기간 지정' : 원하는 수령기간을 지정\n\n② '금액 지정' : 수령할 연금액을 지정\n\n③ '연금수령한도' : 매년 연금수령한도만큼 수령, 연금수령연차 6년차 초과자는 선택 불가\n\n④ '비정기연금' : 필요금액만큼 임의로 자유롭게 수령하는 방식\n\n※ 연금수령 방식에 대해서는 미리 지정해두는 방식이 아닌 연금을 개시하는 시점에 결정하시면 됩니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2279628",
+    "source_message_number": "20"
+  },
+  {
+    "source_id": 31,
+    "source_question": "[퇴직연금] 연금개시 후에도 상품을 계속 운용할 수 있나요? 연금지급 매도순위는 어떻게 되나요?",
+    "source_answer": "퇴직연금 연금개시 후에도 상품을 계속 운용하실 수 있습니다.\n\n또한, 연금 수령 중에도 상품 교체가 가능하고, 여러 상품으로 운용중인 경우 연금지급을 위한 매도순위 지정도 가능합니다.\n\n만약 매도 순위를 미지정한 경우, 운용관리계약서상 자동지정되는 매도순서가 있습니다.\n\n지급매도 순위 : 현금성자산 > 원리금보장상품(저금리에서 고금리 순) > 비원리금보장상품(펀드 등)\n\n※ ETF나 리츠는 자동 매도가 불가하므로 연금 지급 시 직접 매도해주셔야 합니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2279623",
+    "source_message_number": "19"
+  },
+  {
+    "source_id": 32,
+    "source_question": "[퇴직연금] 연금저축/IRP로 퇴직금 수령해서 연금수령 시 연간 1,500만원 초과하면 종합과세되나요?",
+    "source_answer": "퇴직금을 연금계좌로 입금하여 연금으로 수령할 경우, 종합과세가 되는 재원은 입금한 퇴직금에서 발생한 운용수익만 해당됩니다.\n\n퇴직금(원금)은 일시금으로 수령하건, 연금으로 수령하건 무조건 분리과세 되기 때문에 1,500만원을 초과하여 수령해도 종합과세 되지 않습니다.\n\n다만, 인출 순서에 따라 퇴직금 원금이 먼저 인출되고 전액 인출되면 운용수익이 인출되는데, 이 운용수익으로 수령한 세전 금액이 연간 1,500만원을 초과할 경우 전액 종합과세 처리 혹은 분리과세(16.5%) 선택할 수 있습니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2279546",
+    "source_message_number": "18"
+  },
+  {
+    "source_id": 33,
+    "source_question": "[퇴직연금] DC/IRP에서 중도인출을 할 수 있나요?",
+    "source_answer": "DC/IRP에서 중도인출을 하려면 근로자 퇴직연금 보장법에서 정한 다음의 중도인출 요건을 충족해야 합니다.\n\n1. 무주택자인 가입자가 본인 명의로 주택을 구입하는 경우\n\n2. 무주택자인 가입자가 주거를 목적으로 전/월세 보증금을 부담하는 경우. 이 경우 가입자가 하나의 사업 또는 사업장(이하 \"사업\"이라 한다)에 근로하는 동안 1회에 한함 - 개인형 IRP는 횟수 제한 없음\n\n3. 가입자 본인 또는 부양가족이 6개월 이상 요양을 필요로 하고 직전 1년간 의료비 지출 총액이 연간임금총액의 12.5%를 초과하는 경우 - 개인형 IRP는 근로소득 여부 관계없이 신청 가능함 (12.5% 초과 여부 확인하지 않음)\n\n4. 최근 5년 이내에 가입자가 [채무자 회생 및 파산에 관한 법률]에 따라 파산선고를 받은 경우 또는 개인회생절차개시 결정을 받은 경우\n\n5. 재난으로 피해를 입은 경우로서 고용노동부장관이 정하는 사유와 요건\n\n원칙적으로는 퇴직연금 일부 인출은 근로자 퇴직연금보장법에 정한 중도인출 사유만 가능합니다만, IRP에서 만 55세가 넘고 가입일로부터 5년이 지났거나, 만 55세가 넘고 퇴직소득이 IRP 계좌로 들어온 경우에는 연금개시를 하여 일부인출을 할 수 있습니다. (DC 내에서는 연금개시 불가)\n\n■ 퇴직연금 중도인출 제반서류 확인 경로\n\n홈페이지(PC) : 연금자산 > 퇴직연금 안내 > 중도인출 안내\n\n▶ 퇴직연금 중도인출 제반서류 바로가기",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2279160",
+    "source_message_number": "17"
+  },
+  {
+    "source_id": 34,
+    "source_question": "[퇴직연금] 세금차감 후 급여계좌로 퇴직금을 수령했는데, 세금 환급 가능한가요?",
+    "source_answer": "퇴직금 수령일로부터 60일 이내에 연금계좌(연금저축계좌/IRP)로 입금하면,\n\n세금을 징수했던 원천징수의무자(퇴직금제도/DB:회사, DC:연금사업자)가 퇴직소득세를 환급해 줍니다.\n\n퇴직일이 아닌 퇴직금 수령일로부터 60일 이내이며,\n\n급여계좌로 수령한 세후 퇴직금의 전액 또는 일부를 원하는 금액만큼 입금할 수 있습니다.\n\n수령한 금액 대비 입금한 금액의 비율만큼 환급 세액을 계산하여, 세후 퇴직금을 입금시켰던 연금계좌로 세금이 환급됩니다.\n\n가까운 미래에셋증권 지점을 방문하시거나, 입금하고자 하는 연금계좌의 관리점으로 연락주시면 유선 업무처리도 가능합니다.",
+    "related_account_types": [
+      "IRP",
+      "DC",
+      "DB"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2279037",
+    "source_message_number": "15"
+  },
+  {
+    "source_id": 35,
+    "source_question": "[퇴직연금] 공무원, 사학연금 가입자도 일시수령한 퇴직금을 연금계좌로 입금하여 세금 환급 가능한가요?",
+    "source_answer": "공무원이나 사립학교 선생님 등도 퇴직소득원천징수영수증이 발급된 금액이라면 퇴직금 수령일로부터 60일 이내에 수령한 금액의 전부 또는 일부 금액을 연금계좌로 입금하여 퇴직소득세를 환급받을 수 있습니다.\n\n그러나 이 때 입금할 수 있는 금액은 퇴직수당 또는 명퇴금 명목으로 수령한 금액이 아니라 퇴직소득원천징수영수증 상의 퇴직급여만 해당됩니다.\n\n이는 공무원 등 특수직역연금 가입자가 수령하는 퇴직금 등은 2002.01.01 이후 근무기간에 대한 금액만 퇴직소득으로 인정되고, 그 이전 근무기간에 대한 금액은 아예 과세소득으로 보지 않기 때문입니다.\n\n다만, 2002.01.01 전 근무기간에 대한 금액은 고객 의사에 따라 가입자부담금 명목으로 연간 1,800만원까지 입금하는 것은 가능합니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2278959",
+    "source_message_number": "14"
+  },
+  {
+    "source_id": 36,
+    "source_question": "[퇴직연금] 연간 납입한도 1,800만원 때문에 퇴직금 입금이 제한되지 않나요?",
+    "source_answer": "퇴직금은 납입한도의 적용을 받지 않으므로, 퇴직금 금액에 상관없이 입금이 가능합니다.\n\n 다만, 퇴직금이라는 근거가 필요하므로 퇴직소득원천징수영수증(DC는 연금계좌원천징수영수증)을 징구하고, 과세이연 내역을 등록해야 합니다.",
+    "related_account_types": [
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2278956",
+    "source_message_number": "13"
+  },
+  {
+    "source_id": 37,
+    "source_question": "[퇴직연금] 퇴직연금 계좌에서 ETF 매매는 어떻게 하나요?",
+    "source_answer": "홈페이지(PC), 카이로스(HTS), M-STOCK에서 가능합니다.\n\n■ 퇴직연금ETF매매 화면경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금매매 > ETF/리츠/인프라 매매\n\n- 홈페이지(PC) : 연금자산 > IRP/DC매매 > 퇴직연금/IRP 리츠/ETF/ETN\n\n- 카이로스(HTS) : 금융상품 > 연금 > [0785] 퇴직연금/IRP 매매 (리츠/ETF/ETN)\n\n ▶ M-STOCK : ETF/리츠/인프라 매매 바로가기\n\n   ※ 주문가능금액이 존재하더라도 위험자산투자한도(70%초과불가) 체크에 의하여 매수신청이 되지 않을 수 있습니다.",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238258",
+    "source_message_number": "11"
+  },
+  {
+    "source_id": 38,
+    "source_question": "[퇴직연금] 가입자 부담금 추가납입 입금한도 등록/변경은 어떻게 하나요?",
+    "source_answer": "홈페이지, 모바일(MTS), 지점유선을 통해 가능합니다.\n\n■ 한도변경\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금관리 > 연금입금관리 > 연금한도변경\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP 관리 > 퇴직연금/IRP 입금한도\n\n ▶ M-STOCK : 한도변경 바로가기\n\n※ 연금저축 납입금액 및 DC/IRP/과학기술인공제회 퇴직연금의 가입자부담금 납입한도를 합산하여 연간 1,800만원 이하로 납입한도 등록이 가능합니다.\n\n※ 해당화면에 미사용한도가 0원이라면 다른 연금계좌나 IRP에 등록된 한도 감액 후 현재한도 등록이 가능합니다.",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238256",
+    "source_message_number": "10"
+  },
+  {
+    "source_id": 39,
+    "source_question": "[퇴직연금]  IRP계좌 해지는 어떻게 하나요?",
+    "source_answer": "당사 홈페이지와 모바일에서 접수 가능하며, 관리점을 통한 유선해지도 가능합니다. IRP계좌 해지시 세액공제대상의 금액과 이익금액에 대해서는 기타소득세(16.5%)가 징수되며, 퇴직재원에 대해서는 퇴직소득세가 징수됩니다.\n\n직접 납입한 금액 중 세액공제를 받지 않은 금액이 있을 경우 국세청 서류 '연금보험료등 소득/세액공제확인서' 서류를 지참 후 가까운 영업점을 방문해 주시거나 모바일M-STOCK로 접수해주셔야 합니다.\n\n과세확정이 필요없는 경우 관리점을 통한 유선해지는 약정계좌가 등록되어 있어야 유선이체가 가능합니다. 약정계좌 미등록시 당사에 사용등록된 보안매체(OTP, 보안카드)가 있다면 해지 후 직접출금도 가능합니다.\n\n■ IRP해지경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금관리 > 연금지급관리 > 연금개시/해지\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP관리 > IRP해지신청\n\n ▶ M-STOCK : 연금 개시/해지 바로가기\n\n※ 홈페이지에서 해지신청을 하시면 과세확정을 하지 않고 바로 해지되어 신청하신 계좌로 지급되니 과세확정이 필요한경우 반드시 국세청 서류 '연금보험료등 소득/세액공제확인서' 서류를 지참 후 가까운 영업점을 방문해 주시거나 모바일M-STOCK로 접수해주셔야 합니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238255",
+    "source_message_number": "9"
+  },
+  {
+    "source_id": 40,
+    "source_question": "[퇴직연금] 상품매매내역 조회는 어떻게 하나요?",
+    "source_answer": "홈페이지, 모바일에서 확인이 가능합니다.\n\n■ 퇴직연금매매내역조회 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금계좌현황 > 금융상품/디폴트옵션 > 신청/매매내역\n\n- 홈페이지(PC) : 연금자산 > IRP/DC매매 > 퇴직연금상품매매 > 매매내역조회\n\n ▶ M-STOCK : 신청/매매내역 바로가기",
+    "related_account_types": [
+      "IRP",
+      "DC"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238254",
+    "source_message_number": "8"
+  },
+  {
+    "source_id": 41,
+    "source_question": "[퇴직연금] 운용중인 상품변경은 어떻게 하나요?",
+    "source_answer": "홈페이지, 모바일에서 변경 가능합니다.\n\n■ 현재 운용중인 상품을 매매하는 방법\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금매매 > 금융상품 매매\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금매매 > ETF/리츠/인프라 매매\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP매매 > 퇴직연금/IRP 상품매매 > 상품매수,상품매도\n\n▶ M-STOCK : 금융상품 매매 바로가기\n\n▶ M-STOCK : ETF/리츠/인프라 매매 바로가기\n\n■ 향후 입금되는 부담금으로 매수 될 상품 변경 방법 (ETF/리츠/ETN 및 저축은행예금 등록 불가)\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 매수상품 사전 지정 > 입금매수상품 지정\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP매매 > 퇴직연금/IRP 상품매매 > 정기입금매수예약\n\n▶ M-STOCK : 입금매수상품 지정 바로가기",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238233",
+    "source_message_number": "7"
+  },
+  {
+    "source_id": 42,
+    "source_question": "[퇴직연금] 회사에서 입금해준 퇴직금 입금내역은 어떻게 확인하나요?",
+    "source_answer": "퇴직금 입금 내역은 홈페이지(PC), M-STOCK을 통해서 퇴직연금 거래내역으로 확인이 가능합니다.\n\n■ 퇴직연금 거래내역 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 자산 뱅킹 > MY자산 > 거래내역 > 퇴직연금별 > 구분값 선택 후 조회\n\n- 홈페이지(PC) : 연금자산 > MY퇴직연금 > 퇴직연금잔고 > 거래내역조회 > 거래구분('입금' 선택)\n\n▶ M-STOCK : 거래내역 바로가기",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238232",
+    "source_message_number": "6"
+  },
+  {
+    "source_id": 43,
+    "source_question": "[퇴직연금] 퇴직연금 제도가입확인서를 발급 받고 싶습니다. 어떻게 발급 받을 수 있나요?",
+    "source_answer": "■  가입자확인서 발급경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금 > 연금계좌현황 > 가입확인서(상단계좌번호를 IRP로 선택)\n\n- 홈페이지(PC) : 연금자산 > MY퇴직연금 > 가입정보확인 및 발급 > 증명서발급 > 퇴직연금 제도가입확인서\n\n▶ M-STOCK : 가입확인서 바로가기\n\n※유선발급 가능",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238225",
+    "source_message_number": "5"
+  },
+  {
+    "source_id": 44,
+    "source_question": "[퇴직연금] 다른 금융회사 IRP계좌를 미래에셋증권으로 옮길 수 있나요?",
+    "source_answer": "지점을 방문, 또는 비대면 방식으로 퇴직연금 개인IRP 계약이전이 가능합니다.\n\nIRP계좌를 신규로 개설하여 최초 입금 전에 계약이전 접수를 하면서 가입일 선택시 '이전하는 계좌의 가입일'을 선택하면 타사IRP가입일을 그대로 이전받을 수 있습니다\n\n■ IRP이전신청 경로\n\n- M-STOCK : 왼쪽하단三메뉴 > 연금 > 연금> 타사 연금가져오기/실물이전 > IRP실물이전 or IRP현금이전 선택\n\n- 홈페이지(PC) : 연금자산 > 퇴직연금/IRP관리 > IRP이전신청\n\n※ 홈페이지는 '현금이전'만 가능함\n\n▶ M-STOCK : 타사 연금가져오기 바로가기\n\n※ 신규개설된 IRP계좌에 계약이전을 신청하신 경우 이전이 완료되기전까지 입금이 제한됩니다.\n\n※ 실물이전과 현금이전 선택이 가능합니다.",
+    "related_account_types": [
+      "IRP"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238222",
+    "source_message_number": "4"
+  },
+  {
+    "source_id": 45,
+    "source_question": "[퇴직연금] 퇴직연금도 압류 대상인가요?",
+    "source_answer": "퇴직연금 제도 (DB,DC,기업형IRP,개인형IRP)의 적립금,근로자 추가부담금, 운용수익은 전액 압류 금지입니다.\n\n다만, 퇴직연금을 일반 예금계좌로 지급받거나, 퇴직연금을 IRP계좌로 지급 받은 후 IRP계좌를 해지하여 일반 예금계좌로 이전한 경우는 전액 압류 대상입니다.",
+    "related_account_types": [
+      "IRP",
+      "DC",
+      "DB"
+    ],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238221",
+    "source_message_number": "3"
+  },
+  {
+    "source_id": 46,
+    "source_question": "[퇴직연금] 중도인출을 신청하였습니다. 언제 받을 수 있나요?",
+    "source_answer": "중도인출 신청 증빙 서류가 고객님의 회사로부터 미래에셋증권에 접수되면 담당자가 검토 후 지급접수를 해야 지급일 확인이 가능합니다.\n\n추가 서류가 필요한 경우 근무하시는 회사의 퇴직연금 담당자를 통해 연락드리고 있습니다.\n\n중도인출 신청 후 시간이 많이 지났음에도 중도인출 금액이 지급되고 있지 않다면 연금자산관리센터1588-5577(08:00~17:00)를 통해 확인해주시기 바랍니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238220",
+    "source_message_number": "2"
+  },
+  {
+    "source_id": 47,
+    "source_question": "[퇴직연금] 퇴사하였습니다. 퇴직연금은 언제 받을 수 있나요?",
+    "source_answer": "퇴직하신 회사로 부터 실제 근무하신 일자까지의 잔여 사용자부담금(퇴직금)이 당사로 입금된 뒤 퇴직급여 신청서 서류가 미래에셋증권 해당 부서에 도착이 되면 지급부서에서 확인 후 지급이 될 수 있도록 진행 됩니다.\n\n서류접수가 되거나 지급이 되면 서류접수/지급된 다음 영업일에 당사 개인정보에 등록되어 있는 고객님의 휴대전화번호로 지급결과 SMS발송이 됩니다. (서류가 도착되어 지급승인이 된 경우 연금자산관리센터1588-5577(08:00~17:00)에서도 지급일정 확인이 가능합니다.)\n\n서류접수 SMS를 못 받았거나 일정이 늦어지는 경우 퇴직하신 회사로 문의하셔서 위와 같은 처리가 어디까지 진행 되었는지 확인해 보시기 바랍니다.",
+    "related_account_types": [],
+    "source_url": "https://securities.miraeasset.com/bbs/board/message/list.do?categoryId=1296&messageCategoryId=189",
+    "source_message_id": "2238219",
+    "source_message_number": "1"
+  }
+]
