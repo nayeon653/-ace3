@@ -21,6 +21,9 @@ CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME = "calculate_pension_withdrawal_lim
 CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME = "calculate_pension_tax_credit"
 CALCULATE_PENSION_INCOME_TAX_TOOL_NAME = "calculate_pension_income_tax"
 CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME = "calculate_non_pension_withdrawal_tax"
+CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME = (
+    "calculate_deferred_retirement_withdrawal_tax"
+)
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
 
@@ -399,6 +402,91 @@ def create_non_pension_withdrawal_tax_tool() -> BaseTool:
         )
 
     return calculate_non_pension_withdrawal_tax
+
+
+def create_deferred_retirement_withdrawal_tax_tool() -> BaseTool:
+    """Tax/Payout Agent용 이연퇴직소득세 납부·감면 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
+        description=(
+            "연금·연금외수령 구분과 실제수령연차에 따라 해당 인출분에 배분된 "
+            "이연퇴직소득세의 납부·감면 비율과 금액을 계산한다. 선택 입력은 값과 "
+            "출처를 함께 전달하거나 함께 생략한다."
+        ),
+    )
+    async def calculate_deferred_retirement_withdrawal_tax(
+        receipt_type: Annotated[
+            Literal["pension", "non_pension"],
+            Field(description="이연퇴직소득의 연금 또는 연금외수령 구분"),
+        ],
+        receipt_type_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="연금수령 또는 연금외수령 의미가 있는 원문 구절",
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+        actual_pension_receipt_year: Annotated[
+            int | None,
+            Field(ge=1, description="실제로 연금을 수령한 누적 연차"),
+        ] = None,
+        actual_pension_receipt_year_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="실제수령연차와 정확한 년차 값이 있는 원문 구절",
+            ),
+        ] = None,
+        allocated_deferred_retirement_tax_krw: Annotated[
+            Decimal | None,
+            Field(ge=0, description="해당 인출분에 배분된 이연퇴직소득세(원)"),
+        ] = None,
+        allocated_deferred_retirement_tax_krw_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="해당 인출분 배분 의미와 퇴직소득세 금액이 있는 원문 구절",
+            ),
+        ] = None,
+    ) -> Command | str:
+        optional_entries: tuple[tuple[str, Any, str | None], ...] = (
+            (
+                "actual_pension_receipt_year",
+                actual_pension_receipt_year,
+                actual_pension_receipt_year_source,
+            ),
+            (
+                "allocated_deferred_retirement_tax_krw",
+                allocated_deferred_retirement_tax_krw,
+                allocated_deferred_retirement_tax_krw_source,
+            ),
+        )
+        inputs: dict[str, Any] = {"receipt_type": receipt_type}
+        input_sources = {"receipt_type": receipt_type_source}
+        for field, value, source in optional_entries:
+            if (value is None) != (source is None):
+                return json.dumps(
+                    {"error": "선택 입력값과 출처는 함께 제공해야 합니다."},
+                    ensure_ascii=False,
+                )
+            if value is not None:
+                inputs[field] = value
+                input_sources[field] = cast(str, source)
+
+        return _execute_calculation(
+            calculator_id="deferred_retirement_withdrawal_tax",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_deferred_retirement_withdrawal_tax
 
 
 def create_fund_standard_price_tool() -> BaseTool:
