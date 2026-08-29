@@ -15,6 +15,7 @@ from pension_agent.rules.calculators.fund_var_risk import classify_var_risk_grad
 
 def test_calculator_map_contains_registered_set() -> None:
     assert CALCULATORS.keys() == {
+        "deferred_retirement_withdrawal_tax",
         "fund_standard_price",
         "fund_var_risk",
         "non_pension_withdrawal_tax",
