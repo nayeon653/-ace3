@@ -44,6 +44,7 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | `pension_tax_credit` | 일반 납입 한도(연금저축 600만원·통합 900만원), 소득 경계 16.5%/13.2%, ISA 추가공제(전환액 10%·동일 만기 누적 300만원) | `doc41.docx` 1쪽, `doc6.docx` 3쪽 |
 | `pension_income_tax` | 일반 연금수령·부득이한 사유 인출의 연령별 세율과 연간 사적연금소득 1,500만원 경계 | `doc38.docx` `#/tables/0`, `#/texts/4`, `#/texts/5`, `#/texts/14`, `#/texts/15`; `doc20.docx` `#/texts/53`, `#/tables/2` |
 | `non_pension_withdrawal_tax` | 세액공제 원금·운용수익의 연금외수령 16.5% | `doc39.docx` `#/texts/22`, `#/tables/0` |
+| `deferred_retirement_withdrawal_tax` | 이연퇴직소득의 연금수령 실제수령연차별 납부·감면 비율과 연금외수령 비율 | `doc39.docx` `#/texts/18`, `#/tables/0`; 실제수령연차 정의: `doc40.docx` `#/texts/13` |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 
@@ -163,6 +164,35 @@ Tool provenance에서 `target_taxable_amount_krw`는 현재·이번·해당 인�
 종합과세 또는 16.5% 분리과세 선택 조건을 강제한다. 금액이 생략된 단순 세율 질문에는
 금액 누락 조건을 추가하지 않는다.
 
+### `deferred_retirement_withdrawal_tax` 계약
+
+**필수 입력**: `receipt_type`(`pension` 또는 `non_pension`). `pension`이면 1 이상의 정수인
+`actual_pension_receipt_year`도 필수이고, `non_pension`이면 이 필드를 전달할 수 없다.
+`actual_pension_receipt_year`는 실제로 연금을 수령한 연도의 누적 횟수다. 같은 해 여러 번
+수령해도 한 해로 세고 수령하지 않은 연도는 누적하지 않는다. 연금수령한도 계산기의
+`pension_year`와 의미가 다르며 서로 대신 사용하거나 함께 전달할 수 없다.
+
+**선택 입력**: `allocated_deferred_retirement_tax_krw`(해당 인출분에 이미 배분된
+이연퇴직소득세). 생략하면 비율만 반환하고 명시적 `0`은 확인된 배분세액으로 보존해
+납부세액과 감면세액을 모두 0원으로 반환한다. 명시적 `null`, 음수와 정의되지 않은 extra
+입력은 거부한다.
+
+**납부·감면 비율**: 연금수령 실제수령 1~10년은 70%/30%, 11~20년은 60%/40%, 21년
+이상은 50%/50%다. 연금외수령은 100%/0%다. `payable_ratio_percent`와
+`reduction_ratio_percent`는 항상 반환한다. 배분세액이 있을 때만
+`tax_payable_krw = 배분세액 × 납부 비율`,
+`tax_reduction_krw = 배분세액 - tax_payable_krw`를 반환한다. 계좌 전체 퇴직소득세의
+원액 산출, 부분 인출분 안분, 인출 원금과 세후 인출액 계산은 범위 밖이다.
+
+**책임과 실행 경계**: Rules는 확정된 입력의 교차검증과 `Decimal` 산술만 수행하고 문서에
+없는 반올림·절사를 적용하지 않는다. Tool은 값/source 쌍을 요구하며 수령 유형,
+실제수령연차와 해당 인출분에 배분된 세액의 의미·값이 원문 같은 구절에 대응하는지
+검증하고 출처를 보존한다. Agent는 검색 근거에서 실제수령연차와 배분세액을 확인하고
+이연퇴직소득 재원을 다른 재원 계산기와 혼용하지 않는다. 이 Tool은 실행당 최대 한 번만
+호출하며 다른 계산 Tool과 동시에 실행하지 않고, 계산 뒤에는 submit만 허용한다. 납부·감면
+세액 질문인데 배분세액이 없으면 Agent가 조건부 결과와 확인 필요 조건을 제출하지만 단순
+비율 질문은 비율만으로 확정할 수 있다.
+
 ## 실행 제한과 오류
 
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
@@ -193,7 +223,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 
 | 소비자 | 허용 계산기 |
 |---|---|
-| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax` |
+| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax` |
 | Product Agent | `fund_standard_price`, `fund_var_risk` |
 | Policy Agent | 없음 |
 | Main Supervisor | 직접 호출 금지 |
@@ -214,6 +244,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 - `tests/unit/rules/test_initial_calculators.py`
 - `tests/unit/rules/test_pension_tax_credit.py`
 - `tests/unit/rules/test_pension_income_tax.py`
+- `tests/unit/rules/test_deferred_retirement_withdrawal_tax.py`
 - `tests/unit/agent/test_calculation_tools.py`
 - `tests/unit/agent/test_domain_agents.py`
 - `tests/test_agent_import_boundaries.py`
