@@ -2003,7 +2003,10 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
     assert "1200000.0 KRW" in result["decision"]["conclusion"]
     assert "999" not in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
-    assert result["calculations"][0]["outputs"] == {"withdrawal_limit": "1200000.0"}
+    assert result["calculations"][0]["outputs"] == {
+        "withdrawal_limit": "1200000.0",
+        "limit_applies": True,
+    }
     assert result["calculations"][0]["input_sources"]["account_valuation_krw"] == {
         "origin": "evidence",
         "text": "평가액 1천만원",
