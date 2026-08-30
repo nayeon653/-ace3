@@ -93,6 +93,17 @@ _PENSION_INSTALLMENT_SOURCE_FIELDS = {
     "remaining_units",
     "standard_price_per_1000_units_krw",
 }
+_PENSION_WITHDRAWAL_AMOUNT_SOURCE_FIELDS = {
+    "requested_withdrawal_krw",
+    "tax_free_source_balance_krw",
+    "deferred_retirement_source_balance_krw",
+    "credited_and_earnings_source_balance_krw",
+    "pension_treated_withdrawal_krw",
+    "non_pension_treated_withdrawal_krw",
+    "annual_private_pension_taxable_income_krw",
+    "pension_treated_allocated_deferred_retirement_tax_krw",
+    "non_pension_treated_allocated_deferred_retirement_tax_krw",
+}
 
 
 def validated_input_sources(
@@ -122,6 +133,13 @@ def validated_input_sources(
         if field in _PENSION_INSTALLMENT_SOURCE_FIELDS
     ]
     if len(installment_sources) != len(set(installment_sources)):
+        return None
+    withdrawal_sources = [
+        _normalize_text(input_sources[field])
+        for field in inputs
+        if field in _PENSION_WITHDRAWAL_AMOUNT_SOURCE_FIELDS
+    ]
+    if len(withdrawal_sources) != len(set(withdrawal_sources)):
         return None
     validated: dict[str, CalculationInputSource] = {}
     for field, value in inputs.items():
@@ -161,6 +179,30 @@ def validated_input_sources(
                 return None
         elif field == "allocated_deferred_retirement_tax_krw":
             if not _matches_allocated_deferred_retirement_tax_source(source, value):
+                return None
+        elif field == "requested_withdrawal_krw":
+            if not _matches_requested_withdrawal_source(source, value):
+                return None
+        elif field == "tax_free_source_balance_krw":
+            if not _matches_withdrawal_balance_source(source, value, "tax_free"):
+                return None
+        elif field == "deferred_retirement_source_balance_krw":
+            if not _matches_withdrawal_balance_source(source, value, "deferred_retirement"):
+                return None
+        elif field == "credited_and_earnings_source_balance_krw":
+            if not _matches_withdrawal_balance_source(source, value, "credited_and_earnings"):
+                return None
+        elif field == "pension_treated_withdrawal_krw":
+            if not _matches_treated_withdrawal_source(source, value, pension=True):
+                return None
+        elif field == "non_pension_treated_withdrawal_krw":
+            if not _matches_treated_withdrawal_source(source, value, pension=False):
+                return None
+        elif field == "pension_treated_allocated_deferred_retirement_tax_krw":
+            if not _matches_treated_allocated_tax_source(source, value, pension=True):
+                return None
+        elif field == "non_pension_treated_allocated_deferred_retirement_tax_krw":
+            if not _matches_treated_allocated_tax_source(source, value, pension=False):
                 return None
         elif field == "recipient_age":
             if not _matches_recipient_age_source(value, source):
@@ -340,6 +382,66 @@ def _matches_allocated_deferred_retirement_tax_source(source: str, value: Any) -
         ("이연퇴직소득세", "퇴직소득세"),
     )
     return "계좌 전체" not in source and _matches_grouped_money_source(groups, source, value)
+
+
+def _matches_requested_withdrawal_source(source: str, value: Any) -> bool:
+    return any(
+        any(
+            label in phrase
+            for label in ("현재 인출 요청액", "이번 인출 요청액", "인출 요청액", "찾을 금액")
+        )
+        and not any(label in phrase for label in ("잔액", "연간", "합계", "과세대상"))
+        and "원" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_withdrawal_balance_source(source: str, value: Any, source_type: str) -> bool:
+    labels = {
+        "tax_free": ("세액공제 미적용 원금", "비과세 재원"),
+        "deferred_retirement": ("이연퇴직소득", "퇴직금 재원"),
+        "credited_and_earnings": ("세액공제 받은 원금·운용수익", "세액공제 받은 원금과 운용수익"),
+    }[source_type]
+    return any(
+        any(label in phrase for label in labels)
+        and "현재" in phrase
+        and "잔액" in phrase
+        and not any(label in phrase for label in ("이번 인출", "현재 인출액", "요청액"))
+        and "원" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_treated_withdrawal_source(source: str, value: Any, *, pension: bool) -> bool:
+    return any(
+        any(label in phrase for label in ("현재 요청", "이번 인출", "현재 인출"))
+        and (
+            (pension and "연금수령" in phrase and "연금외수령" not in phrase)
+            or (not pension and "연금외수령" in phrase)
+        )
+        and any(label in phrase for label in ("처리 금액", "처리되는 금액", "처리액"))
+        and not any(label in phrase for label in ("연간", "합계", "잔액", "과세대상"))
+        and "원" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_treated_allocated_tax_source(source: str, value: Any, *, pension: bool) -> bool:
+    return any(
+        any(label in phrase for label in ("해당 인출분", "배분된"))
+        and any(label in phrase for label in ("이연퇴직소득세", "퇴직소득세"))
+        and (
+            (pension and "연금수령 처리" in phrase and "연금외수령 처리" not in phrase)
+            or (not pension and "연금외수령 처리" in phrase)
+        )
+        and "계좌 전체" not in phrase
+        and "원" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
 
 
 def _matches_recipient_age_source(value: Any, source: str) -> bool:

@@ -12,7 +12,9 @@ from pension_agent.agent.calculation.tools import (
     CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
     CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
     CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
+    CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+    CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
     create_deferred_retirement_withdrawal_tax_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
@@ -22,7 +24,9 @@ from pension_agent.agent.calculation.tools import (
     create_pension_period_installment_tool,
     create_pension_tax_credit_tool,
     create_pension_unit_installment_tool,
+    create_pension_withdrawal_allocation_tool,
     create_pension_withdrawal_limit_tool,
+    create_pension_withdrawal_tax_breakdown_tool,
 )
 
 __all__ = [
@@ -35,7 +39,9 @@ __all__ = [
     "CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME",
     "CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME",
     "CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME",
+    "CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME",
     "CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME",
+    "CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME",
     "calculation_evidence_chunk_ids",
     "create_deferred_retirement_withdrawal_tax_tool",
     "create_fund_standard_price_tool",
@@ -46,6 +52,8 @@ __all__ = [
     "create_pension_period_installment_tool",
     "create_pension_tax_credit_tool",
     "create_pension_unit_installment_tool",
+    "create_pension_withdrawal_allocation_tool",
     "create_pension_withdrawal_limit_tool",
+    "create_pension_withdrawal_tax_breakdown_tool",
     "format_calculation_summary",
 ]

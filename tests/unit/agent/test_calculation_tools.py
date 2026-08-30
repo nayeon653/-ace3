@@ -17,7 +17,9 @@ from pension_agent.agent.calculation import (
     create_pension_period_installment_tool,
     create_pension_tax_credit_tool,
     create_pension_unit_installment_tool,
+    create_pension_withdrawal_allocation_tool,
     create_pension_withdrawal_limit_tool,
+    create_pension_withdrawal_tax_breakdown_tool,
     format_calculation_summary,
 )
 from pension_agent.agent.calculation.input_sources import validated_input_sources
@@ -1255,3 +1257,363 @@ def test_calculation_summary_preserves_verified_values() -> None:
 
     assert "31.62277660168379331998893544 %" in summary
     assert "2등급 (높은 위험)" in summary
+
+
+_WITHDRAWAL_VALUES = {
+    "requested_withdrawal_krw": Decimal(6_000_000),
+    "tax_free_source_balance_krw": Decimal(1_000_000),
+    "deferred_retirement_source_balance_krw": Decimal(2_000_000),
+    "credited_and_earnings_source_balance_krw": Decimal(5_000_000),
+}
+_WITHDRAWAL_SOURCES = {
+    "requested_withdrawal_krw_source": "현재 인출 요청액 600만원",
+    "tax_free_source_balance_krw_source": "세액공제 미적용 원금 비과세 재원의 현재 잔액 100만원",
+    "deferred_retirement_source_balance_krw_source": "이연퇴직소득 퇴직금 재원의 현재 잔액 200만원",
+    "credited_and_earnings_source_balance_krw_source": (
+        "세액공제 받은 원금·운용수익 재원의 현재 잔액 500만원"
+    ),
+}
+_BREAKDOWN_VALUES = {
+    **_WITHDRAWAL_VALUES,
+    "pension_treated_withdrawal_krw": Decimal(4_000_000),
+    "non_pension_treated_withdrawal_krw": Decimal(2_000_000),
+}
+_BREAKDOWN_SOURCES = {
+    **_WITHDRAWAL_SOURCES,
+    "pension_treated_withdrawal_krw_source": "현재 요청 중 연금수령으로 처리되는 금액 400만원",
+    "non_pension_treated_withdrawal_krw_source": (
+        "현재 요청 중 연금외수령으로 처리되는 금액 200만원"
+    ),
+}
+
+
+def _withdrawal_runtime(*sources: str) -> SimpleNamespace:
+    content = "; ".join(sources)
+    return _runtime(question=content, chunk_content=content)
+
+
+def _breakdown_optional(annual: Decimal | None = Decimal(10_000_000)) -> dict[str, Any]:
+    optional: dict[str, Any] = {
+        "actual_pension_receipt_year": 10,
+        "actual_pension_receipt_year_source": "실제수령연차 10년차",
+        "recipient_age": 65,
+        "recipient_age_source": "만 65세",
+        "is_lifetime_annuity": False,
+        "is_lifetime_annuity_source": "종신연금에 해당하지 않음",
+        "pension_treated_allocated_deferred_retirement_tax_krw": Decimal(1_000_000),
+        "pension_treated_allocated_deferred_retirement_tax_krw_source": (
+            "해당 인출분에 배분된 연금수령 처리 이연퇴직소득세 100만원"
+        ),
+    }
+    if annual is not None:
+        optional["annual_private_pension_taxable_income_krw"] = annual
+        optional["annual_private_pension_taxable_income_krw_source"] = (
+            f"해당 연도 연간 사적연금 과세대상 합계 {annual}원"
+        )
+    return optional
+
+
+def _optional_sources(optional: dict[str, Any]) -> list[str]:
+    return [str(value) for key, value in optional.items() if key.endswith("_source")]
+
+
+@pytest.mark.anyio
+async def test_withdrawal_allocation_tool_calculates_and_preserves_sources() -> None:
+    result = await create_pension_withdrawal_allocation_tool().coroutine(
+        **_WITHDRAWAL_VALUES,
+        **_WITHDRAWAL_SOURCES,
+        runtime=_withdrawal_runtime(*_WITHDRAWAL_SOURCES.values()),
+    )
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "pension_withdrawal_allocation"
+    assert calculation["outputs"]["tax_free_withdrawal_krw"] == "1000000"
+    assert calculation["outputs"]["credited_and_earnings_withdrawal_krw"] == "3000000"
+    assert set(calculation["input_sources"]) == set(_WITHDRAWAL_VALUES)
+
+
+@pytest.mark.anyio
+async def test_withdrawal_allocation_tool_preserves_zero_request() -> None:
+    values = {**_WITHDRAWAL_VALUES, "requested_withdrawal_krw": Decimal(0)}
+    sources = {**_WITHDRAWAL_SOURCES, "requested_withdrawal_krw_source": "현재 인출 요청액 0원"}
+    result = await create_pension_withdrawal_allocation_tool().coroutine(
+        **values,
+        **sources,
+        runtime=_withdrawal_runtime(*sources.values()),
+    )
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"]["tax_free_withdrawal_krw"] == "0"
+
+
+@pytest.mark.anyio
+async def test_withdrawal_allocation_tool_returns_rules_error_above_balance() -> None:
+    values = {**_WITHDRAWAL_VALUES, "requested_withdrawal_krw": Decimal(9_000_000)}
+    sources = {**_WITHDRAWAL_SOURCES, "requested_withdrawal_krw_source": "현재 인출 요청액 900만원"}
+    result = await create_pension_withdrawal_allocation_tool().coroutine(
+        **values,
+        **sources,
+        runtime=_withdrawal_runtime(*sources.values()),
+    )
+    assert isinstance(result, str)
+    assert "error" in result
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_source"),
+    [
+        ("requested_withdrawal_krw_source", "현재 비과세 재원 잔액 600만원"),
+        ("tax_free_source_balance_krw_source", "현재 인출 요청액 100만원"),
+        ("deferred_retirement_source_balance_krw_source", "비과세 재원의 현재 잔액 200만원"),
+        ("credited_and_earnings_source_balance_krw_source", "이연퇴직소득 현재 잔액 500만원"),
+    ],
+)
+@pytest.mark.anyio
+async def test_withdrawal_allocation_tool_rejects_misassigned_meaning(
+    field: str, bad_source: str
+) -> None:
+    sources = {**_WITHDRAWAL_SOURCES, field: bad_source}
+    result = await create_pension_withdrawal_allocation_tool().coroutine(
+        **_WITHDRAWAL_VALUES,
+        **sources,
+        runtime=_withdrawal_runtime(*sources.values()),
+    )
+    assert isinstance(result, str)
+    assert "error" in result
+
+
+@pytest.mark.anyio
+async def test_withdrawal_allocation_tool_rejects_reused_or_multi_value_source() -> None:
+    reused = {
+        **_WITHDRAWAL_SOURCES,
+        "deferred_retirement_source_balance_krw_source": (
+            _WITHDRAWAL_SOURCES["tax_free_source_balance_krw_source"]
+        ),
+    }
+    result = await create_pension_withdrawal_allocation_tool().coroutine(
+        **_WITHDRAWAL_VALUES,
+        **reused,
+        runtime=_withdrawal_runtime(*reused.values()),
+    )
+    assert isinstance(result, str)
+
+    combined = {
+        **_WITHDRAWAL_SOURCES,
+        "tax_free_source_balance_krw_source": (
+            "세액공제 미적용 원금 비과세 재원의 현재 잔액 100만원과 200만원"
+        ),
+    }
+    result = await create_pension_withdrawal_allocation_tool().coroutine(
+        **_WITHDRAWAL_VALUES,
+        **combined,
+        runtime=_withdrawal_runtime(*combined.values()),
+    )
+    assert isinstance(result, str)
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_tool_calculates_all_paths() -> None:
+    optional = _breakdown_optional()
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        **optional,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "pension_withdrawal_tax_breakdown"
+    assert calculation["outputs"]["tax_free_pension_tax_krw"] == "0"
+    assert calculation["outputs"]["current_withdrawal_tax_krw"] == "1085000.000"
+    assert set(calculation["input_sources"]) == set(calculation["inputs"])
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_preserves_unknown_annual_nulls() -> None:
+    optional = _breakdown_optional(annual=None)
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        **optional,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, Command)
+    outputs = result.update["calculations"][0]["outputs"]
+    assert outputs["credited_and_earnings_pension_tax_krw"] is None
+    assert outputs["current_withdrawal_tax_krw"] is None
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_preserves_separate_tax_option() -> None:
+    optional = _breakdown_optional(Decimal(15_000_001))
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        **optional,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, Command)
+    outputs = result.update["calculations"][0]["outputs"]
+    assert outputs["current_withdrawal_tax_krw"] is None
+    assert outputs["annual_private_pension_separate_tax_option_tax_krw"] == "2475000.165"
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_rejects_optional_half_pair_and_rules_omission() -> None:
+    half_pair = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        recipient_age=65,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values()),
+    )
+    assert isinstance(half_pair, str)
+
+    missing = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values()),
+    )
+    assert isinstance(missing, str)
+    assert "error" in missing
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "source"),
+    [
+        ("actual_pension_receipt_year", 10, "연금수령연차 10년차"),
+        ("recipient_age", 55, "수령자 나이 55세 미만"),
+        ("is_lifetime_annuity", True, "종신연금에 해당하지 않음"),
+    ],
+)
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_reuses_strict_existing_provenance(
+    field: str, value: Any, source: str
+) -> None:
+    optional = _breakdown_optional()
+    optional[field] = value
+    optional[f"{field}_source"] = source
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        **optional,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, str)
+    assert "error" in result
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_rejects_treatment_mixup_and_annual_reuse() -> None:
+    mixed = {
+        **_BREAKDOWN_SOURCES,
+        "pension_treated_withdrawal_krw_source": (
+            _BREAKDOWN_SOURCES["non_pension_treated_withdrawal_krw_source"]
+        ),
+    }
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **mixed,
+        runtime=_withdrawal_runtime(*mixed.values()),
+    )
+    assert isinstance(result, str)
+
+    optional = _breakdown_optional()
+    optional["annual_private_pension_taxable_income_krw"] = Decimal(4_000_000)
+    optional["annual_private_pension_taxable_income_krw_source"] = _BREAKDOWN_SOURCES[
+        "pension_treated_withdrawal_krw_source"
+    ]
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        **optional,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, str)
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_rejects_whole_account_allocated_tax() -> None:
+    optional = _breakdown_optional()
+    optional["pension_treated_allocated_deferred_retirement_tax_krw_source"] = (
+        "계좌 전체 연금수령 처리 이연퇴직소득세 100만원"
+    )
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **_BREAKDOWN_VALUES,
+        **_BREAKDOWN_SOURCES,
+        **optional,
+        runtime=_withdrawal_runtime(*_BREAKDOWN_SOURCES.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, str)
+    assert "error" in result
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_returns_rules_error_for_treatment_sum() -> None:
+    optional = _breakdown_optional()
+    values = {
+        **_BREAKDOWN_VALUES,
+        "non_pension_treated_withdrawal_krw": Decimal(1_000_000),
+    }
+    sources = {
+        **_BREAKDOWN_SOURCES,
+        "non_pension_treated_withdrawal_krw_source": (
+            "현재 요청 중 연금외수령으로 처리되는 금액 100만원"
+        ),
+    }
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **values,
+        **sources,
+        **optional,
+        runtime=_withdrawal_runtime(*sources.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, str)
+    assert "error" in result
+
+
+@pytest.mark.anyio
+async def test_withdrawal_tax_breakdown_separates_two_allocated_tax_sources() -> None:
+    values = {
+        **_BREAKDOWN_VALUES,
+        "requested_withdrawal_krw": Decimal(4_000_000),
+        "pension_treated_withdrawal_krw": Decimal(2_000_000),
+        "non_pension_treated_withdrawal_krw": Decimal(2_000_000),
+    }
+    sources = {
+        **_BREAKDOWN_SOURCES,
+        "requested_withdrawal_krw_source": "현재 인출 요청액 400만원",
+        "pension_treated_withdrawal_krw_source": (
+            "현재 요청 중 연금수령으로 처리되는 금액 200만원"
+        ),
+    }
+    optional: dict[str, Any] = {
+        "actual_pension_receipt_year": 10,
+        "actual_pension_receipt_year_source": "실제수령연차 10년차",
+        "pension_treated_allocated_deferred_retirement_tax_krw": Decimal(500_000),
+        "pension_treated_allocated_deferred_retirement_tax_krw_source": (
+            "해당 인출분에 배분된 연금수령 처리 이연퇴직소득세 50만원"
+        ),
+        "non_pension_treated_allocated_deferred_retirement_tax_krw": Decimal(600_000),
+        "non_pension_treated_allocated_deferred_retirement_tax_krw_source": (
+            "해당 인출분에 배분된 연금외수령 처리 이연퇴직소득세 60만원"
+        ),
+    }
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **values,
+        **sources,
+        **optional,
+        runtime=_withdrawal_runtime(*sources.values(), *_optional_sources(optional)),
+    )
+    assert isinstance(result, Command)
+
+    duplicated = dict(optional)
+    duplicated["non_pension_treated_allocated_deferred_retirement_tax_krw"] = Decimal(500_000)
+    duplicated["non_pension_treated_allocated_deferred_retirement_tax_krw_source"] = optional[
+        "pension_treated_allocated_deferred_retirement_tax_krw_source"
+    ]
+    result = await create_pension_withdrawal_tax_breakdown_tool().coroutine(
+        **values,
+        **sources,
+        **duplicated,
+        runtime=_withdrawal_runtime(*sources.values(), *_optional_sources(duplicated)),
+    )
+    assert isinstance(result, str)
+    assert "error" in result
