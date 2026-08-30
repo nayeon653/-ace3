@@ -4,7 +4,7 @@
 
 Tax/Payout Agent는 연금 세액공제, 과세와 수령 조건을 제공 문서 근거로 판단한다.
 검증된 입력이 있으면 Python Calculation Tool로 연금수령한도, 연금계좌 세액공제,
-연금수령 세금 또는 연금외수령 세금을 계산한다. 일반적으로 질문에 맞는 Tool 하나만
+분할지급액, 연금수령 세금 또는 연금외수령 세금을 계산한다. 일반적으로 질문에 맞는 Tool 하나만
 호출하고, 연금수령·연금외수령 비교 질문에서는 두 세금 Tool을 각각 한 번 호출할 수 있다.
 
 세액공제 적용 조건, 연금 과세, 수령 방식(일시금/분할)에 따른 과세, 중도해지 과세는 이
@@ -41,13 +41,44 @@ warning이 `calculations`에 포함된다.
 ### `calculate_pension_withdrawal_limit`
 
 - 검색된 문서 근거가 있는 경우에만 실행한다.
-- 입력은 원 단위 연금계좌 평가액과 1~10의 연금수령연차다.
+- 필수 입력은 1 이상의 `pension_year`와 source다. 1~10년차에는 원 단위
+  `account_valuation_krw`와 source가 필수이고, 11년차 이상에는 평가액 쌍을 생략할 수 있다.
 - 사용자 질문 또는 검증된 검색 근거에 없는 입력을 추정하지 않는다.
 - 각 입력에는 필드명, 그 값 하나와 단위가 포함된 원문 `source` 구절이 필요하다. Python은
   필드 의미, 질문 또는 검색 청크 포함 여부와 정규화 입력 일치를 검증한다. 검색 청크에서
   가져온 입력은 `chunk_id`를 계산 결과에 기록하고 최종 evidence에 자동 포함한다.
 - Calculation Service의 `pension_withdrawal_limit`만 호출한다.
+- 1~10년차 출력은 `withdrawal_limit`과 `limit_applies=true`다. 11년차 이상은
+  `withdrawal_limit=null`, `limit_applies=false`이며 0원이나 임의의 큰 수로 표현하지 않는다.
 - 호출은 한 번으로 제한한다.
+
+### `calculate_pension_annual_limit_installment`
+
+- 올해 남은 연금수령한도를 당해연도 잔여 지급횟수로 나누는 방식에만 사용한다.
+- 입력은 `remaining_annual_limit_krw`, `remaining_payments_in_year`와 각각의 source이고,
+  출력은 `installment_krw`다.
+- 당해연도 잔여 지급횟수를 전체 기간 잔여회차와 혼용하지 않는다.
+- 호출은 한 번으로 제한하며 다른 #116 계산 Tool과 동시에 또는 연속 실행하지 않는다.
+
+### `calculate_pension_period_installment`
+
+- 현재 계좌 평가액을 전체 기간 잔여회차로 나누는 방식에만 사용한다.
+- 입력은 `current_valuation_krw`, `remaining_payments`와 각각의 source이고, 출력은
+  `installment_krw`다.
+- 다음 연도에는 당시 평가액으로 다시 산정해야 하며 Rules는 미래 평가액을 추정하지 않는다.
+- 호출은 한 번으로 제한하며 다른 #116 계산 Tool과 동시에 또는 연속 실행하지 않는다.
+
+### `calculate_pension_unit_installment`
+
+- 잔고좌수와 1,000좌당 기준가격으로 회당 지급액을 계산하는 방식에만 사용한다.
+- 입력은 `remaining_units`, `remaining_payments`,
+  `standard_price_per_1000_units_krw`와 각각의 source이고, 출력은 `installment_krw`다.
+- 좌수와 원화 금액을 혼용하지 않으며 호출은 한 번으로 제한한다. 다른 #116 계산 Tool과
+  동시에 또는 연속 실행하지 않는다.
+
+네 #116 Tool 모두 지급 방식 적용 여부와 검색 근거 확인은 Agent, 결정론적 산술은 Rules,
+값/source의 같은 구절 대응 검증은 Tool이 담당한다. Agent와 presentation은 Python 결과를
+재계산하지 않고 문서에 없는 좌수·원 단위 반올림·절사를 적용하지 않는다.
 
 ### `calculate_pension_tax_credit`
 
