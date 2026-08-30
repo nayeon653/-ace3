@@ -1,16 +1,11 @@
 # PR #128 한투 30문항 Gold Answer 표
 
-이 문서는 [Gold Answer JSONL](hantoo_selected_30.jsonl)을 사람이 검토하기 쉽게 표로 투영한 파일이다. 정규 원본은 JSONL이며, 이 표는 아래 명령으로 결정론적으로 재생성한다.
-
-```bash
-uv run python -m evals.harness.render_gold_markdown
-```
+이 문서는 PR #128 질문셋에 대해 우리 에이전트가 생성해야 할 목표 답변과 문서 근거를 사람이 검토할 수 있도록 정리한 독립 정답표다.
 
 ## 범위와 판정 기준
 
 - 질문: `30`건 (`PROD 15` / `POLICY 15`)
 - 근거충분도: 직접 지원 `9`, 부분 지원 `14`, 미지원 `6`, 최신성 공백 `1`
-- Gold JSONL SHA-256: `b7c24ca8ba03999ca4c65aeaa1bf73259722e8934eb716afb5eddf7389ec49ed`
 - 페이지가 없는 DOCX는 원본 SHA-256, Docling JSON SHA-256과 `item_ref`가 정규 위치다.
 - bbox와 표 셀 좌표는 Docling 값 그대로이며 표의 행·열은 0-based다.
 - `부분 지원`, `미지원`, `최신성 공백`도 우리 에이전트가 생성해야 하는 안전한 목표 답변을 포함한다.
