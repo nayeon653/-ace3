@@ -18,6 +18,9 @@ from pension_agent.agent.execution import ExecutionContext
 from pension_agent.rules import CalculationError, CalculationRequest, calculate
 
 CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME = "calculate_pension_withdrawal_limit"
+CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME = "calculate_pension_annual_limit_installment"
+CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME = "calculate_pension_period_installment"
+CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME = "calculate_pension_unit_installment"
 CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME = "calculate_pension_tax_credit"
 CALCULATE_PENSION_INCOME_TAX_TOOL_NAME = "calculate_pension_income_tax"
 CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME = "calculate_non_pension_withdrawal_tax"
@@ -39,47 +42,142 @@ def create_pension_withdrawal_limit_tool() -> BaseTool:
         ),
     )
     async def calculate_pension_withdrawal_limit(
-        account_valuation_krw: Annotated[
-            Decimal,
-            Field(ge=0, description="연금계좌 평가액(원)"),
-        ],
         pension_year: Annotated[
             int,
-            Field(ge=1, le=10, description="1부터 10까지의 연금수령연차"),
-        ],
-        account_valuation_source: Annotated[
-            str,
-            Field(
-                min_length=1,
-                max_length=120,
-                description="평가액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
-            ),
+            Field(ge=1, description="1 이상의 연금수령연차"),
         ],
         pension_year_source: Annotated[
             str,
             Field(
                 min_length=1,
                 max_length=120,
-                description="수령연차 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+                description="연금수령연차 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
             ),
         ],
         runtime: ToolRuntime[ExecutionContext, Any],
+        account_valuation_krw: Annotated[
+            Decimal | None,
+            Field(ge=0, description="선택 연금계좌 평가액(원)"),
+        ] = None,
+        account_valuation_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="평가액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ] = None,
     ) -> Command | str:
+        if (account_valuation_krw is None) != (account_valuation_source is None):
+            return "계산 Tool 오류: 선택 입력은 값과 source를 함께 전달하거나 함께 생략해야 합니다."
+        inputs: dict[str, Any] = {"pension_year": pension_year}
+        input_sources = {"pension_year": pension_year_source}
+        if account_valuation_krw is not None:
+            inputs["account_valuation_krw"] = account_valuation_krw
+            input_sources["account_valuation_krw"] = cast(str, account_valuation_source)
         return _execute_calculation(
             calculator_id="pension_withdrawal_limit",
-            inputs={
-                "account_valuation_krw": account_valuation_krw,
-                "pension_year": pension_year,
-            },
-            input_sources={
-                "account_valuation_krw": account_valuation_source,
-                "pension_year": pension_year_source,
-            },
+            inputs=inputs,
+            input_sources=input_sources,
             tool_name=CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
             runtime=runtime,
         )
 
     return calculate_pension_withdrawal_limit
+
+
+def create_pension_annual_limit_installment_tool() -> BaseTool:
+    """당해연도 남은 한도의 회당 지급액 계산 Tool을 만든다."""
+
+    @tool(CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME)
+    async def calculate_pension_annual_limit_installment(
+        remaining_annual_limit_krw: Annotated[Decimal, Field(ge=0)],
+        remaining_payments_in_year: Annotated[int, Field(ge=1)],
+        remaining_annual_limit_source: Annotated[str, Field(min_length=1, max_length=120)],
+        remaining_payments_in_year_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """당해연도 남은 한도를 잔여 지급횟수로 나눈다."""
+
+        return _execute_calculation(
+            calculator_id="pension_annual_limit_installment",
+            inputs={
+                "remaining_annual_limit_krw": remaining_annual_limit_krw,
+                "remaining_payments_in_year": remaining_payments_in_year,
+            },
+            input_sources={
+                "remaining_annual_limit_krw": remaining_annual_limit_source,
+                "remaining_payments_in_year": remaining_payments_in_year_source,
+            },
+            tool_name=CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_pension_annual_limit_installment
+
+
+def create_pension_period_installment_tool() -> BaseTool:
+    """현재 평가액의 전체 잔여회차별 지급액 계산 Tool을 만든다."""
+
+    @tool(CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME)
+    async def calculate_pension_period_installment(
+        current_valuation_krw: Annotated[Decimal, Field(ge=0)],
+        remaining_payments: Annotated[int, Field(ge=1)],
+        current_valuation_source: Annotated[str, Field(min_length=1, max_length=120)],
+        remaining_payments_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """현재 평가액을 전체 기간 잔여 지급횟수로 나눈다."""
+
+        return _execute_calculation(
+            calculator_id="pension_period_installment",
+            inputs={
+                "current_valuation_krw": current_valuation_krw,
+                "remaining_payments": remaining_payments,
+            },
+            input_sources={
+                "current_valuation_krw": current_valuation_source,
+                "remaining_payments": remaining_payments_source,
+            },
+            tool_name=CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_pension_period_installment
+
+
+def create_pension_unit_installment_tool() -> BaseTool:
+    """잔고좌수와 기준가격의 전체 잔여회차별 지급액 계산 Tool을 만든다."""
+
+    @tool(CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME)
+    async def calculate_pension_unit_installment(
+        remaining_units: Annotated[Decimal, Field(ge=0)],
+        remaining_payments: Annotated[int, Field(ge=1)],
+        standard_price_per_1000_units_krw: Annotated[Decimal, Field(ge=0)],
+        remaining_units_source: Annotated[str, Field(min_length=1, max_length=120)],
+        remaining_payments_source: Annotated[str, Field(min_length=1, max_length=120)],
+        standard_price_per_1000_units_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """잔고좌수와 기준가격으로 전체 기간 회당 지급액을 계산한다."""
+
+        return _execute_calculation(
+            calculator_id="pension_unit_installment",
+            inputs={
+                "remaining_units": remaining_units,
+                "remaining_payments": remaining_payments,
+                "standard_price_per_1000_units_krw": standard_price_per_1000_units_krw,
+            },
+            input_sources={
+                "remaining_units": remaining_units_source,
+                "remaining_payments": remaining_payments_source,
+                "standard_price_per_1000_units_krw": standard_price_per_1000_units_source,
+            },
+            tool_name=CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_pension_unit_installment
 
 
 def create_pension_tax_credit_tool() -> BaseTool:

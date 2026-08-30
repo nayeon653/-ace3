@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from langgraph.types import Command
@@ -11,8 +12,11 @@ from pension_agent.agent.calculation import (
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
     create_non_pension_withdrawal_tax_tool,
+    create_pension_annual_limit_installment_tool,
     create_pension_income_tax_tool,
+    create_pension_period_installment_tool,
     create_pension_tax_credit_tool,
+    create_pension_unit_installment_tool,
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
 )
@@ -45,7 +49,7 @@ def _runtime(
         state={
             "question": question
             or (
-                "평가액 1천만원, 1년차, 자산총액 100만원, 부채총액 10만원, "
+                "평가액 1천만원, 연금수령연차 1년차, 자산총액 100만원, 부채총액 10만원, "
                 "총좌수 10만좌, 손실률 -2%"
             ),
             "search_result": SearchResult(
@@ -63,7 +67,7 @@ async def test_pension_tool_records_rules_result_in_state() -> None:
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
         account_valuation_source="평가액 1천만원",
-        pension_year_source="1년차",
+        pension_year_source="연금수령연차 1년차",
         runtime=_runtime(),
     )
 
@@ -102,7 +106,7 @@ async def test_calculation_tool_requires_completed_search_evidence() -> None:
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
         account_valuation_source="평가액 1천만원",
-        pension_year_source="1년차",
+        pension_year_source="연금수령연차 1년차",
         runtime=_runtime(with_evidence=False),
     )
 
@@ -116,7 +120,7 @@ async def test_calculation_tool_rejects_input_without_trusted_source() -> None:
         account_valuation_krw=Decimal(999999999),
         pension_year=10,
         account_valuation_source="평가액 999,999,999원",
-        pension_year_source="10년차",
+        pension_year_source="연금수령연차 10년차",
         runtime=_runtime(),
     )
 
@@ -148,10 +152,10 @@ async def test_calculation_tool_records_evidence_source_chunk() -> None:
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
         account_valuation_source="평가액 1천만원",
-        pension_year_source="수령연차 1년차",
+        pension_year_source="연금수령연차 1년차",
         runtime=_runtime(
             question="연금수령한도를 계산해줘",
-            chunk_content="평가액 1천만원, 수령연차 1년차에 대한 계산 규칙",
+            chunk_content="평가액 1천만원, 연금수령연차 1년차에 대한 계산 규칙",
         ),
     )
 
@@ -180,8 +184,194 @@ async def test_calculation_tool_rejects_wrong_field_or_multi_value_source(
         account_valuation_krw=account_value,
         pension_year=1,
         account_valuation_source=account_source,
-        pension_year_source="1년차",
+        pension_year_source="연금수령연차 1년차",
         runtime=_runtime(),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_withdrawal_limit_tool_allows_omitted_valuation_after_tenth_year() -> None:
+    result = await create_pension_withdrawal_limit_tool().coroutine(
+        pension_year=11,
+        pension_year_source="연금수령연차 11년차",
+        runtime=_runtime(question="연금수령연차 11년차"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"] == {"pension_year": 11}
+    assert calculation["outputs"] == {"withdrawal_limit": None, "limit_applies": False}
+    assert calculation["input_sources"].keys() == {"pension_year"}
+
+
+@pytest.mark.anyio
+async def test_withdrawal_limit_tool_returns_rules_error_without_required_valuation() -> None:
+    result = await create_pension_withdrawal_limit_tool().coroutine(
+        pension_year=10,
+        pension_year_source="연금수령연차 10년차",
+        runtime=_runtime(question="연금수령연차 10년차"),
+    )
+
+    assert isinstance(result, str)
+    assert "계산 입력" in result
+
+
+@pytest.mark.anyio
+async def test_withdrawal_limit_tool_rejects_mismatched_optional_pair() -> None:
+    result = await create_pension_withdrawal_limit_tool().coroutine(
+        pension_year=11,
+        pension_year_source="연금수령연차 11년차",
+        account_valuation_krw=Decimal(1_000_000),
+        runtime=_runtime(question="연금수령연차 11년차, 평가액 100만원"),
+    )
+
+    assert isinstance(result, str)
+    assert "함께" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool_factory", "kwargs", "calculator_id", "expected"),
+    [
+        (
+            create_pension_annual_limit_installment_tool,
+            {
+                "remaining_annual_limit_krw": Decimal(1_200_000),
+                "remaining_payments_in_year": 12,
+                "remaining_annual_limit_source": "올해 남은 연금수령한도 120만원",
+                "remaining_payments_in_year_source": "올해 잔여 지급횟수 12회",
+            },
+            "pension_annual_limit_installment",
+            "100000",
+        ),
+        (
+            create_pension_period_installment_tool,
+            {
+                "current_valuation_krw": Decimal(1_200_000),
+                "remaining_payments": 12,
+                "current_valuation_source": "현재 계좌 평가액 120만원",
+                "remaining_payments_source": "전체 기간 잔여회차 12회",
+            },
+            "pension_period_installment",
+            "100000",
+        ),
+        (
+            create_pension_unit_installment_tool,
+            {
+                "remaining_units": Decimal(12_000),
+                "remaining_payments": 12,
+                "standard_price_per_1000_units_krw": Decimal(1_500),
+                "remaining_units_source": "잔고좌수 12,000좌",
+                "remaining_payments_source": "전체 기간 잔여 지급횟수 12회",
+                "standard_price_per_1000_units_source": "1,000좌당 기준가격 1,500원",
+            },
+            "pension_unit_installment",
+            "1500",
+        ),
+    ],
+)
+async def test_pension_installment_tools_calculate_and_preserve_sources(
+    tool_factory: Any,
+    kwargs: dict[str, Any],
+    calculator_id: str,
+    expected: str,
+) -> None:
+    question = "; ".join(str(value) for key, value in kwargs.items() if key.endswith("source"))
+    result = await tool_factory().coroutine(**kwargs, runtime=_runtime(question=question))
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == calculator_id
+    assert calculation["outputs"]["installment_krw"] == expected
+    expected_sources = {str(value) for key, value in kwargs.items() if key.endswith("source")}
+    assert {source["text"] for source in calculation["input_sources"].values()} == (
+        expected_sources
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("source", "value"),
+    [
+        ("실제수령연차 11년차", 11),
+        ("연금수령연차 10년차", 11),
+        ("연금수령연차; 11년차", 11),
+    ],
+)
+async def test_withdrawal_limit_tool_rejects_invalid_year_provenance(
+    source: str, value: int
+) -> None:
+    result = await create_pension_withdrawal_limit_tool().coroutine(
+        pension_year=value,
+        pension_year_source=source,
+        runtime=_runtime(question=source),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool_factory", "kwargs", "question"),
+    [
+        (
+            create_pension_annual_limit_installment_tool,
+            {
+                "remaining_annual_limit_krw": Decimal(1_200_000),
+                "remaining_payments_in_year": 12,
+                "remaining_annual_limit_source": "올해 남은 연금수령한도; 120만원",
+                "remaining_payments_in_year_source": "전체 기간 잔여회차 12회",
+            },
+            "올해 남은 연금수령한도; 120만원; 전체 기간 잔여회차 12회",
+        ),
+        (
+            create_pension_period_installment_tool,
+            {
+                "current_valuation_krw": Decimal(1_200_000),
+                "remaining_payments": 12,
+                "current_valuation_source": "현재 계좌 평가액 120만원",
+                "remaining_payments_source": "올해 잔여 지급횟수 12회",
+            },
+            "현재 계좌 평가액 120만원; 올해 잔여 지급횟수 12회",
+        ),
+        (
+            create_pension_unit_installment_tool,
+            {
+                "remaining_units": Decimal(1_500),
+                "remaining_payments": 12,
+                "standard_price_per_1000_units_krw": Decimal(1_500),
+                "remaining_units_source": "잔고좌수 1,500원",
+                "remaining_payments_source": "전체 기간 잔여회차 12회",
+                "standard_price_per_1000_units_source": "1,000좌당 기준가격 1,500원",
+            },
+            "잔고좌수 1,500원; 전체 기간 잔여회차 12회; 1,000좌당 기준가격 1,500원",
+        ),
+    ],
+)
+async def test_pension_installment_tools_reject_semantic_or_phrase_mismatch(
+    tool_factory: Any,
+    kwargs: dict[str, Any],
+    question: str,
+) -> None:
+    result = await tool_factory().coroutine(**kwargs, runtime=_runtime(question=question))
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_pension_installment_tool_rejects_reused_source() -> None:
+    source = "전체 현재 계좌 평가액과 잔여회차 12회 120만원"
+    result = await create_pension_period_installment_tool().coroutine(
+        current_valuation_krw=Decimal(1_200_000),
+        remaining_payments=12,
+        current_valuation_source=source,
+        remaining_payments_source=source,
+        runtime=_runtime(question=source),
     )
 
     assert isinstance(result, str)

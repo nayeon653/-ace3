@@ -83,6 +83,16 @@ _PENSION_INCOME_MONEY_SOURCE_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("과세대상", "세액공제 받은 원금", "운용수익"),
     ),
 }
+_PENSION_INSTALLMENT_SOURCE_FIELDS = {
+    "account_valuation_krw",
+    "pension_year",
+    "remaining_annual_limit_krw",
+    "remaining_payments_in_year",
+    "current_valuation_krw",
+    "remaining_payments",
+    "remaining_units",
+    "standard_price_per_1000_units_krw",
+}
 
 
 def validated_input_sources(
@@ -106,10 +116,41 @@ def validated_input_sources(
         and _normalize_text(target_source) == _normalize_text(annual_source)
     ):
         return None
+    installment_sources = [
+        _normalize_text(input_sources[field])
+        for field in inputs
+        if field in _PENSION_INSTALLMENT_SOURCE_FIELDS
+    ]
+    if len(installment_sources) != len(set(installment_sources)):
+        return None
     validated: dict[str, CalculationInputSource] = {}
     for field, value in inputs.items():
         source = _normalize_text(input_sources[field])
-        if field == "pension_treatment":
+        if field == "pension_year":
+            if not _matches_pension_year_source(value, source):
+                return None
+        elif field == "account_valuation_krw":
+            if not _matches_account_valuation_source(value, source):
+                return None
+        elif field == "remaining_annual_limit_krw":
+            if not _matches_remaining_annual_limit_source(value, source):
+                return None
+        elif field == "remaining_payments_in_year":
+            if not _matches_annual_remaining_payments_source(value, source):
+                return None
+        elif field == "current_valuation_krw":
+            if not _matches_current_valuation_source(value, source):
+                return None
+        elif field == "remaining_payments":
+            if not _matches_total_remaining_payments_source(value, source):
+                return None
+        elif field == "remaining_units":
+            if not _matches_remaining_units_source(value, source):
+                return None
+        elif field == "standard_price_per_1000_units_krw":
+            if not _matches_standard_price_source(value, source):
+                return None
+        elif field == "pension_treatment":
             if not _matches_pension_treatment_source(value, source):
                 return None
         elif field == "receipt_type":
@@ -170,6 +211,77 @@ def validated_input_sources(
 def _matches_pension_tax_credit_source(field: str, source: str, value: Any) -> bool:
     groups = _PENSION_TAX_CREDIT_SOURCE_GROUPS[field]
     return _matches_grouped_money_source(groups, source, value)
+
+
+def _matches_pension_year_source(value: Any, source: str) -> bool:
+    normalized_source = source.replace(" ", "")
+    has_explicit_label = "연금수령연차" in normalized_source
+    return any(
+        "실제수령연차" not in phrase.replace(" ", "")
+        and (not has_explicit_label or "연금수령연차" in phrase.replace(" ", ""))
+        and _matches_single_quantity(phrase, value)
+        and len(_RECEIPT_YEAR_PATTERN.findall(phrase)) == 1
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_account_valuation_source(value: Any, source: str) -> bool:
+    return _matches_grouped_money_source((("평가액", "평가금액"),), source, value)
+
+
+def _matches_remaining_annual_limit_source(value: Any, source: str) -> bool:
+    return _matches_grouped_money_source(
+        (("당해연도", "올해"), ("남은", "잔여"), ("연금수령한도",)), source, value
+    )
+
+
+def _matches_annual_remaining_payments_source(value: Any, source: str) -> bool:
+    return any(
+        any(label in phrase for label in ("당해연도", "올해"))
+        and any(label in phrase for label in ("잔여 지급횟수", "남은 지급횟수"))
+        and "회" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_current_valuation_source(value: Any, source: str) -> bool:
+    return _matches_grouped_money_source(
+        (("현재",), ("계좌 평가액", "계좌평가액", "평가액")), source, value
+    )
+
+
+def _matches_total_remaining_payments_source(value: Any, source: str) -> bool:
+    return any(
+        any(label in phrase for label in ("전체 기간", "전체", "총"))
+        and any(label in phrase for label in ("잔여 지급횟수", "잔여회차", "남은 지급횟수"))
+        and not any(label in phrase for label in ("당해연도", "올해"))
+        and "회" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_remaining_units_source(value: Any, source: str) -> bool:
+    return any(
+        any(label in phrase for label in ("잔고좌수", "보유좌수"))
+        and "좌" in phrase
+        and "원" not in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_standard_price_source(value: Any, source: str) -> bool:
+    return any(
+        any(label in phrase.replace(" ", "") for label in ("1,000좌당기준가격", "1000좌당기준가격"))
+        and "원" in phrase
+        and _matches_single_quantity(
+            re.sub(r"1,?000\s*좌당", "", phrase),
+            value,
+        )
+        for phrase in _source_phrases(source)
+    )
 
 
 def _matches_grouped_money_source(
