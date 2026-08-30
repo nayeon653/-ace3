@@ -174,6 +174,9 @@ graph TD;
 	TaxPayoutModelCallLimit\2eafter_model("TaxPayoutModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_withdrawal_limit].after_model")
+	ToolCallLimitMiddleware\5bcalculate_pension_annual_limit_installment\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_annual_limit_installment].after_model")
+	ToolCallLimitMiddleware\5bcalculate_pension_period_installment\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_period_installment].after_model")
+	ToolCallLimitMiddleware\5bcalculate_pension_unit_installment\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_unit_installment].after_model")
 	ToolCallLimitMiddleware\5bcalculate_pension_tax_credit\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_tax_credit].after_model")
 	ToolCallLimitMiddleware\5bcalculate_pension_income_tax\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_income_tax].after_model")
 	ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model("ToolCallLimitMiddleware[calculate_non_pension_withdrawal_tax].after_model")
@@ -195,10 +198,16 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_income_tax\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_pension_annual_limit_installment\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_pension_annual_limit_installment\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_pension_income_tax\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_tax_credit\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_pension_income_tax\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bcalculate_pension_tax_credit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_pension_period_installment\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_annual_limit_installment\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_pension_period_installment\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_pension_tax_credit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_unit_installment\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_pension_tax_credit\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_pension_unit_installment\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_period_installment\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_pension_unit_installment\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> TaxPayoutModelCallLimit\2eafter_model;
