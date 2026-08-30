@@ -19,8 +19,11 @@ def test_calculator_map_contains_registered_set() -> None:
         "fund_standard_price",
         "fund_var_risk",
         "non_pension_withdrawal_tax",
+        "pension_annual_limit_installment",
         "pension_income_tax",
+        "pension_period_installment",
         "pension_tax_credit",
+        "pension_unit_installment",
         "pension_withdrawal_limit",
     }
 
@@ -37,19 +40,16 @@ def test_pension_withdrawal_limit_formula(pension_year: int, expected: Decimal) 
         )
     )
 
-    assert result.outputs == {"withdrawal_limit": expected}
+    assert result.outputs == {"withdrawal_limit": expected, "limit_applies": True}
     assert result.units == {"withdrawal_limit": "KRW"}
 
 
-@pytest.mark.parametrize("pension_year", [0, 11])
-def test_pension_withdrawal_limit_rejects_year_outside_source_range(
-    pension_year: int,
-) -> None:
+def test_pension_withdrawal_limit_rejects_zero_year() -> None:
     with pytest.raises(InvalidCalculationInputError):
         calculate(
             CalculationRequest(
                 calculator_id="pension_withdrawal_limit",
-                inputs={"account_valuation_krw": 100_000_000, "pension_year": pension_year},
+                inputs={"account_valuation_krw": 100_000_000, "pension_year": 0},
             )
         )
 
