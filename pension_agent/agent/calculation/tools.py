@@ -27,6 +27,8 @@ CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME = "calculate_non_pension_withdraw
 CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME = (
     "calculate_deferred_retirement_withdrawal_tax"
 )
+CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME = "calculate_pension_withdrawal_allocation"
+CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME = "calculate_pension_withdrawal_tax_breakdown"
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
 
@@ -585,6 +587,169 @@ def create_deferred_retirement_withdrawal_tax_tool() -> BaseTool:
         )
 
     return calculate_deferred_retirement_withdrawal_tax
+
+
+def create_pension_withdrawal_allocation_tool() -> BaseTool:
+    """현재 인출 요청액을 세법상 재원 순서대로 배분하는 Tool을 만든다."""
+
+    @tool(CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME)
+    async def calculate_pension_withdrawal_allocation(
+        requested_withdrawal_krw: Annotated[Decimal, Field(ge=0)],
+        tax_free_source_balance_krw: Annotated[Decimal, Field(ge=0)],
+        deferred_retirement_source_balance_krw: Annotated[Decimal, Field(ge=0)],
+        credited_and_earnings_source_balance_krw: Annotated[Decimal, Field(ge=0)],
+        requested_withdrawal_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        tax_free_source_balance_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        deferred_retirement_source_balance_krw_source: Annotated[
+            str, Field(min_length=1, max_length=120)
+        ],
+        credited_and_earnings_source_balance_krw_source: Annotated[
+            str, Field(min_length=1, max_length=120)
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """현재 인출 요청액을 재원별로 배분한다."""
+
+        return _execute_calculation(
+            calculator_id="pension_withdrawal_allocation",
+            inputs={
+                "requested_withdrawal_krw": requested_withdrawal_krw,
+                "tax_free_source_balance_krw": tax_free_source_balance_krw,
+                "deferred_retirement_source_balance_krw": deferred_retirement_source_balance_krw,
+                "credited_and_earnings_source_balance_krw": (
+                    credited_and_earnings_source_balance_krw
+                ),
+            },
+            input_sources={
+                "requested_withdrawal_krw": requested_withdrawal_krw_source,
+                "tax_free_source_balance_krw": tax_free_source_balance_krw_source,
+                "deferred_retirement_source_balance_krw": (
+                    deferred_retirement_source_balance_krw_source
+                ),
+                "credited_and_earnings_source_balance_krw": (
+                    credited_and_earnings_source_balance_krw_source
+                ),
+            },
+            tool_name=CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_pension_withdrawal_allocation
+
+
+def create_pension_withdrawal_tax_breakdown_tool() -> BaseTool:
+    """재원·수령구분별 현재 인출 세금 명세를 계산하는 Tool을 만든다."""
+
+    @tool(CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME)
+    async def calculate_pension_withdrawal_tax_breakdown(
+        requested_withdrawal_krw: Annotated[Decimal, Field(ge=0)],
+        tax_free_source_balance_krw: Annotated[Decimal, Field(ge=0)],
+        deferred_retirement_source_balance_krw: Annotated[Decimal, Field(ge=0)],
+        credited_and_earnings_source_balance_krw: Annotated[Decimal, Field(ge=0)],
+        pension_treated_withdrawal_krw: Annotated[Decimal, Field(ge=0)],
+        non_pension_treated_withdrawal_krw: Annotated[Decimal, Field(ge=0)],
+        requested_withdrawal_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        tax_free_source_balance_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        deferred_retirement_source_balance_krw_source: Annotated[
+            str, Field(min_length=1, max_length=120)
+        ],
+        credited_and_earnings_source_balance_krw_source: Annotated[
+            str, Field(min_length=1, max_length=120)
+        ],
+        pension_treated_withdrawal_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        non_pension_treated_withdrawal_krw_source: Annotated[
+            str, Field(min_length=1, max_length=120)
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+        actual_pension_receipt_year: Annotated[int | None, Field(ge=1)] = None,
+        actual_pension_receipt_year_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+        recipient_age: Annotated[int | None, Field(ge=0)] = None,
+        recipient_age_source: Annotated[str | None, Field(min_length=1, max_length=120)] = None,
+        is_lifetime_annuity: bool | None = None,
+        is_lifetime_annuity_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+        annual_private_pension_taxable_income_krw: Annotated[Decimal | None, Field(ge=0)] = None,
+        annual_private_pension_taxable_income_krw_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+        pension_treated_allocated_deferred_retirement_tax_krw: Annotated[
+            Decimal | None, Field(ge=0)
+        ] = None,
+        pension_treated_allocated_deferred_retirement_tax_krw_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+        non_pension_treated_allocated_deferred_retirement_tax_krw: Annotated[
+            Decimal | None, Field(ge=0)
+        ] = None,
+        non_pension_treated_allocated_deferred_retirement_tax_krw_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+    ) -> Command | str:
+        """현재 인출액의 재원·수령구분별 세금 명세를 계산한다."""
+
+        inputs: dict[str, Any] = {
+            "requested_withdrawal_krw": requested_withdrawal_krw,
+            "tax_free_source_balance_krw": tax_free_source_balance_krw,
+            "deferred_retirement_source_balance_krw": deferred_retirement_source_balance_krw,
+            "credited_and_earnings_source_balance_krw": credited_and_earnings_source_balance_krw,
+            "pension_treated_withdrawal_krw": pension_treated_withdrawal_krw,
+            "non_pension_treated_withdrawal_krw": non_pension_treated_withdrawal_krw,
+        }
+        input_sources: dict[str, str] = {
+            "requested_withdrawal_krw": requested_withdrawal_krw_source,
+            "tax_free_source_balance_krw": tax_free_source_balance_krw_source,
+            "deferred_retirement_source_balance_krw": deferred_retirement_source_balance_krw_source,
+            "credited_and_earnings_source_balance_krw": (
+                credited_and_earnings_source_balance_krw_source
+            ),
+            "pension_treated_withdrawal_krw": pension_treated_withdrawal_krw_source,
+            "non_pension_treated_withdrawal_krw": non_pension_treated_withdrawal_krw_source,
+        }
+        optional_entries: tuple[tuple[str, Any, str | None], ...] = (
+            (
+                "actual_pension_receipt_year",
+                actual_pension_receipt_year,
+                actual_pension_receipt_year_source,
+            ),
+            ("recipient_age", recipient_age, recipient_age_source),
+            ("is_lifetime_annuity", is_lifetime_annuity, is_lifetime_annuity_source),
+            (
+                "annual_private_pension_taxable_income_krw",
+                annual_private_pension_taxable_income_krw,
+                annual_private_pension_taxable_income_krw_source,
+            ),
+            (
+                "pension_treated_allocated_deferred_retirement_tax_krw",
+                pension_treated_allocated_deferred_retirement_tax_krw,
+                pension_treated_allocated_deferred_retirement_tax_krw_source,
+            ),
+            (
+                "non_pension_treated_allocated_deferred_retirement_tax_krw",
+                non_pension_treated_allocated_deferred_retirement_tax_krw,
+                non_pension_treated_allocated_deferred_retirement_tax_krw_source,
+            ),
+        )
+        for field, value, source in optional_entries:
+            if (value is None) != (source is None):
+                return json.dumps(
+                    {"error": "선택 입력값과 출처는 함께 제공해야 합니다."},
+                    ensure_ascii=False,
+                )
+            if value is not None:
+                inputs[field] = value
+                input_sources[field] = cast(str, source)
+        return _execute_calculation(
+            calculator_id="pension_withdrawal_tax_breakdown",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_pension_withdrawal_tax_breakdown
 
 
 def create_fund_standard_price_tool() -> BaseTool:
