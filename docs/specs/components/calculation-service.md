@@ -40,7 +40,10 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 
 | 계산기 ID | 산식·규칙 | 검증 문서 |
 |---|---|---|
-| `pension_withdrawal_limit` | 평가액 ÷ (11 - 수령연차) × 120%, 1~10년차 | `doc2.pdf` 1쪽 |
+| `pension_withdrawal_limit` | 1~10년차 평가액 ÷ (11 - 수령연차) × 120%, 11년차 이상 한도 미적용 | `doc2.pdf` 1쪽; `doc39.docx` `#/texts/7` |
+| `pension_annual_limit_installment` | 연간 잔여한도 ÷ 당해연도 잔여 지급횟수 | `doc2.pdf` 2쪽 |
+| `pension_period_installment` | 현재 평가액 ÷ 전체 잔여회차 | `doc2.pdf` 2쪽 |
+| `pension_unit_installment` | 잔고좌수 ÷ 전체 잔여횟수 × 1,000좌당 기준가격 ÷ 1,000 | `doc2.pdf` 2쪽 |
 | `pension_tax_credit` | 일반 납입 한도(연금저축 600만원·통합 900만원), 소득 경계 16.5%/13.2%, ISA 추가공제(전환액 10%·동일 만기 누적 300만원) | `doc41.docx` 1쪽, `doc6.docx` 3쪽 |
 | `pension_income_tax` | 일반 연금수령·부득이한 사유 인출의 연령별 세율과 연간 사적연금소득 1,500만원 경계 | `doc38.docx` `#/tables/0`, `#/texts/4`, `#/texts/5`, `#/texts/14`, `#/texts/15`; `doc20.docx` `#/texts/53`, `#/tables/2` |
 | `non_pension_withdrawal_tax` | 세액공제 원금·운용수익의 연금외수령 16.5% | `doc39.docx` `#/texts/22`, `#/tables/0` |
@@ -50,6 +53,47 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 
 검증 문서 정보는 개발 기록이며 런타임 결과에 직렬화하지 않는다. 문서에 없는 표시
 자릿수나 최종 지급 단위 반올림은 임의로 적용하지 않고 warning에 남긴다.
+
+### 연금수령한도·분할지급 계산 계약
+
+**`pension_withdrawal_limit`**: `pension_year`는 상한 없는 1 이상의 정수다.
+1~10년차에는 `account_valuation_krw`(0 이상의 `Decimal`, KRW)가 필수이며
+`withdrawal_limit = account_valuation_krw / (11 - pension_year) * 1.2`와
+`limit_applies=true`를 반환한다. 11년차 이상에는 평가액을 생략할 수 있고
+`withdrawal_limit=null`(단위 KRW), `limit_applies=false`를 반환한다. 이 구간에 평가액이
+전달돼도 한도 계산에는 사용하지 않고 warning으로 알린다. `null`을 0원, 무한대나 임의의
+큰 수로 바꾸지 않는다.
+
+**`pension_annual_limit_installment`**: 필수 입력은 0 이상의 `Decimal`인
+`remaining_annual_limit_krw`(KRW)와 1 이상의 정수인
+`remaining_payments_in_year`다. 출력은
+`installment_krw = remaining_annual_limit_krw / remaining_payments_in_year`(KRW)다.
+
+**`pension_period_installment`**: 필수 입력은 0 이상의 `Decimal`인
+`current_valuation_krw`(KRW)와 1 이상의 정수인 `remaining_payments`다. 출력은
+`installment_krw = current_valuation_krw / remaining_payments`(KRW)다. 현재 입력으로
+해당 연도의 지급액만 계산하며 다음 연도 평가액을 추정하지 않는다.
+
+**`pension_unit_installment`**: 필수 입력은 0 이상의 `Decimal`인 `remaining_units`(좌),
+1 이상의 정수인 `remaining_payments`, 0 이상의 `Decimal`인
+`standard_price_per_1000_units_krw`(KRW/1,000좌)다. 출력은
+`installment_krw = remaining_units / remaining_payments *
+standard_price_per_1000_units_krw / 1000`(KRW)다.
+
+**입력·산술 경계**: 선택 평가액의 생략과 명시적 `null`은 구분하며 명시적 `null`, 음수와
+extra 입력은 거부한다. 필수 입력의 `null`도 거부한다. 금액·좌수·기준가격 0은 허용해 0
+결과를 반환하지만 지급횟수 0이나 음수는 입력 검증에서 거부하므로 0으로 나누지 않는다.
+연금수령한도 역시 11년차 이상을 산식에 대입하지 않아 0 또는 음수 분모로 나누지 않는다.
+모든 산술은 `Decimal`로 수행하며 문서에 없는 원·좌수 단위 반올림·절사를 적용하지 않는다.
+
+**책임·출처·호출 경계**: 지급 방식의 적용 가능 여부와 필요한 기준시점 입력 확인은 Agent,
+값/source의 같은 구절 의미·수량·단위 대응 검증은 Tool, 확정 입력의 산술은 Rules가
+담당한다. 한도용 `pension_year`를 이연퇴직소득세의 `actual_pension_receipt_year`와
+혼용하지 않고, 당해연도 `remaining_payments_in_year`를 전체 기간
+`remaining_payments`와 혼용하지 않는다. 검증된 input source와 검색 청크 ID는 계산의
+`input_sources`와 최종 evidence에 보존한다. 각 Tool은 최대 한 번 호출하며 #116 계산
+Tool은 한 응답에서 하나만 실행하고 하나를 계산한 뒤에는 다른 #116 Tool을 추가 실행하지
+않는다.
 
 ### `pension_tax_credit` 계약
 
@@ -223,7 +267,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 
 | 소비자 | 허용 계산기 |
 |---|---|
-| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax` |
+| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax` |
 | Product Agent | `fund_standard_price`, `fund_var_risk` |
 | Policy Agent | 없음 |
 | Main Supervisor | 직접 호출 금지 |
@@ -242,6 +286,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 
 - `tests/unit/rules/test_calculation_service.py`
 - `tests/unit/rules/test_initial_calculators.py`
+- `tests/unit/rules/test_pension_installments.py`
 - `tests/unit/rules/test_pension_tax_credit.py`
 - `tests/unit/rules/test_pension_income_tax.py`
 - `tests/unit/rules/test_deferred_retirement_withdrawal_tax.py`
