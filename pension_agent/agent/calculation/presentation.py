@@ -14,7 +14,24 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
         outputs = calculation["outputs"]
         units = calculation["units"]
         if calculator_id == "pension_withdrawal_limit":
-            lines.append(f"연금수령한도: {_value(outputs, units, 'withdrawal_limit')}")
+            if outputs.get("limit_applies") is False:
+                lines.append("연금수령 11년차 이후로 연금수령한도가 적용되지 않습니다")
+            else:
+                lines.append(f"연금수령한도: {_value(outputs, units, 'withdrawal_limit')}")
+        elif calculator_id == "pension_annual_limit_installment":
+            lines.append(
+                f"당해연도 잔여한도 기준 회당 지급액: {_value(outputs, units, 'installment_krw')}"
+            )
+        elif calculator_id == "pension_period_installment":
+            lines.append(
+                "현재 평가액·전체 잔여회차 기준 회당 지급액: "
+                f"{_value(outputs, units, 'installment_krw')}"
+            )
+        elif calculator_id == "pension_unit_installment":
+            lines.append(
+                "잔고좌수·1,000좌당 기준가격 기준 회당 지급액: "
+                f"{_value(outputs, units, 'installment_krw')}"
+            )
         elif calculator_id == "pension_tax_credit":
             lines.extend(_pension_tax_credit_lines(calculation["inputs"], outputs, units))
         elif calculator_id == "pension_income_tax":
