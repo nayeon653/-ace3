@@ -26,8 +26,6 @@
 - [Docling 근거 레지스트리](miraeasset_actual_86.evidence.json): item_ref, page/slide, bbox, charspan, table cell, 인용문, retrieval chunk
 - [출처 레지스트리](miraeasset_actual_86.sources.json): 원본 SHA-256, Drive URL, variant별 bundle ID, parser profile/digest, Docling JSON SHA-256
 - [Gold manifest](miraeasset_actual_86.manifest.json): 질문·정답·출처·근거·코퍼스 스냅샷과 해시
-- [Gold validator](../harness/validate_miraeasset_gold.py): CI 구조 검증과 로컬 원문 전체 검증
-
 ## 원문과 코퍼스 고정
 
 | 대상 | 고정값 |
@@ -69,14 +67,4 @@
 3. 모든 사용 원본의 바이트 크기·SHA-256과 variant별 bundle manifest를 다시 계산하고, delivery loose bundle이 archive member와 byte-identical한지 확인했다.
 4. 각 필수 주장을 raw Docling item·표 셀·page/bbox/charspan에 대조하고, review_local_ocr 근거 페이지는 원본 PDF 렌더로 시각 확인했다.
 5. FAQ 답변과 제공 문서가 충돌하거나 문서가 부족한 경우 문서 기준으로 범위를 줄이고 금지 주장을 기록했다.
-6. 질문 순서, 86개 ID, 레지스트리 참조, artifact hash, 원문 인용과 retrieval 연결을 validator로 재검증했다.
-
-## 재현 명령
-
-```bash
-uv run python -m evals.harness.validate_miraeasset_gold --structure-only
-uv run python -m evals.harness.validate_miraeasset_gold --data-root data
-uv run pytest -q tests/evals/test_miraeasset_gold.py
-```
-
-CI에는 대용량 원본과 Docling bundle이 없으므로 구조·해시는 `--structure-only`로 확인한다. 전체 검증은 Drive 전달물과 byte-identical한 로컬 `data/` 스냅샷에서 수행한다.
+6. 질문 순서, 86개 ID, 레지스트리 참조, artifact hash, 원문 인용과 retrieval 연결을 확인하고 최종 집계를 manifest에 기록했다.
