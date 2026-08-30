@@ -365,7 +365,7 @@ async def test_pension_tax_credit_tool_rejects_income_basis_source_mismatch() ->
 async def test_pension_income_tax_tool_calculates_ordinary_with_all_inputs() -> None:
     question = (
         "일반 연금수령; 수령자 나이 55세; 비종신 연금; "
-        "연금수령 과세대상 금액 100만원; 연간 사적연금 과세대상 합계 1,000만원"
+        "현재 연금수령 과세대상 금액 100만원; 연간 사적연금 과세대상 합계 1,000만원"
     )
     result = await create_pension_income_tax_tool().coroutine(
         pension_treatment="ordinary",
@@ -374,7 +374,7 @@ async def test_pension_income_tax_tool_calculates_ordinary_with_all_inputs() -> 
         recipient_age_source="수령자 나이 55세",
         runtime=_runtime(question=question),
         target_taxable_amount_krw=Decimal(1_000_000),
-        target_taxable_amount_krw_source="연금수령 과세대상 금액 100만원",
+        target_taxable_amount_krw_source="현재 연금수령 과세대상 금액 100만원",
         is_lifetime_annuity=False,
         is_lifetime_annuity_source="비종신 연금",
         annual_private_pension_taxable_income_krw=Decimal(10_000_000),
@@ -388,7 +388,7 @@ async def test_pension_income_tax_tool_calculates_ordinary_with_all_inputs() -> 
     assert calculation["outputs"]["tax_krw"] == "55000.000"
     assert calculation["input_sources"]["target_taxable_amount_krw"] == {
         "origin": "question",
-        "text": "연금수령 과세대상 금액 100만원",
+        "text": "현재 연금수령 과세대상 금액 100만원",
         "chunk_id": None,
     }
 
@@ -544,7 +544,7 @@ async def test_pension_income_tool_rejects_lifetime_source_mismatch() -> None:
         ),
         (
             "annual_private_pension_taxable_income_krw",
-            "연금수령 과세대상 금액 100만원",
+            "현재 연금수령 과세대상 금액 100만원",
             Decimal(1_000_000),
         ),
     ],
@@ -559,6 +559,112 @@ def test_pension_income_provenance_rejects_misassigned_money_meaning(
     )
 
     assert result is None
+
+
+def test_pension_income_provenance_rejects_annual_source_reused_for_target() -> None:
+    source = "연간 사적연금 과세대상 합계 1,000만원"
+    result = validated_input_sources(
+        inputs={
+            "target_taxable_amount_krw": Decimal(10_000_000),
+            "annual_private_pension_taxable_income_krw": Decimal(10_000_000),
+        },
+        input_sources={
+            "target_taxable_amount_krw": source,
+            "annual_private_pension_taxable_income_krw": source,
+        },
+        state={"question": source},
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    ("treatment", "source"),
+    [
+        ("ordinary", "현재 연금수령 세액공제 받은 원금의 과세대상 금액 100만원"),
+        ("unavoidable", "부득이한 사유로 인출한 세액공제 받은 원금의 과세대상 금액 100만원"),
+    ],
+)
+def test_pension_income_target_provenance_accepts_current_amount_meaning(
+    treatment: str, source: str
+) -> None:
+    treatment_source = "일반 연금수령" if treatment == "ordinary" else "부득이한 사유 인출"
+    question = f"{treatment_source}; {source}"
+    result = validated_input_sources(
+        inputs={"pension_treatment": treatment, "target_taxable_amount_krw": Decimal(1_000_000)},
+        input_sources={
+            "pension_treatment": treatment_source,
+            "target_taxable_amount_krw": source,
+        },
+        state={"question": question},
+    )
+
+    assert result is not None
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "source"),
+    [
+        ("pension_treatment", "ordinary", "일반 연금수령이 아님"),
+        ("pension_treatment", "unavoidable", "부득이한 사유가 아닌 인출"),
+        ("is_lifetime_annuity", True, "종신연금에 해당하지 않음"),
+    ],
+)
+def test_pension_income_provenance_rejects_negated_positive_meaning(
+    field: str, value: object, source: str
+) -> None:
+    result = validated_input_sources(
+        inputs={field: value},
+        input_sources={field: source},
+        state={"question": source},
+    )
+
+    assert result is None
+
+
+def test_non_lifetime_provenance_accepts_explicit_negation() -> None:
+    source = "종신연금에 해당하지 않음"
+    result = validated_input_sources(
+        inputs={"is_lifetime_annuity": False},
+        input_sources={"is_lifetime_annuity": source},
+        state={"question": source},
+    )
+
+    assert result is not None
+
+
+@pytest.mark.parametrize(
+    ("value", "source"),
+    [
+        (55, "수령자 나이 55세 미만"),
+        (70, "수령자 연령 70세 이상"),
+        (80, "수령자 연령 80세 미만"),
+        (69, "수령자 나이 55~69세"),
+        (55, "수령자 나이 55세부터 69세"),
+        (70, "수령자 나이 70세 전후"),
+    ],
+)
+def test_recipient_age_provenance_rejects_ranges_and_approximations(
+    value: int, source: str
+) -> None:
+    result = validated_input_sources(
+        inputs={"recipient_age": value},
+        input_sources={"recipient_age": source},
+        state={"question": source},
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize("source", ["나이 65세", "연령 65세", "만 65세"])
+def test_recipient_age_provenance_accepts_exact_age(source: str) -> None:
+    result = validated_input_sources(
+        inputs={"recipient_age": 65},
+        input_sources={"recipient_age": source},
+        state={"question": source},
+    )
+
+    assert result is not None
 
 
 @pytest.mark.anyio

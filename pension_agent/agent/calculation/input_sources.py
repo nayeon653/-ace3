@@ -27,6 +27,18 @@ _UNIT_MULTIPLIERS = {
 _UNIT_SUFFIX_PATTERN = re.compile(r"(천만|백만|십만|억|만|천|백|십)$")
 _PHRASE_SPLIT_PATTERN = re.compile(r"[;\n]+|,(?!\d)")
 _AGE_PATTERN = re.compile(r"([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))\s*세")
+_NEGATION_EXPRESSIONS = ("아님", "아닌", "아니다", "해당하지 않음", "해당하지 않는다")
+_AGE_NON_EXACT_EXPRESSIONS = (
+    "이상",
+    "이하",
+    "초과",
+    "미만",
+    "부터",
+    "전후",
+    "약 ",
+    "정도",
+    "무렵",
+)
 _SOURCE_REQUIREMENTS = {
     "account_valuation_krw": (("평가액",), ("원",)),
     "pension_year": (("수령연차", "연금수령연차", "년차"), ("년", "연차")),
@@ -85,6 +97,14 @@ def validated_input_sources(
     question, chunks = _trusted_sources(state)
     if not question and not chunks:
         return None
+    target_source = input_sources.get("target_taxable_amount_krw")
+    annual_source = input_sources.get("annual_private_pension_taxable_income_krw")
+    if (
+        target_source is not None
+        and annual_source is not None
+        and _normalize_text(target_source) == _normalize_text(annual_source)
+    ):
+        return None
     validated: dict[str, CalculationInputSource] = {}
     for field, value in inputs.items():
         source = _normalize_text(input_sources[field])
@@ -96,6 +116,11 @@ def validated_input_sources(
                 return None
         elif field == "is_lifetime_annuity":
             if not _matches_lifetime_annuity_source(value, source):
+                return None
+        elif field == "target_taxable_amount_krw":
+            if not _matches_target_taxable_amount_source(
+                source, value, inputs.get("pension_treatment")
+            ):
                 return None
         elif field in _PENSION_INCOME_MONEY_SOURCE_GROUPS:
             if not _matches_grouped_money_source(
@@ -149,30 +174,97 @@ def _matches_grouped_money_source(
 
 
 def _matches_pension_treatment_source(value: Any, source: str) -> bool:
-    if value == "ordinary":
-        return "연금수령" in source and "연금외수령" not in source and "부득이" not in source
-    if value == "unavoidable":
-        return "부득이" in source
+    for phrase in _source_phrases(source):
+        if value == "ordinary" and (
+            "연금수령" in phrase
+            and "연금외수령" not in phrase
+            and "부득이" not in phrase
+            and not _is_negated_phrase(phrase)
+        ):
+            return True
+        if value == "unavoidable" and "부득이" in phrase and not _is_negated_phrase(phrase):
+            return True
     return False
 
 
 def _matches_recipient_age_source(value: Any, source: str) -> bool:
-    if not any(label in source for label in ("나이", "연령")):
-        return False
-    ages = [_decimal(match.group(1).replace(",", "")) for match in _AGE_PATTERN.finditer(source)]
-    return len(ages) == 1 and ages[0] == _decimal(value)
+    for phrase in _source_phrases(source):
+        if not (
+            any(label in phrase for label in ("나이", "연령"))
+            or re.search(r"만\s*\d[\d,]*\s*세", phrase)
+        ):
+            continue
+        if any(expression in phrase for expression in _AGE_NON_EXACT_EXPRESSIONS):
+            continue
+        if "~" in phrase or "∼" in phrase or "-" in phrase:
+            continue
+        ages = [
+            _decimal(match.group(1).replace(",", "")) for match in _AGE_PATTERN.finditer(phrase)
+        ]
+        if len(ages) == 1 and ages[0] == _decimal(value):
+            return True
+    return False
 
 
 def _matches_lifetime_annuity_source(value: Any, source: str) -> bool:
     if value is True:
-        return "종신연금" in source and not any(
-            label in source for label in ("비종신", "종신이 아님", "종신연금이 아님")
+        return any(
+            "종신연금" in phrase and "비종신" not in phrase and not _is_negated_phrase(phrase)
+            for phrase in _source_phrases(source)
         )
     if value is False:
         return any(
-            label in source for label in ("비종신", "종신이 아님", "종신연금이 아님", "확정기간")
+            any(
+                label in phrase
+                for label in (
+                    "비종신",
+                    "종신이 아님",
+                    "종신연금이 아님",
+                    "종신연금에 해당하지 않음",
+                    "종신연금에 해당하지 않는다",
+                    "확정기간",
+                )
+            )
+            for phrase in _source_phrases(source)
         )
     return False
+
+
+def _matches_target_taxable_amount_source(source: str, value: Any, pension_treatment: Any) -> bool:
+    for phrase in _source_phrases(source):
+        if any(label in phrase for label in ("연간", "합계", "전체 사적연금소득")):
+            continue
+        has_current_meaning = any(
+            label in phrase
+            for label in (
+                "현재 인출",
+                "현재 수령",
+                "현재 연금수령",
+                "이번 인출",
+                "이번 수령",
+                "해당 인출",
+            )
+        )
+        if pension_treatment == "unavoidable" and "부득이한 사유로 인출" in phrase:
+            has_current_meaning = True
+        has_taxable_meaning = any(
+            label in phrase for label in ("과세대상", "세액공제 받은 원금", "운용수익")
+        )
+        if not has_current_meaning or not has_taxable_meaning:
+            continue
+        if pension_treatment == "ordinary" and "연금수령" not in phrase:
+            continue
+        if pension_treatment == "unavoidable" and (
+            "부득이" not in phrase or _is_negated_phrase(phrase)
+        ):
+            continue
+        if "원" in phrase and _matches_single_quantity(phrase, value):
+            return True
+    return False
+
+
+def _is_negated_phrase(phrase: str) -> bool:
+    return any(expression in phrase for expression in _NEGATION_EXPRESSIONS)
 
 
 def _source_phrases(source: str) -> list[str]:

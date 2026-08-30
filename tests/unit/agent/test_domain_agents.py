@@ -2290,7 +2290,7 @@ async def test_tax_agent_leaves_income_bracket_as_missing_condition_when_omitted
             "일반 연금수령 세금을 계산해줘",
             (
                 "일반 연금수령; 수령자 나이 55세; 비종신 연금; "
-                "연금수령 과세대상 금액 100만원; "
+                "현재 연금수령 과세대상 금액 100만원; "
                 "연간 사적연금 과세대상 합계 1,000만원"
             ),
             "calculate_pension_income_tax",
@@ -2300,7 +2300,7 @@ async def test_tax_agent_leaves_income_bracket_as_missing_condition_when_omitted
                 "pension_treatment_source": "일반 연금수령",
                 "recipient_age_source": "수령자 나이 55세",
                 "target_taxable_amount_krw": "1000000",
-                "target_taxable_amount_krw_source": "연금수령 과세대상 금액 100만원",
+                "target_taxable_amount_krw_source": "현재 연금수령 과세대상 금액 100만원",
                 "is_lifetime_annuity": False,
                 "is_lifetime_annuity_source": "비종신 연금",
                 "annual_private_pension_taxable_income_krw": "10000000",
@@ -2445,7 +2445,7 @@ def test_tax_agent_keeps_exact_pension_tax_comparison_pair_in_one_model_call() -
 async def test_tax_agent_preserves_both_pension_tax_comparison_results() -> None:
     content = (
         "일반 연금수령; 수령자 나이 55세; 비종신 연금; "
-        "연금수령 과세대상 금액 100만원; "
+        "현재 연금수령 과세대상 금액 100만원; "
         "연간 사적연금 과세대상 합계 1,000만원; "
         "중도해지 운용수익 과세대상 금액 100만원"
     )
@@ -2481,7 +2481,9 @@ async def test_tax_agent_preserves_both_pension_tax_comparison_results() -> None
                             "pension_treatment_source": "일반 연금수령",
                             "recipient_age_source": "수령자 나이 55세",
                             "target_taxable_amount_krw": "1000000",
-                            "target_taxable_amount_krw_source": ("연금수령 과세대상 금액 100만원"),
+                            "target_taxable_amount_krw_source": (
+                                "현재 연금수령 과세대상 금액 100만원"
+                            ),
                             "is_lifetime_annuity": False,
                             "is_lifetime_annuity_source": "비종신 연금",
                             "annual_private_pension_taxable_income_krw": "10000000",
@@ -2540,7 +2542,107 @@ async def test_tax_agent_preserves_both_pension_tax_comparison_results() -> None
     ]
 
 
-def test_tax_agent_allows_remaining_comparison_tool_and_submit_after_first() -> None:
+@pytest.mark.anyio
+@pytest.mark.parametrize("first_calculator", ["pension", "non_pension"])
+async def test_tax_agent_defers_submit_until_remaining_comparison_calculation_finishes(
+    first_calculator: str,
+) -> None:
+    content = (
+        "일반 연금수령; 수령자 나이 55세; 비종신 연금; "
+        "현재 연금수령 과세대상 금액 100만원; "
+        "연간 사적연금 과세대상 합계 1,000만원; "
+        "중도해지 운용수익 과세대상 금액 100만원"
+    )
+    pension_call = {
+        "name": "calculate_pension_income_tax",
+        "args": {
+            "pension_treatment": "ordinary",
+            "recipient_age": 55,
+            "pension_treatment_source": "일반 연금수령",
+            "recipient_age_source": "수령자 나이 55세",
+            "target_taxable_amount_krw": "1000000",
+            "target_taxable_amount_krw_source": "현재 연금수령 과세대상 금액 100만원",
+            "is_lifetime_annuity": False,
+            "is_lifetime_annuity_source": "비종신 연금",
+            "annual_private_pension_taxable_income_krw": "10000000",
+            "annual_private_pension_taxable_income_krw_source": (
+                "연간 사적연금 과세대상 합계 1,000만원"
+            ),
+        },
+        "id": "pension-call",
+        "type": "tool_call",
+    }
+    non_pension_call = {
+        "name": "calculate_non_pension_withdrawal_tax",
+        "args": {
+            "taxable_amount_krw": "1000000",
+            "taxable_amount_krw_source": "중도해지 운용수익 과세대상 금액 100만원",
+        },
+        "id": "non-pension-call",
+        "type": "tool_call",
+    }
+    first_call, remaining_call = (
+        (pension_call, non_pension_call)
+        if first_calculator == "pension"
+        else (non_pension_call, pension_call)
+    )
+    premature_submit = {
+        "name": "submit_domain_result",
+        "args": {
+            "status": "determined",
+            "conclusion": "두 계산 결과를 비교합니다.",
+            "missing_conditions": [],
+            "warnings": [],
+            "evidence_chunk_ids": [],
+        },
+        "id": "premature-submit-call",
+        "type": "tool_call",
+    }
+    final_submit = {
+        **premature_submit,
+        "id": "final-submit-call",
+    }
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(DocumentType.PENSION_REFERENCE, title="수령 방식별 과세", content=content)
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "수령 방식별 과세 비교"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="", tool_calls=[first_call]),
+            AIMessage(content="", tool_calls=[remaining_call, premature_submit]),
+            AIMessage(content="", tool_calls=[final_submit]),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {"question": "연금수령과 중도해지 세금을 비교해줘", "objective": "세금 비교"}
+    )
+
+    assert {calculation["calculator_id"] for calculation in result["calculations"]} == {
+        "pension_income_tax",
+        "non_pension_withdrawal_tax",
+    }
+    assert "일반 연금수령 적용 기본세율" in result["decision"]["conclusion"]
+    assert "연금외수령 적용 기본세율" in result["decision"]["conclusion"]
+
+
+def test_tax_agent_defers_submit_when_remaining_comparison_tool_is_requested() -> None:
     kept = _sequence_result_tool_names(
         calculations=[{"calculator_id": "pension_income_tax"}],
         tool_names=[
@@ -2550,7 +2652,7 @@ def test_tax_agent_allows_remaining_comparison_tool_and_submit_after_first() -> 
         ],
     )
 
-    assert kept == ["calculate_non_pension_withdrawal_tax", "submit_domain_result"]
+    assert kept == ["calculate_non_pension_withdrawal_tax"]
 
 
 def test_tax_agent_allows_only_submit_after_both_comparison_calculations() -> None:

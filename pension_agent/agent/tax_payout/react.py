@@ -242,10 +242,10 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
         calculation_calls = [
             call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
         ]
-        if state.get("calculations"):
-            kept_calls = allowed_calls
-        elif {call["name"] for call in calculation_calls} == _PENSION_TAX_COMPARISON_TOOL_NAMES:
+        if {call["name"] for call in calculation_calls} == _PENSION_TAX_COMPARISON_TOOL_NAMES:
             kept_calls = calculation_calls
+        elif calculation_calls:
+            kept_calls = calculation_calls[:1]
         else:
             kept_calls = allowed_calls[:1]
         if kept_calls == last_message.tool_calls:
