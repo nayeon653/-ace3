@@ -111,6 +111,7 @@ def validated_input_sources(
     inputs: Mapping[str, Any],
     input_sources: Mapping[str, str],
     state: Mapping[str, Any],
+    calculator_id: str | None = None,
 ) -> dict[str, CalculationInputSource] | None:
     """각 입력의 필드 의미·수치·원문 출처를 검증해 정규화한다."""
 
@@ -144,7 +145,31 @@ def validated_input_sources(
     validated: dict[str, CalculationInputSource] = {}
     for field, value in inputs.items():
         source = _normalize_text(input_sources[field])
-        if field == "pension_year":
+        if field == "employment_duration_category":
+            if not _matches_employment_duration_category(value, source):
+                return None
+        elif field == "previous_year_annual_wages_krw":
+            if not _matches_previous_year_annual_wages_source(source, value):
+                return None
+        elif field == "preceding_12_month_wages_krw":
+            if not _matches_preceding_12_month_wages_source(source, value):
+                return None
+        elif field == "average_monthly_wage_during_employment_krw":
+            if not _matches_average_monthly_wage_source(source, value):
+                return None
+        elif field == "documented_medical_expenses_krw":
+            if not _matches_documented_medical_expenses_source(source, value):
+                return None
+        elif field == "actual_medical_expenses_krw":
+            if not _matches_actual_medical_expenses_source(source, value):
+                return None
+        elif field == "care_expenses_krw":
+            if not _matches_care_expenses_source(source, value):
+                return None
+        elif field == "own_leave_months":
+            if not _matches_own_leave_months_source(source, value):
+                return None
+        elif field == "pension_year":
             if not _matches_pension_year_source(value, source):
                 return None
         elif field == "account_valuation_krw":
@@ -181,7 +206,14 @@ def validated_input_sources(
             if not _matches_allocated_deferred_retirement_tax_source(source, value):
                 return None
         elif field == "requested_withdrawal_krw":
-            if not _matches_requested_withdrawal_source(source, value):
+            if calculator_id in {
+                "medical_care_withdrawal_tax_limit",
+                "medical_care_withdrawal_tax_breakdown",
+            }:
+                matches_request = _matches_medical_care_requested_withdrawal_source(source, value)
+            else:
+                matches_request = _matches_requested_withdrawal_source(source, value)
+            if not matches_request:
                 return None
         elif field == "tax_free_source_balance_krw":
             if not _matches_withdrawal_balance_source(source, value, "tax_free"):
@@ -397,6 +429,142 @@ def _matches_requested_withdrawal_source(source: str, value: Any) -> bool:
     )
 
 
+def _matches_employment_duration_category(value: Any, source: str) -> bool:
+    if any(label in source for label in ("약 ", "정도", "무렵", "전후")):
+        return False
+    for phrase in _source_phrases(source):
+        if (
+            "재직" not in phrase
+            or _is_negated_phrase(phrase)
+            or any(label in phrase for label in ("배우자", "가족", "타인"))
+        ):
+            continue
+        if value == "less_than_one_year" and "1년 미만" in phrase:
+            return True
+        if value == "at_least_one_year" and "1년 이상" in phrase:
+            return True
+        month_matches = re.findall(r"(\d+)\s*개월", phrase)
+        if len(month_matches) == 1:
+            months = int(month_matches[0])
+            if value == "less_than_one_year" and months < 12:
+                return True
+            if value == "at_least_one_year" and months >= 12:
+                return True
+    return False
+
+
+def _matches_previous_year_annual_wages_source(source: str, value: Any) -> bool:
+    return _matches_medical_care_money_source(
+        source,
+        value,
+        required_groups=(("직전연도", "직전 연도"), ("연간임금총액", "연간 임금총액")),
+        forbidden=("직전 12개월", "월평균", "월급", "현재 연봉", "배우자", "가족", "타인"),
+    )
+
+
+def _matches_preceding_12_month_wages_source(source: str, value: Any) -> bool:
+    return any(
+        "직전 12개월" in phrase
+        and any(label in phrase for label in ("임금", "급여"))
+        and not any(
+            label in phrase
+            for label in ("직전연도", "직전 연도", "월평균", "배우자", "가족", "타인")
+        )
+        and not _is_negated_phrase(phrase)
+        and _matches_single_quantity(phrase.replace("12개월", ""), value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_average_monthly_wage_source(source: str, value: Any) -> bool:
+    return _matches_medical_care_money_source(
+        source,
+        value,
+        required_groups=(("재직 중",), ("월평균 급여", "월 평균 급여", "월평균 임금")),
+        forbidden=(
+            "연간임금",
+            "연간 임금",
+            "직전 12개월",
+            "직전연도",
+            "배우자",
+            "가족",
+            "타인",
+        ),
+    )
+
+
+def _matches_documented_medical_expenses_source(source: str, value: Any) -> bool:
+    return _matches_medical_care_money_source(
+        source,
+        value,
+        required_groups=(("근로자 부담", "본인 부담"), ("증빙 의료비", "의료비")),
+        forbidden=("요청액", "인출액", "잔액", "간병비"),
+    )
+
+
+def _matches_medical_care_requested_withdrawal_source(source: str, value: Any) -> bool:
+    return _matches_medical_care_money_source(
+        source,
+        value,
+        required_groups=(
+            ("의료·요양", "의료 요양", "의료비·요양", "의료비 요양", "의료 목적", "요양 목적"),
+            ("총 인출 요청액", "총 요청 인출액", "인출 요청액", "요청한 총 인출액"),
+        ),
+        forbidden=("잔액", "실제 의료비", "간병비", "한도"),
+    )
+
+
+def _matches_actual_medical_expenses_source(source: str, value: Any) -> bool:
+    return _matches_medical_care_money_source(
+        source,
+        value,
+        required_groups=(("실제 의료비",),),
+        forbidden=("요청액", "인출액", "잔액", "간병비"),
+    )
+
+
+def _matches_care_expenses_source(source: str, value: Any) -> bool:
+    return _matches_medical_care_money_source(
+        source,
+        value,
+        required_groups=(("간병비",),),
+        forbidden=("의료비", "요청액", "인출액", "잔액"),
+    )
+
+
+def _matches_medical_care_money_source(
+    source: str,
+    value: Any,
+    *,
+    required_groups: tuple[tuple[str, ...], ...],
+    forbidden: tuple[str, ...],
+) -> bool:
+    return any(
+        all(any(label in phrase for label in group) for group in required_groups)
+        and not any(label in phrase for label in forbidden)
+        and not _is_negated_phrase(phrase)
+        and _matches_zero_or_single_quantity(phrase, value, unit="원")
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_own_leave_months_source(source: str, value: Any) -> bool:
+    return any(
+        "본인" in phrase
+        and "휴직" in phrase
+        and not any(label in phrase for label in ("배우자", "가족", "요양기간", "재직기간"))
+        and not _is_negated_phrase(phrase)
+        and _matches_zero_or_single_quantity(phrase, value, unit="개월")
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_zero_or_single_quantity(source: str, value: Any, *, unit: str) -> bool:
+    if _decimal(value) == 0 and any(label in source for label in ("없음", "없다", "없습니다")):
+        return not _quantities(source)
+    return unit in source and _matches_single_quantity(source, value)
+
+
 def _matches_withdrawal_balance_source(source: str, value: Any, source_type: str) -> bool:
     labels = {
         "tax_free": ("세액공제 미적용 원금", "비과세 재원"),
@@ -446,6 +614,8 @@ def _matches_treated_allocated_tax_source(source: str, value: Any, *, pension: b
 
 def _matches_recipient_age_source(value: Any, source: str) -> bool:
     for phrase in _source_phrases(source):
+        if any(label in phrase for label in ("배우자", "가족", "부양가족", "자녀", "부모")):
+            continue
         if not (
             any(label in phrase for label in ("나이", "연령"))
             or re.search(r"만\s*\d[\d,]*\s*세", phrase)
