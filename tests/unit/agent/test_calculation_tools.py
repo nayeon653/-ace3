@@ -8,9 +8,12 @@ import pytest
 from langgraph.types import Command
 
 from pension_agent.agent.calculation import (
+    create_dc_medical_withdrawal_threshold_tool,
     create_deferred_retirement_withdrawal_tax_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
+    create_medical_care_withdrawal_tax_breakdown_tool,
+    create_medical_care_withdrawal_tax_limit_tool,
     create_non_pension_withdrawal_tax_tool,
     create_pension_annual_limit_installment_tool,
     create_pension_income_tax_tool,
@@ -24,6 +27,23 @@ from pension_agent.agent.calculation import (
 )
 from pension_agent.agent.calculation.input_sources import validated_input_sources
 from pension_agent.agent.search import SearchResult
+
+_DC_DURATION_SOURCE = "재직 1년 이상"
+_DC_MEDICAL_SOURCE = "근로자 부담 증빙 의료비 1,300만원"
+_DC_PREVIOUS_WAGES_SOURCE = "직전연도 연간임금총액 1억원"
+_DC_PRECEDING_WAGES_SOURCE = "신청일 기준 직전 12개월 임금 8천만원"
+_MEDICAL_CARE_REQUEST_SOURCE = "의료·요양 총 인출 요청액 300만원"
+_ACTUAL_MEDICAL_SOURCE = "과세한도 산식 실제 의료비 50만원"
+_CARE_EXPENSE_SOURCE = "간병비 25만원"
+_OWN_LEAVE_SOURCE = "본인 휴직 0개월"
+
+
+def _medical_care_runtime(*sources: str, chunk: bool = False) -> SimpleNamespace:
+    content = "; ".join(sources)
+    return _runtime(
+        question="의료·요양 인출을 계산해줘" if chunk else content,
+        chunk_content=content,
+    )
 
 
 def _runtime(
@@ -1356,6 +1376,265 @@ async def test_withdrawal_allocation_tool_returns_rules_error_above_balance() ->
     )
     assert isinstance(result, str)
     assert "error" in result
+
+
+@pytest.mark.anyio
+async def test_dc_medical_threshold_tool_calculates_and_preserves_sources() -> None:
+    sources = (_DC_DURATION_SOURCE, _DC_MEDICAL_SOURCE, _DC_PREVIOUS_WAGES_SOURCE)
+    result = await create_dc_medical_withdrawal_threshold_tool().coroutine(
+        employment_duration_category="at_least_one_year",
+        documented_medical_expenses_krw=Decimal(13_000_000),
+        employment_duration_category_source=_DC_DURATION_SOURCE,
+        documented_medical_expenses_krw_source=_DC_MEDICAL_SOURCE,
+        previous_year_annual_wages_krw=Decimal(100_000_000),
+        previous_year_annual_wages_krw_source=_DC_PREVIOUS_WAGES_SOURCE,
+        runtime=_medical_care_runtime(*sources, chunk=True),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "dc_medical_withdrawal_threshold"
+    assert calculation["outputs"]["threshold_met"] is True
+    assert set(calculation["inputs"]) == set(calculation["input_sources"])
+    assert {source["origin"] for source in calculation["input_sources"].values()} == {"evidence"}
+
+
+@pytest.mark.anyio
+async def test_dc_medical_threshold_tool_selects_lower_preceding_wages() -> None:
+    sources = (
+        _DC_DURATION_SOURCE,
+        _DC_MEDICAL_SOURCE,
+        _DC_PREVIOUS_WAGES_SOURCE,
+        _DC_PRECEDING_WAGES_SOURCE,
+    )
+    result = await create_dc_medical_withdrawal_threshold_tool().coroutine(
+        employment_duration_category="at_least_one_year",
+        documented_medical_expenses_krw=Decimal(13_000_000),
+        employment_duration_category_source=_DC_DURATION_SOURCE,
+        documented_medical_expenses_krw_source=_DC_MEDICAL_SOURCE,
+        previous_year_annual_wages_krw=Decimal(100_000_000),
+        previous_year_annual_wages_krw_source=_DC_PREVIOUS_WAGES_SOURCE,
+        preceding_12_month_wages_krw=Decimal(80_000_000),
+        preceding_12_month_wages_krw_source=_DC_PRECEDING_WAGES_SOURCE,
+        runtime=_medical_care_runtime(*sources),
+    )
+
+    assert isinstance(result, Command)
+    outputs = result.update["calculations"][0]["outputs"]
+    assert outputs["applicable_wages_krw"] == "80000000"
+    assert outputs["wage_basis"] == "preceding_12_month_wages"
+
+
+@pytest.mark.anyio
+async def test_dc_medical_threshold_accepts_exact_month_duration_and_zero_values() -> None:
+    sources = ("재직 11개월", "근로자 부담 증빙 의료비 0원", "재직 중 월평균 급여 0원")
+    result = await create_dc_medical_withdrawal_threshold_tool().coroutine(
+        employment_duration_category="less_than_one_year",
+        documented_medical_expenses_krw=Decimal(0),
+        employment_duration_category_source=sources[0],
+        documented_medical_expenses_krw_source=sources[1],
+        average_monthly_wage_during_employment_krw=Decimal(0),
+        average_monthly_wage_during_employment_krw_source=sources[2],
+        runtime=_medical_care_runtime(*sources),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"]["documented_medical_expenses_krw"] == "0"
+    assert calculation["inputs"]["average_monthly_wage_during_employment_krw"] == "0"
+    assert calculation["outputs"]["threshold_met"] is False
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "bad_source"),
+    [
+        ("previous_year_annual_wages_krw_source", _DC_PRECEDING_WAGES_SOURCE),
+        ("previous_year_annual_wages_krw_source", "재직 중 월평균 급여 1억원"),
+        ("previous_year_annual_wages_krw_source", "배우자 직전연도 연간임금총액 1억원"),
+        ("documented_medical_expenses_krw_source", "의료 목적 인출 요청액 1,300만원"),
+        ("documented_medical_expenses_krw_source", "금액 1,300만원"),
+        ("documented_medical_expenses_krw_source", "근로자 부담 증빙 의료비가 아님 1,300만원"),
+        ("employment_duration_category_source", "재직 약 1년"),
+        ("employment_duration_category_source", "재직 11개월"),
+    ],
+)
+async def test_dc_medical_threshold_rejects_provenance_mismatch(
+    field: str, bad_source: str
+) -> None:
+    values: dict[str, object] = {
+        "employment_duration_category": "at_least_one_year",
+        "documented_medical_expenses_krw": Decimal(13_000_000),
+        "employment_duration_category_source": _DC_DURATION_SOURCE,
+        "documented_medical_expenses_krw_source": _DC_MEDICAL_SOURCE,
+        "previous_year_annual_wages_krw": Decimal(100_000_000),
+        "previous_year_annual_wages_krw_source": _DC_PREVIOUS_WAGES_SOURCE,
+    }
+    values[field] = bad_source
+    sources = [str(value) for key, value in values.items() if key.endswith("_source")]
+    result = await create_dc_medical_withdrawal_threshold_tool().coroutine(
+        **values,
+        runtime=_medical_care_runtime(*sources),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+def _medical_limit_tool_inputs(**updates: object) -> dict[str, object]:
+    inputs: dict[str, object] = {
+        "requested_withdrawal_krw": Decimal(3_000_000),
+        "actual_medical_expenses_krw": Decimal(500_000),
+        "care_expenses_krw": Decimal(250_000),
+        "own_leave_months": 0,
+        "requested_withdrawal_krw_source": _MEDICAL_CARE_REQUEST_SOURCE,
+        "actual_medical_expenses_krw_source": _ACTUAL_MEDICAL_SOURCE,
+        "care_expenses_krw_source": _CARE_EXPENSE_SOURCE,
+        "own_leave_months_source": _OWN_LEAVE_SOURCE,
+    }
+    inputs.update(updates)
+    return inputs
+
+
+def _source_values(inputs: dict[str, object]) -> list[str]:
+    return [str(value) for key, value in inputs.items() if key.endswith("_source")]
+
+
+@pytest.mark.anyio
+async def test_medical_care_limit_tool_calculates_and_preserves_sources() -> None:
+    inputs = _medical_limit_tool_inputs()
+    result = await create_medical_care_withdrawal_tax_limit_tool().coroutine(
+        **inputs,
+        runtime=_medical_care_runtime(*_source_values(inputs)),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "medical_care_withdrawal_tax_limit"
+    assert calculation["outputs"] == {
+        "tax_limit_krw": "2750000",
+        "amount_within_limit_krw": "2750000",
+        "excess_amount_krw": "250000",
+    }
+    assert set(calculation["inputs"]) == set(calculation["input_sources"])
+
+
+@pytest.mark.anyio
+async def test_medical_care_limit_allows_shared_source_with_each_meaning_and_value() -> None:
+    shared = "의료·요양 총 인출 요청액 300만원, 실제 의료비 50만원, 간병비 25만원, 본인 휴직 2개월"
+    result = await create_medical_care_withdrawal_tax_limit_tool().coroutine(
+        requested_withdrawal_krw=Decimal(3_000_000),
+        actual_medical_expenses_krw=Decimal(500_000),
+        care_expenses_krw=Decimal(250_000),
+        own_leave_months=2,
+        requested_withdrawal_krw_source=shared,
+        actual_medical_expenses_krw_source=shared,
+        care_expenses_krw_source=shared,
+        own_leave_months_source=shared,
+        runtime=_medical_care_runtime(shared),
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"]["tax_limit_krw"] == "5750000"
+
+
+@pytest.mark.anyio
+async def test_medical_care_limit_preserves_explicit_zero_sources() -> None:
+    inputs = _medical_limit_tool_inputs(
+        actual_medical_expenses_krw=Decimal(0),
+        care_expenses_krw=Decimal(0),
+        actual_medical_expenses_krw_source="실제 의료비 없음",
+        care_expenses_krw_source="간병비 0원",
+        own_leave_months_source="본인 휴직 없음",
+    )
+    result = await create_medical_care_withdrawal_tax_limit_tool().coroutine(
+        **inputs,
+        runtime=_medical_care_runtime(*_source_values(inputs)),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"]["actual_medical_expenses_krw"] == "0"
+    assert calculation["inputs"]["care_expenses_krw"] == "0"
+    assert calculation["inputs"]["own_leave_months"] == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "source"),
+    [
+        ("requested_withdrawal_krw_source", "계좌 전체 잔액 300만원"),
+        ("requested_withdrawal_krw_source", "실제 의료비 300만원"),
+        ("actual_medical_expenses_krw_source", "의료·요양 총 인출 요청액 50만원"),
+        ("actual_medical_expenses_krw_source", "간병비 50만원"),
+        ("care_expenses_krw_source", "실제 의료비 25만원"),
+        ("own_leave_months_source", "가족 휴직 0개월"),
+        ("own_leave_months_source", "본인 요양기간 0개월"),
+        ("own_leave_months_source", "본인 휴직이 아님 0개월"),
+    ],
+)
+async def test_medical_care_limit_rejects_provenance_mismatch(field: str, source: str) -> None:
+    inputs = _medical_limit_tool_inputs(**{field: source})
+    result = await create_medical_care_withdrawal_tax_limit_tool().coroutine(
+        **inputs,
+        runtime=_medical_care_runtime(*_source_values(inputs)),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("requested", "age", "expected_tax", "expect_null"),
+    [
+        (Decimal(2_750_000), 69, "151250.000", False),
+        (Decimal(3_000_000), 70, "121000.000", True),
+    ],
+)
+async def test_medical_care_breakdown_preserves_rules_results_and_warnings(
+    requested: Decimal, age: int, expected_tax: str, expect_null: bool
+) -> None:
+    inputs = _medical_limit_tool_inputs(
+        requested_withdrawal_krw=requested,
+        requested_withdrawal_krw_source=f"의료·요양 총 인출 요청액 {requested}원",
+    )
+    result = await create_medical_care_withdrawal_tax_breakdown_tool().coroutine(
+        **inputs,
+        recipient_age=age,
+        recipient_age_source=f"수령자 나이 {age}세",
+        runtime=_medical_care_runtime(*_source_values(inputs), f"수령자 나이 {age}세", chunk=True),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "medical_care_withdrawal_tax_breakdown"
+    assert calculation["outputs"]["within_limit_tax_krw"] == expected_tax
+    assert (calculation["outputs"]["current_withdrawal_tax_krw"] is None) is expect_null
+    assert (calculation["outputs"]["current_withdrawal_after_tax_krw"] is None) is expect_null
+    assert set(calculation["inputs"]) == set(calculation["input_sources"])
+    if expect_null:
+        assert "초과액" in " ".join(calculation["warnings"])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "age_source",
+    ["수령자 나이 70대", "수령자 나이 약 70세", "수령자 나이 70세 이상", "배우자 나이 70세"],
+)
+async def test_medical_care_breakdown_rejects_non_exact_or_other_person_age(
+    age_source: str,
+) -> None:
+    inputs = _medical_limit_tool_inputs()
+    result = await create_medical_care_withdrawal_tax_breakdown_tool().coroutine(
+        **inputs,
+        recipient_age=70,
+        recipient_age_source=age_source,
+        runtime=_medical_care_runtime(*_source_values(inputs), age_source),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
 
 
 @pytest.mark.parametrize(

@@ -29,6 +29,13 @@ CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME = (
 )
 CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME = "calculate_pension_withdrawal_allocation"
 CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME = "calculate_pension_withdrawal_tax_breakdown"
+CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME = "calculate_dc_medical_withdrawal_threshold"
+CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME = (
+    "calculate_medical_care_withdrawal_tax_limit"
+)
+CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME = (
+    "calculate_medical_care_withdrawal_tax_breakdown"
+)
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
 
@@ -637,6 +644,156 @@ def create_pension_withdrawal_allocation_tool() -> BaseTool:
     return calculate_pension_withdrawal_allocation
 
 
+def create_dc_medical_withdrawal_threshold_tool() -> BaseTool:
+    """Policy Agent용 DC 의료비 12.5% 기준 계산 Tool을 만든다."""
+
+    @tool(CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME)
+    async def calculate_dc_medical_withdrawal_threshold(
+        employment_duration_category: Literal["less_than_one_year", "at_least_one_year"],
+        documented_medical_expenses_krw: Annotated[Decimal, Field(ge=0)],
+        employment_duration_category_source: Annotated[str, Field(min_length=1, max_length=120)],
+        documented_medical_expenses_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+        previous_year_annual_wages_krw: Annotated[Decimal | None, Field(ge=0)] = None,
+        previous_year_annual_wages_krw_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+        preceding_12_month_wages_krw: Annotated[Decimal | None, Field(ge=0)] = None,
+        preceding_12_month_wages_krw_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+        average_monthly_wage_during_employment_krw: Annotated[Decimal | None, Field(ge=0)] = None,
+        average_monthly_wage_during_employment_krw_source: Annotated[
+            str | None, Field(min_length=1, max_length=120)
+        ] = None,
+    ) -> Command | str:
+        """검증된 임금과 의료비로 DC 12.5% 기준을 계산한다."""
+
+        inputs: dict[str, Any] = {
+            "employment_duration_category": employment_duration_category,
+            "documented_medical_expenses_krw": documented_medical_expenses_krw,
+        }
+        input_sources = {
+            "employment_duration_category": employment_duration_category_source,
+            "documented_medical_expenses_krw": documented_medical_expenses_krw_source,
+        }
+        optional_entries: tuple[tuple[str, Any, str | None], ...] = (
+            (
+                "previous_year_annual_wages_krw",
+                previous_year_annual_wages_krw,
+                previous_year_annual_wages_krw_source,
+            ),
+            (
+                "preceding_12_month_wages_krw",
+                preceding_12_month_wages_krw,
+                preceding_12_month_wages_krw_source,
+            ),
+            (
+                "average_monthly_wage_during_employment_krw",
+                average_monthly_wage_during_employment_krw,
+                average_monthly_wage_during_employment_krw_source,
+            ),
+        )
+        for field, value, source in optional_entries:
+            if (value is None) != (source is None):
+                return json.dumps(
+                    {"error": "선택 입력값과 출처는 함께 제공해야 합니다."},
+                    ensure_ascii=False,
+                )
+            if value is not None:
+                inputs[field] = value
+                input_sources[field] = cast(str, source)
+        return _execute_calculation(
+            calculator_id="dc_medical_withdrawal_threshold",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_dc_medical_withdrawal_threshold
+
+
+def create_medical_care_withdrawal_tax_limit_tool() -> BaseTool:
+    """Tax/Payout Agent용 의료·요양 저율과세 한도 Tool을 만든다."""
+
+    @tool(CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME)
+    async def calculate_medical_care_withdrawal_tax_limit(
+        requested_withdrawal_krw: Annotated[Decimal, Field(ge=0)],
+        actual_medical_expenses_krw: Annotated[Decimal, Field(ge=0)],
+        care_expenses_krw: Annotated[Decimal, Field(ge=0)],
+        own_leave_months: Annotated[int, Field(ge=0)],
+        requested_withdrawal_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        actual_medical_expenses_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        care_expenses_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        own_leave_months_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """검증된 의료·요양 입력으로 저율과세 한도를 계산한다."""
+
+        return _execute_calculation(
+            calculator_id="medical_care_withdrawal_tax_limit",
+            inputs={
+                "requested_withdrawal_krw": requested_withdrawal_krw,
+                "actual_medical_expenses_krw": actual_medical_expenses_krw,
+                "care_expenses_krw": care_expenses_krw,
+                "own_leave_months": own_leave_months,
+            },
+            input_sources={
+                "requested_withdrawal_krw": requested_withdrawal_krw_source,
+                "actual_medical_expenses_krw": actual_medical_expenses_krw_source,
+                "care_expenses_krw": care_expenses_krw_source,
+                "own_leave_months": own_leave_months_source,
+            },
+            tool_name=CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_medical_care_withdrawal_tax_limit
+
+
+def create_medical_care_withdrawal_tax_breakdown_tool() -> BaseTool:
+    """Tax/Payout Agent용 의료·요양 한도 내 세액 명세 Tool을 만든다."""
+
+    @tool(CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME)
+    async def calculate_medical_care_withdrawal_tax_breakdown(
+        requested_withdrawal_krw: Annotated[Decimal, Field(ge=0)],
+        actual_medical_expenses_krw: Annotated[Decimal, Field(ge=0)],
+        care_expenses_krw: Annotated[Decimal, Field(ge=0)],
+        own_leave_months: Annotated[int, Field(ge=0)],
+        recipient_age: Annotated[int, Field(ge=0)],
+        requested_withdrawal_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        actual_medical_expenses_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        care_expenses_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        own_leave_months_source: Annotated[str, Field(min_length=1, max_length=120)],
+        recipient_age_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """검증된 의료·요양 입력과 나이로 한도 내 세액을 계산한다."""
+
+        return _execute_calculation(
+            calculator_id="medical_care_withdrawal_tax_breakdown",
+            inputs={
+                "requested_withdrawal_krw": requested_withdrawal_krw,
+                "actual_medical_expenses_krw": actual_medical_expenses_krw,
+                "care_expenses_krw": care_expenses_krw,
+                "own_leave_months": own_leave_months,
+                "recipient_age": recipient_age,
+            },
+            input_sources={
+                "requested_withdrawal_krw": requested_withdrawal_krw_source,
+                "actual_medical_expenses_krw": actual_medical_expenses_krw_source,
+                "care_expenses_krw": care_expenses_krw_source,
+                "own_leave_months": own_leave_months_source,
+                "recipient_age": recipient_age_source,
+            },
+            tool_name=CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_medical_care_withdrawal_tax_breakdown
+
+
 def create_pension_withdrawal_tax_breakdown_tool() -> BaseTool:
     """재원·수령구분별 현재 인출 세금 명세를 계산하는 Tool을 만든다."""
 
@@ -882,6 +1039,7 @@ def _execute_calculation(
         inputs=inputs,
         input_sources=input_sources,
         state=runtime.state,
+        calculator_id=calculator_id,
     )
     if verified_sources is None:
         return json.dumps(
