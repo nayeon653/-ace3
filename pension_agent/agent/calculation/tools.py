@@ -30,6 +30,10 @@ CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME = (
 CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME = "calculate_pension_withdrawal_allocation"
 CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME = "calculate_pension_withdrawal_tax_breakdown"
 CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME = "calculate_dc_medical_withdrawal_threshold"
+CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME = "calculate_db_retirement_benefit"
+CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME = "calculate_dc_minimum_employer_contribution"
+CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME = "calculate_dc_retirement_benefit"
+CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME = "calculate_db_to_dc_transfer_amount"
 CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME = (
     "calculate_medical_care_withdrawal_tax_limit"
 )
@@ -712,6 +716,126 @@ def create_dc_medical_withdrawal_threshold_tool() -> BaseTool:
         )
 
     return calculate_dc_medical_withdrawal_threshold
+
+
+def create_db_retirement_benefit_tool() -> BaseTool:
+    """검증된 평균임금 입력과 계속근로연수로 DB 퇴직급여를 계산하는 Tool을 만든다."""
+
+    @tool(CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME)
+    async def calculate_db_retirement_benefit(
+        wages_for_average_period_krw: Annotated[Decimal, Field(ge=0)],
+        included_days_for_average_wage: Annotated[int, Field(ge=1)],
+        verified_service_years: Annotated[Decimal, Field(ge=0)],
+        wages_for_average_period_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        included_days_for_average_wage_source: Annotated[str, Field(min_length=1, max_length=120)],
+        verified_service_years_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """검증된 최근 3개월 임금·포함 일수·근속연수로 DB 급여를 계산한다."""
+
+        return _execute_calculation(
+            calculator_id="db_retirement_benefit",
+            inputs={
+                "wages_for_average_period_krw": wages_for_average_period_krw,
+                "included_days_for_average_wage": included_days_for_average_wage,
+                "verified_service_years": verified_service_years,
+            },
+            input_sources={
+                "wages_for_average_period_krw": wages_for_average_period_krw_source,
+                "included_days_for_average_wage": included_days_for_average_wage_source,
+                "verified_service_years": verified_service_years_source,
+            },
+            tool_name=CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_db_retirement_benefit
+
+
+def create_dc_minimum_employer_contribution_tool() -> BaseTool:
+    """검증된 연간임금총액으로 DC 최소 사용자 부담금을 계산하는 Tool을 만든다."""
+
+    @tool(CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME)
+    async def calculate_dc_minimum_employer_contribution(
+        annual_total_wages_krw: Annotated[Decimal, Field(ge=0)],
+        annual_total_wages_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """검증된 연간임금총액의 12분의 1을 계산한다."""
+
+        return _execute_calculation(
+            calculator_id="dc_minimum_employer_contribution",
+            inputs={"annual_total_wages_krw": annual_total_wages_krw},
+            input_sources={"annual_total_wages_krw": annual_total_wages_krw_source},
+            tool_name=CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_dc_minimum_employer_contribution
+
+
+def create_dc_retirement_benefit_tool() -> BaseTool:
+    """검증된 누적 부담금과 운용손익으로 DC 퇴직급여를 계산하는 Tool을 만든다."""
+
+    @tool(CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME)
+    async def calculate_dc_retirement_benefit(
+        accumulated_contributions_krw: Annotated[Decimal, Field(ge=0)],
+        investment_gain_loss_krw: Decimal,
+        accumulated_contributions_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        investment_gain_loss_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """검증된 DC 누적 부담금과 부호 있는 누적 운용손익을 합산한다."""
+
+        return _execute_calculation(
+            calculator_id="dc_retirement_benefit",
+            inputs={
+                "accumulated_contributions_krw": accumulated_contributions_krw,
+                "investment_gain_loss_krw": investment_gain_loss_krw,
+            },
+            input_sources={
+                "accumulated_contributions_krw": accumulated_contributions_krw_source,
+                "investment_gain_loss_krw": investment_gain_loss_krw_source,
+            },
+            tool_name=CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_dc_retirement_benefit
+
+
+def create_db_to_dc_transfer_amount_tool() -> BaseTool:
+    """검증된 두 임금 기준과 근속연수로 DB→DC 전환금액을 계산하는 Tool을 만든다."""
+
+    @tool(CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME)
+    async def calculate_db_to_dc_transfer_amount(
+        final_average_wage_30_days_krw: Annotated[Decimal, Field(ge=0)],
+        final_annual_total_wages_krw: Annotated[Decimal, Field(ge=0)],
+        verified_service_years: Annotated[Decimal, Field(ge=0)],
+        final_average_wage_30_days_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        final_annual_total_wages_krw_source: Annotated[str, Field(min_length=1, max_length=120)],
+        verified_service_years_source: Annotated[str, Field(min_length=1, max_length=120)],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        """전환 기준시점의 두 임금 기준 중 큰 값에 검증된 근속연수를 적용한다."""
+
+        return _execute_calculation(
+            calculator_id="db_to_dc_transfer_amount",
+            inputs={
+                "final_average_wage_30_days_krw": final_average_wage_30_days_krw,
+                "final_annual_total_wages_krw": final_annual_total_wages_krw,
+                "verified_service_years": verified_service_years,
+            },
+            input_sources={
+                "final_average_wage_30_days_krw": final_average_wage_30_days_krw_source,
+                "final_annual_total_wages_krw": final_annual_total_wages_krw_source,
+                "verified_service_years": verified_service_years_source,
+            },
+            tool_name=CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_db_to_dc_transfer_amount
 
 
 def create_medical_care_withdrawal_tax_limit_tool() -> BaseTool:

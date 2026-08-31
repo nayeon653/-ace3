@@ -3,7 +3,11 @@
 from pension_agent.agent.calculation.input_sources import calculation_evidence_chunk_ids
 from pension_agent.agent.calculation.presentation import format_calculation_summary
 from pension_agent.agent.calculation.tools import (
+    CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
+    CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME,
     CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME,
+    CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
+    CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
     CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME,
     CALCULATE_FUND_VAR_RISK_TOOL_NAME,
@@ -18,7 +22,11 @@ from pension_agent.agent.calculation.tools import (
     CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+    create_db_retirement_benefit_tool,
+    create_db_to_dc_transfer_amount_tool,
     create_dc_medical_withdrawal_threshold_tool,
+    create_dc_minimum_employer_contribution_tool,
+    create_dc_retirement_benefit_tool,
     create_deferred_retirement_withdrawal_tax_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
@@ -36,7 +44,11 @@ from pension_agent.agent.calculation.tools import (
 )
 
 __all__ = [
+    "CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME",
+    "CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME",
     "CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME",
+    "CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME",
+    "CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME",
     "CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME",
     "CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME",
     "CALCULATE_FUND_VAR_RISK_TOOL_NAME",
@@ -52,7 +64,11 @@ __all__ = [
     "CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME",
     "CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME",
     "calculation_evidence_chunk_ids",
+    "create_db_retirement_benefit_tool",
+    "create_db_to_dc_transfer_amount_tool",
     "create_dc_medical_withdrawal_threshold_tool",
+    "create_dc_minimum_employer_contribution_tool",
+    "create_dc_retirement_benefit_tool",
     "create_deferred_retirement_withdrawal_tax_tool",
     "create_fund_standard_price_tool",
     "create_fund_var_risk_tool",
