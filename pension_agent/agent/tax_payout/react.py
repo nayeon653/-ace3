@@ -25,6 +25,10 @@ from langgraph.types import Command
 from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
+    CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
+    CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME,
+    CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
+    CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
     CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
     CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
@@ -38,6 +42,10 @@ from pension_agent.agent.calculation import (
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
     calculation_evidence_chunk_ids,
+    create_db_retirement_benefit_tool,
+    create_db_to_dc_transfer_amount_tool,
+    create_dc_minimum_employer_contribution_tool,
+    create_dc_retirement_benefit_tool,
     create_deferred_retirement_withdrawal_tax_tool,
     create_medical_care_withdrawal_tax_breakdown_tool,
     create_medical_care_withdrawal_tax_limit_tool,
@@ -88,6 +96,8 @@ _NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID = "non_pension_withdrawal_tax"
 _PENSION_WITHDRAWAL_TAX_BREAKDOWN_CALCULATOR_ID = "pension_withdrawal_tax_breakdown"
 _MEDICAL_CARE_TAX_LIMIT_CALCULATOR_ID = "medical_care_withdrawal_tax_limit"
 _MEDICAL_CARE_TAX_BREAKDOWN_CALCULATOR_ID = "medical_care_withdrawal_tax_breakdown"
+_DB_RETIREMENT_BENEFIT_CALCULATOR_ID = "db_retirement_benefit"
+_DC_RETIREMENT_BENEFIT_CALCULATOR_ID = "dc_retirement_benefit"
 _RECIPIENT_AGE_MISSING_CONDITION = "정확한 수령자 나이 확인 필요"
 _MEDICAL_CARE_EXCESS_MISSING_CONDITION = "초과액의 재원 및 연금수령·연금외수령 구분 확인 필요"
 _TAX_AMOUNT_INTENT_PATTERN = re.compile(r"세액|세후|세금|실수령|납부세액")
@@ -97,6 +107,24 @@ _PENSION_TAX_COMPARISON_TOOL_NAMES = frozenset(
         CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
     }
 )
+_DB_DC_BENEFIT_COMPARISON_TOOL_NAMES = frozenset(
+    {
+        CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
+        CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
+    }
+)
+_DB_SERVICE_YEARS_MISSING_CONDITION = "검증된 계속근로연수 확인 필요"
+_DC_ANNUAL_WAGES_MISSING_CONDITION = "연간임금총액 확인 필요"
+_DC_CONTRIBUTIONS_MISSING_CONDITION = "누적 부담금 확인 필요"
+_DC_GAIN_LOSS_MISSING_CONDITION = "운용손익 확인 필요"
+_RETIREMENT_SCHEME_MISSING_CONDITION = "DB 또는 DC 제도 유형 확인 필요"
+_DB_WAGES_MISSING_CONDITION = "평균임금 산정 대상 최근 3개월 임금 합계 확인 필요"
+_DB_INCLUDED_DAYS_MISSING_CONDITION = "평균임금 산정 포함 일수 확인 필요"
+_TRANSFER_FINAL_AVERAGE_WAGE_MISSING_CONDITION = "전환 기준 최종 30일 평균임금 확인 필요"
+_TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION = "전환 기준 최종 연간임금총액 확인 필요"
+_RETIREMENT_INPUT_SOURCE_MISSING_CONDITION = "검증된 퇴직급여 계산 입력 출처 확인 필요"
+_RETIREMENT_AMOUNT_INTENT_PATTERN = re.compile(r"계산|얼마|금액|급여액|부담금")
+_COMPARISON_INTENT_PATTERN = re.compile(r"비교|차이|대비|각각")
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
 _NUMERIC_CLAIM_REMOVED_WARNING = "근거 없이 제출된 확정 수치는 결과에서 제거했습니다."
 _NUMERIC_CLAIM_RESUBMIT_INSTRUCTION = (
@@ -104,6 +132,18 @@ _NUMERIC_CLAIM_RESUBMIT_INSTRUCTION = (
     "제출하고, 정확한 계산이 필요한 질문이면 status를 conditional로 하고 missing_conditions에 "
     "결정론적 계산 Tool 결과를 남겨 다시 제출하세요."
 )
+
+
+def _is_db_dc_benefit_comparison(state: Mapping[str, Any]) -> bool:
+    """질문이 DB와 DC 퇴직급여 금액의 명시적 비교인지 좁게 확인한다."""
+
+    text = f"{state.get('question', '')} {state.get('objective', '')}"
+    return (
+        "DB" in text
+        and "DC" in text
+        and "퇴직급여" in text
+        and bool(_COMPARISON_INTENT_PATTERN.search(text))
+    )
 
 
 class TaxPayoutAgentState(AgentState):
@@ -194,7 +234,10 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
                 "둘 중 하나만 호출하세요. 의료·요양 저율과세 한도만 필요하거나 정확한 나이가 "
                 "없으면 calculate_medical_care_withdrawal_tax_limit Tool을, 적용 사유와 원 입력 및 "
                 "정확한 나이가 모두 확인되면 calculate_medical_care_withdrawal_tax_breakdown Tool을 "
-                "둘 중 하나만 호출하세요. "
+                "둘 중 하나만 호출하세요. DB 퇴직급여, DC 최소 사용자 부담금, DC 퇴직급여, "
+                "DB→DC 전환금액은 각각 대응하는 calculate_db_retirement_benefit, "
+                "calculate_dc_minimum_employer_contribution, calculate_dc_retirement_benefit, "
+                "calculate_db_to_dc_transfer_amount Tool을 사용하고 필수 입력을 0으로 채우지 마세요. "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
         else:
@@ -263,6 +306,23 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
                     CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
                     SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                 )
+            elif _is_db_dc_benefit_comparison(state):
+                completed_benefit_ids = completed_ids & {
+                    _DB_RETIREMENT_BENEFIT_CALCULATOR_ID,
+                    _DC_RETIREMENT_BENEFIT_CALCULATOR_ID,
+                }
+                if completed_benefit_ids == {_DB_RETIREMENT_BENEFIT_CALCULATOR_ID}:
+                    allowed_tools = (
+                        CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
+                        SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                    )
+                elif completed_benefit_ids == {_DC_RETIREMENT_BENEFIT_CALCULATOR_ID}:
+                    allowed_tools = (
+                        CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
+                        SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                    )
+                else:
+                    allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
             else:
                 allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
         else:
@@ -279,13 +339,21 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
                 CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
                 CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
                 CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+                CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
+                CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
+                CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
+                CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
         calculation_calls = [
             call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
         ]
-        if {call["name"] for call in calculation_calls} == _PENSION_TAX_COMPARISON_TOOL_NAMES:
+        calculation_tool_names = {call["name"] for call in calculation_calls}
+        if calculation_tool_names == _PENSION_TAX_COMPARISON_TOOL_NAMES or (
+            calculation_tool_names == _DB_DC_BENEFIT_COMPARISON_TOOL_NAMES
+            and _is_db_dc_benefit_comparison(state)
+        ):
             kept_calls = calculation_calls
         elif calculation_calls:
             kept_calls = calculation_calls[:1]
@@ -341,6 +409,10 @@ def create_tax_payout_react_agent(
     withdrawal_tax_breakdown_tool = create_pension_withdrawal_tax_breakdown_tool()
     medical_care_limit_tool = create_medical_care_withdrawal_tax_limit_tool()
     medical_care_breakdown_tool = create_medical_care_withdrawal_tax_breakdown_tool()
+    db_retirement_benefit_tool = create_db_retirement_benefit_tool()
+    dc_minimum_contribution_tool = create_dc_minimum_employer_contribution_tool()
+    dc_retirement_benefit_tool = create_dc_retirement_benefit_tool()
+    db_to_dc_transfer_tool = create_db_to_dc_transfer_amount_tool()
     graph = create_agent(
         model=model,
         tools=(
@@ -357,6 +429,10 @@ def create_tax_payout_react_agent(
             withdrawal_tax_breakdown_tool,
             medical_care_limit_tool,
             medical_care_breakdown_tool,
+            db_retirement_benefit_tool,
+            dc_minimum_contribution_tool,
+            dc_retirement_benefit_tool,
+            db_to_dc_transfer_tool,
             _create_tax_payout_result_tool(),
         ),
         system_prompt=system_prompt,
@@ -430,6 +506,26 @@ def create_tax_payout_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=medical_care_breakdown_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=db_retirement_benefit_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=dc_minimum_contribution_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=dc_retirement_benefit_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=db_to_dc_transfer_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),
@@ -714,6 +810,10 @@ def _build_tax_payout_result(
                 warnings=normalized_warnings,
             )
         )
+        retirement_missing = _retirement_calculation_missing_conditions(question, search_result)
+        if retirement_missing:
+            status = "conditional"
+            normalized_missing = list(dict.fromkeys([*normalized_missing, *retirement_missing]))
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
@@ -753,6 +853,77 @@ def _has_unconditioned_pension_tax_credit_rate_scenarios(
         and "other_income_rate_percent" in calculation["outputs"]
         for calculation in calculations
     )
+
+
+def _retirement_calculation_missing_conditions(
+    question: str, search_result: SearchResult
+) -> list[str]:
+    """명확한 #118 금액 요청이 계산 없이 제출될 때 확인할 입력을 반환한다."""
+
+    if not _RETIREMENT_AMOUNT_INTENT_PATTERN.search(question):
+        return []
+    source_text = " ".join([question, *(chunk.content for chunk in search_result.retrieved_chunks)])
+    if "DB→DC" in question or "DB에서 DC" in question:
+        missing = _missing_labeled_values(
+            source_text,
+            (
+                (
+                    ("최종 30일 평균임금", "최종 30일평균임금"),
+                    _TRANSFER_FINAL_AVERAGE_WAGE_MISSING_CONDITION,
+                ),
+                (
+                    ("최종 연간임금총액", "최종 연간 임금총액"),
+                    _TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION,
+                ),
+                (("계속근로연수", "근속연수"), _DB_SERVICE_YEARS_MISSING_CONDITION),
+            ),
+        )
+    elif "DC" in question and any(
+        label in question for label in ("최소 사용자 부담금", "최소 부담금")
+    ):
+        missing = _missing_labeled_values(
+            source_text,
+            ((("연간임금총액", "연간 임금총액"), _DC_ANNUAL_WAGES_MISSING_CONDITION),),
+        )
+    elif "DB" in question and "퇴직급여" in question:
+        missing = _missing_labeled_values(
+            source_text,
+            (
+                (
+                    ("최근 3개월 임금 합계", "3개월 임금총액", "3개월 임금 총액"),
+                    _DB_WAGES_MISSING_CONDITION,
+                ),
+                (("산정일수", "포함 일수"), _DB_INCLUDED_DAYS_MISSING_CONDITION),
+                (("계속근로연수", "근속연수"), _DB_SERVICE_YEARS_MISSING_CONDITION),
+            ),
+        )
+    elif "DC" in question and "퇴직급여" in question:
+        missing = _missing_labeled_values(
+            source_text,
+            (
+                (("누적 부담금",), _DC_CONTRIBUTIONS_MISSING_CONDITION),
+                (("운용손익", "운용수익", "운용손실"), _DC_GAIN_LOSS_MISSING_CONDITION),
+            ),
+        )
+    elif "퇴직급여" in question and "DB" not in question and "DC" not in question:
+        return [_RETIREMENT_SCHEME_MISSING_CONDITION]
+    else:
+        return []
+    return missing or [_RETIREMENT_INPUT_SOURCE_MISSING_CONDITION]
+
+
+def _missing_labeled_values(
+    source_text: str,
+    requirements: tuple[tuple[tuple[str, ...], str], ...],
+) -> list[str]:
+    return [
+        condition
+        for labels, condition in requirements
+        if not any(
+            any(label in phrase for label in labels) and bool(re.search(r"\d", phrase))
+            for phrase in re.split(r"[;\n]+|,(?!\d)", source_text)
+        )
+    ]
 
 
 def _has_unknown_ordinary_pension_income_threshold(

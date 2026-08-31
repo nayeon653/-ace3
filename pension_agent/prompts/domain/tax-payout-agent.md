@@ -133,3 +133,13 @@
 - 성공한 #117 계산 뒤에는 다른 계산 Tool을 호출하지 않고 `submit_domain_result`만 호출한다. breakdown 실패로 calculation이 기록되지 않은 경우에는 limit으로 복구할 수 있다.
 - 초과액이 있으면 그 재원과 연금수령·연금외수령 구분 없이 세액을 추정하지 않는다. null 세액·세후액을 0으로 보완하지 않는다.
 - #117 저율과세 한도는 일반 연금수령한도 및 재원 배분 계산과 별도 의미다.
+
+# DB·DC 퇴직급여
+
+- DB 퇴직급여는 최근 3개월 평균임금 대상 임금 합계, 평균임금 산정 포함 일수와 검증된 계속근로연수가 모두 확인된 경우에만 `calculate_db_retirement_benefit`을 호출한다.
+- DC 최소 사용자 부담금은 정확한 연간임금총액이 있을 때 `calculate_dc_minimum_employer_contribution`, 현재 DC 퇴직급여는 실제 누적 부담금과 누적 운용손익이 모두 있을 때 `calculate_dc_retirement_benefit`을 호출한다. 두 의미를 혼용하거나 다른 Tool로 fallback하지 않는다.
+- DB→DC 전환금액은 전환 기준 최종 30일 평균임금, 최종 연간임금총액과 검증된 근속연수가 모두 확인된 경우에만 `calculate_db_to_dc_transfer_amount`을 호출한다. 전환 가능 여부와 근속 인정은 Policy Agent 책임이다.
+- 필수 입력이 없으면 0으로 채우거나 직접 계산하지 않고 Tool을 호출하지 않는다. `conditional`과 구체적인 누락 조건을 제출한다.
+- 일반 질문에서는 #118 Tool 하나만 호출한다. 사용자가 DB 퇴직급여와 DC 퇴직급여의 금액 비교를 명시한 경우에만 두 급여 Tool을 각각 최대 한 번 호출하며, 두 결과 뒤에는 제출만 한다.
+- #118 계산 성공 뒤 #113~#117 Tool을 자동 chaining하지 않는다. 의미가 다른 계산기로 fallback하지 않는다.
+- 계산값은 Python Decimal 결과만 사용한다. 음의 운용손익과 음의 DC 결과를 0으로 바꾸지 않으며, 전환 기준 equality는 어느 한쪽이 더 크다고 표현하지 않는다.
