@@ -54,6 +54,14 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
             lines.extend(_medical_care_withdrawal_tax_limit_lines(outputs, units))
         elif calculator_id == "medical_care_withdrawal_tax_breakdown":
             lines.extend(_medical_care_withdrawal_tax_breakdown_lines(outputs, units))
+        elif calculator_id == "db_retirement_benefit":
+            lines.extend(_db_retirement_benefit_lines(calculation["inputs"], outputs, units))
+        elif calculator_id == "dc_minimum_employer_contribution":
+            lines.extend(_dc_minimum_employer_contribution_lines(outputs, units))
+        elif calculator_id == "dc_retirement_benefit":
+            lines.extend(_dc_retirement_benefit_lines(outputs, units))
+        elif calculator_id == "db_to_dc_transfer_amount":
+            lines.extend(_db_to_dc_transfer_amount_lines(calculation["inputs"], outputs, units))
         elif calculator_id == "fund_standard_price":
             lines.append(
                 "펀드 1,000좌당 기준가격: "
@@ -293,6 +301,64 @@ def _medical_care_withdrawal_tax_breakdown_lines(
             "현재 전체 세후액: "
             f"{_value_or_unresolved(outputs, units, 'current_withdrawal_after_tax_krw')}"
         ),
+    ]
+
+
+def _db_retirement_benefit_lines(
+    inputs: dict[str, object], outputs: dict[str, object], units: dict[str, str]
+) -> list[str]:
+    return [
+        (
+            "평균임금 산정 대상 최근 3개월 임금 합계: "
+            f"{_value(inputs, {'wages_for_average_period_krw': 'KRW'}, 'wages_for_average_period_krw')}"
+        ),
+        f"평균임금 산정 포함 일수: {inputs['included_days_for_average_wage']}일",
+        f"평균일급: {_value(outputs, units, 'average_daily_wage')}",
+        f"30일 평균임금: {_value(outputs, units, 'average_wage_30_days')}",
+        f"검증된 계속근로연수: {_value(outputs, units, 'verified_service_years')}",
+        f"DB 퇴직급여: {_value(outputs, units, 'retirement_benefit')}",
+    ]
+
+
+def _dc_minimum_employer_contribution_lines(
+    outputs: dict[str, object], units: dict[str, str]
+) -> list[str]:
+    return [
+        f"연간임금총액: {_value(outputs, units, 'annual_total_wages')}",
+        f"DC 최소 사용자 부담금: {_value(outputs, units, 'minimum_employer_contribution')}",
+    ]
+
+
+def _dc_retirement_benefit_lines(outputs: dict[str, object], units: dict[str, str]) -> list[str]:
+    return [
+        f"DC 실제 누적 부담금: {_value(outputs, units, 'accumulated_contributions')}",
+        f"누적 운용손익: {_value(outputs, units, 'investment_gain_loss')}",
+        f"DC 퇴직급여: {_value(outputs, units, 'retirement_benefit')}",
+    ]
+
+
+def _db_to_dc_transfer_amount_lines(
+    inputs: dict[str, object], outputs: dict[str, object], units: dict[str, str]
+) -> list[str]:
+    basis_labels = {
+        "average_wage_30_days": "최종 30일 평균임금",
+        "annual_wage_monthly_basis": "최종 연간임금총액의 월 기준값",
+        "equal": "두 기준 동일",
+    }
+    basis_type = str(outputs["selected_basis_type"])
+    return [
+        f"전환 기준 최종 30일 평균임금: {_value(outputs, units, 'final_average_wage_30_days')}",
+        (
+            "전환 기준 최종 연간임금총액: "
+            f"{_value(inputs, {'final_annual_total_wages_krw': 'KRW'}, 'final_annual_total_wages_krw')}"
+        ),
+        f"최종 연간임금의 월 기준값: {_value(outputs, units, 'annual_wage_monthly_basis')}",
+        (
+            f"선택된 전환 기준: {basis_labels.get(basis_type, basis_type)}, "
+            f"{_value(outputs, units, 'selected_basis')}"
+        ),
+        f"검증된 근속연수: {_value(outputs, units, 'verified_service_years')}",
+        f"DB→DC 전환금액: {_value(outputs, units, 'transfer_amount')}",
     ]
 
 

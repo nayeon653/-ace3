@@ -272,6 +272,10 @@ DomainRequest
 | 이연퇴직소득세 Tool | 최대 1회 |
 | 연금 인출 재원 배분 Tool | 최대 1회 |
 | 연금 인출 세금 명세 Tool | 최대 1회 |
+| DB 퇴직급여 Tool | 최대 1회 |
+| DC 최소 사용자 부담금 Tool | 최대 1회 |
+| DC 퇴직급여 Tool | 최대 1회 |
+| DB→DC 전환금액 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |
@@ -299,3 +303,17 @@ DomainRequest
 - #114·#115·#116 계산과 chaining하지 않으며 #117 한도는 일반 연금수령한도 및 재원 배분과 별도 의미다.
 - 세액 질문에 나이가 없으면 한도를 보존하면서 `conditional`과 정확한 나이 누락 조건을 강제한다. 순수 한도 질문은 determined가 가능하다.
 - breakdown 초과액의 현재 전체 세액·세후액이 null이면 Python 경계가 `conditional`과 재원·수령구분 누락 조건을 강제한다. null은 숫자로 보완하지 않는다.
+
+## DB·DC 퇴직급여 계산
+
+Tax/Payout Agent에는 `calculate_db_retirement_benefit`,
+`calculate_dc_minimum_employer_contribution`, `calculate_dc_retirement_benefit`,
+`calculate_db_to_dc_transfer_amount`을 연결하며 각 Tool은 실행당 최대 한 번 호출한다.
+
+- DB 급여, DC 최소 사용자 부담금, DC 현재 급여와 DB→DC 전환금액의 입력 의미를 서로 바꾸지 않는다. 필수 입력과 source가 모두 확인된 경우에만 대응 Tool을 호출한다.
+- 일반 #118 질문에서는 하나의 Tool만 성공할 수 있다. 명시적인 DB 퇴직급여 대 DC 퇴직급여 금액 비교에만 두 급여 Tool을 각각 한 번 허용하고, 두 계산 뒤에는 submit만 허용한다.
+- 계산 성공 후 기존 세금·인출·분할지급 Tool을 자동 chaining하지 않는다. provenance 실패 시 다른 의미의 #118 Tool로 fallback하지 않는다.
+- 필수 입력이 없으면 0으로 보완하지 않고 Tool을 호출하지 않는다. Python 결과 경계는 명확한 금액 요청에 구체적인 누락 조건과 `conditional`을 강제한다.
+- 평균임금 제외기간, 근속 인정과 전환 가능 여부는 Policy 책임이다. Agent와 Tool은 날짜에서 포함 일수나 근속연수를 만들지 않는다.
+- presentation은 Rules의 Decimal 입력·중간값·출력을 그대로 표시한다. 음의 운용손익과 음의 DC 결과를 보존하고, 전환 기준이 같으면 `두 기준 동일`로 표현한다.
+- 계산 근거 문서의 filename과 locator는 이 문서에 기록하지 않는다.
