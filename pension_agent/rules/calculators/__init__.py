@@ -31,8 +31,18 @@ from pension_agent.rules.calculators.pension_withdrawal_breakdown import (
 from pension_agent.rules.calculators.pension_withdrawal_limit import (
     PENSION_WITHDRAWAL_LIMIT,
 )
+from pension_agent.rules.calculators.retirement_benefits import (
+    DB_RETIREMENT_BENEFIT,
+    DB_TO_DC_TRANSFER_AMOUNT,
+    DC_MINIMUM_EMPLOYER_CONTRIBUTION,
+    DC_RETIREMENT_BENEFIT,
+)
 
 CALCULATORS = {
+    "db_retirement_benefit": DB_RETIREMENT_BENEFIT,
+    "db_to_dc_transfer_amount": DB_TO_DC_TRANSFER_AMOUNT,
+    "dc_minimum_employer_contribution": DC_MINIMUM_EMPLOYER_CONTRIBUTION,
+    "dc_retirement_benefit": DC_RETIREMENT_BENEFIT,
     "deferred_retirement_withdrawal_tax": DEFERRED_RETIREMENT_WITHDRAWAL_TAX,
     "dc_medical_withdrawal_threshold": DC_MEDICAL_WITHDRAWAL_THRESHOLD,
     "fund_standard_price": FUND_STANDARD_PRICE,
@@ -52,7 +62,11 @@ CALCULATORS = {
 
 __all__ = [
     "CALCULATORS",
+    "DB_RETIREMENT_BENEFIT",
+    "DB_TO_DC_TRANSFER_AMOUNT",
     "DC_MEDICAL_WITHDRAWAL_THRESHOLD",
+    "DC_MINIMUM_EMPLOYER_CONTRIBUTION",
+    "DC_RETIREMENT_BENEFIT",
     "DEFERRED_RETIREMENT_WITHDRAWAL_TAX",
     "FUND_STANDARD_PRICE",
     "FUND_VAR_RISK",
