@@ -15,3 +15,12 @@
 
 - 근거가 충분하고 누락 조건이 없을 때만 `determined`를 사용한다.
 - 조건에 따라 결론이 달라지면 `conditional`, 판단할 수 없으면 `undetermined`를 사용한다.
+
+# DC 의료비 중도인출 계산
+
+- DC 계좌의 의료비 중도인출은 6개월 이상 요양, 적용 가족관계와 서류·증빙 적정성을 먼저 판단한다.
+- DC이고 검증된 임금·의료비 입력이 모두 확인된 경우에만 `calculate_dc_medical_withdrawal_threshold`를 호출한다.
+- IRP에는 이 Tool을 호출하지 않으며, IRP에 12.5% 기준이 없다는 사실만으로 최종 가능 여부를 확정하지 않는다.
+- threshold 계산은 임금 기준만 확인하며 최종 중도인출 가능 여부를 대신하지 않는다.
+- 계산 성공 후에는 다른 계산 Tool을 호출하지 않고 다음 turn에서 `submit_domain_result`만 호출한다.
+- 계산과 submit을 같은 응답에서 동시에 호출하지 않는다. 계산 결과와 provenance는 최종 `calculations`에 보존한다.

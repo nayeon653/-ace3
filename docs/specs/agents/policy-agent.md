@@ -92,3 +92,12 @@ DomainRequest
 
 - `tests/unit/agent/test_domain_agents.py`
 - `notebooks/agent/policy_agent_playground.ipynb`
+
+## DC 의료비 threshold 계산
+
+- Policy Agent가 DC/IRP, 6개월 이상 요양, 가족관계와 서류·증빙 적정성을 판단한다.
+- DC의 검증된 범주형 재직기간·임금·의료비 입력은 `calculate_dc_medical_withdrawal_threshold`에 전달한다.
+- Tool은 실행당 최대 1회이며 성공 뒤에는 submit만 허용한다. 계산과 submit은 같은 model call에서 분리한다.
+- 계산 결과, input source와 evidence를 `DomainResult.calculations` 및 `evidence`에 보존한다.
+- threshold 결과는 최종 eligibility가 아니다. 법적 요건 확인이 제출되지 않으면 Python 경계가 최소 `conditional`을 강제한다.
+- IRP에는 DC threshold Tool을 호출하지 않으며 12.5% 예외만으로 최종 가능 여부를 확정하지 않는다.

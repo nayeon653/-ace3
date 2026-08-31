@@ -48,6 +48,12 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
             )
         elif calculator_id == "pension_withdrawal_tax_breakdown":
             lines.extend(_pension_withdrawal_tax_breakdown_lines(outputs, units))
+        elif calculator_id == "dc_medical_withdrawal_threshold":
+            lines.extend(_dc_medical_withdrawal_threshold_lines(outputs, units))
+        elif calculator_id == "medical_care_withdrawal_tax_limit":
+            lines.extend(_medical_care_withdrawal_tax_limit_lines(outputs, units))
+        elif calculator_id == "medical_care_withdrawal_tax_breakdown":
+            lines.extend(_medical_care_withdrawal_tax_breakdown_lines(outputs, units))
         elif calculator_id == "fund_standard_price":
             lines.append(
                 "펀드 1,000좌당 기준가격: "
@@ -242,6 +248,52 @@ def _pension_withdrawal_tax_breakdown_lines(
             f"{_value(outputs, units, 'annual_private_pension_separate_tax_option_tax_krw')}"
         )
     return lines
+
+
+def _dc_medical_withdrawal_threshold_lines(
+    outputs: dict[str, object], units: dict[str, str]
+) -> list[str]:
+    basis_labels = {
+        "previous_year_annual_wages": "직전연도 연간임금총액",
+        "preceding_12_month_wages": "신청일 기준 직전 12개월 임금",
+        "annualized_average_monthly_wage": "재직 중 월평균 급여의 연환산액",
+    }
+    basis = basis_labels.get(str(outputs["wage_basis"]), str(outputs["wage_basis"]))
+    met = "충족" if outputs["threshold_met"] is True else "미충족"
+    return [
+        f"DC 의료비 기준 적용 임금: {basis}",
+        f"적용 임금 기준액: {_value(outputs, units, 'applicable_wages_krw')}",
+        f"임금 기준액의 12.5%: {_value(outputs, units, 'medical_expense_threshold_krw')}",
+        f"증빙 의료비의 12.5% 기준 엄격 초과 여부: {met}",
+    ]
+
+
+def _medical_care_withdrawal_tax_limit_lines(
+    outputs: dict[str, object], units: dict[str, str]
+) -> list[str]:
+    return [
+        f"의료·요양 저율과세 한도: {_value(outputs, units, 'tax_limit_krw')}",
+        f"한도 내 금액: {_value(outputs, units, 'amount_within_limit_krw')}",
+        f"초과액: {_value(outputs, units, 'excess_amount_krw')}",
+    ]
+
+
+def _medical_care_withdrawal_tax_breakdown_lines(
+    outputs: dict[str, object], units: dict[str, str]
+) -> list[str]:
+    return [
+        f"의료·요양 저율과세 한도: {_value(outputs, units, 'tax_limit_krw')}",
+        f"한도 내 금액: {_value(outputs, units, 'amount_within_limit_krw')}",
+        f"한도 내 세율: {_value(outputs, units, 'within_limit_tax_rate_percent')}",
+        f"한도 내 세액: {_value(outputs, units, 'within_limit_tax_krw')}",
+        f"한도 내 세후액: {_value(outputs, units, 'within_limit_after_tax_krw')}",
+        f"초과액: {_value(outputs, units, 'excess_amount_krw')}",
+        f"현재 전체 세액: {_value_or_unresolved(outputs, units, 'current_withdrawal_tax_krw')}",
+        (
+            "현재 전체 세후액: "
+            f"{_value_or_unresolved(outputs, units, 'current_withdrawal_after_tax_krw')}"
+        ),
+    ]
 
 
 def _is_positive(value: object) -> bool:
