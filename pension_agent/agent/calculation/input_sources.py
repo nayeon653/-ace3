@@ -28,6 +28,17 @@ _UNIT_SUFFIX_PATTERN = re.compile(r"(천만|백만|십만|억|만|천|백|십)$"
 _PHRASE_SPLIT_PATTERN = re.compile(r"[;\n]+|,(?!\d)")
 _AGE_PATTERN = re.compile(r"([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))\s*세")
 _NEGATION_EXPRESSIONS = ("아님", "아닌", "아니다", "해당하지 않음", "해당하지 않는다")
+_NON_EXACT_EXPRESSIONS = (
+    "이상",
+    "이하",
+    "초과",
+    "미만",
+    "부터",
+    "전후",
+    "약 ",
+    "정도",
+    "무렵",
+)
 _AGE_NON_EXACT_EXPRESSIONS = (
     "이상",
     "이하",
@@ -145,7 +156,31 @@ def validated_input_sources(
     validated: dict[str, CalculationInputSource] = {}
     for field, value in inputs.items():
         source = _normalize_text(input_sources[field])
-        if field == "employment_duration_category":
+        if field == "wages_for_average_period_krw":
+            if not _matches_average_period_wages_source(source, value):
+                return None
+        elif field == "included_days_for_average_wage":
+            if not _matches_average_wage_included_days_source(source, value):
+                return None
+        elif field == "verified_service_years":
+            if not _matches_verified_service_years_source(source, value):
+                return None
+        elif field == "annual_total_wages_krw":
+            if not _matches_dc_annual_total_wages_source(source, value):
+                return None
+        elif field == "accumulated_contributions_krw":
+            if not _matches_accumulated_contributions_source(source, value):
+                return None
+        elif field == "investment_gain_loss_krw":
+            if not _matches_investment_gain_loss_source(source, value):
+                return None
+        elif field == "final_average_wage_30_days_krw":
+            if not _matches_final_average_wage_source(source, value):
+                return None
+        elif field == "final_annual_total_wages_krw":
+            if not _matches_final_annual_wages_source(source, value):
+                return None
+        elif field == "employment_duration_category":
             if not _matches_employment_duration_category(value, source):
                 return None
         elif field == "previous_year_annual_wages_krw":
@@ -280,6 +315,162 @@ def validated_input_sources(
             return None
         validated[field] = matched_source
     return validated
+
+
+def _matches_average_period_wages_source(source: str, value: Any) -> bool:
+    return _matches_retirement_money_source(
+        source,
+        value,
+        required_groups=(
+            ("최근 3개월", "평균임금 산정 대상 3개월"),
+            ("임금 합계", "임금총액", "임금 총액"),
+        ),
+        forbidden=(
+            "연간임금",
+            "월급",
+            "계좌입금",
+            "최종 연간",
+            "의료비",
+            "threshold",
+        ),
+        ignored_tokens=("3개월",),
+    )
+
+
+def _matches_average_wage_included_days_source(source: str, value: Any) -> bool:
+    return any(
+        any(label in phrase for label in ("평균임금 산정 포함 일수", "산정일수", "포함 일수"))
+        and not any(label in phrase for label in ("근속", "휴직", "요양", "재직"))
+        and not _is_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and "일" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_verified_service_years_source(source: str, value: Any) -> bool:
+    return any(
+        any(label in phrase for label in ("계속근로연수", "검증된 근속연수", "근속연수"))
+        and not any(label in phrase for label in ("배우자", "가족", "타인", "다른 사람"))
+        and not _is_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and "년" in phrase
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_dc_annual_total_wages_source(source: str, value: Any) -> bool:
+    return _matches_retirement_money_source(
+        source,
+        value,
+        required_groups=(("연간임금총액", "연간 임금총액"),),
+        forbidden=(
+            "최근 3개월",
+            "월급",
+            "직전 12개월",
+            "직전연도",
+            "의료비",
+            "threshold",
+            "누적 부담금",
+            "계좌잔액",
+            "최종 30일",
+            "전환 기준",
+            "전환기준",
+        ),
+    )
+
+
+def _matches_accumulated_contributions_source(source: str, value: Any) -> bool:
+    return _matches_retirement_money_source(
+        source,
+        value,
+        required_groups=(("DC",), ("실제 누적 부담금", "누적 부담금")),
+        forbidden=("계좌잔액", "계좌 잔액", "최소 사용자 부담금", "예상", "월 납입액"),
+    )
+
+
+def _matches_investment_gain_loss_source(source: str, value: Any) -> bool:
+    for phrase in _source_phrases(source):
+        if (
+            any(label in phrase for label in ("%", "퍼센트", "수익률", "평가액", "계좌잔액"))
+            or any(label in phrase for label in ("예상", "전망", "추정"))
+            or _is_non_exact_phrase(phrase)
+            or _is_negated_phrase(phrase)
+            or "원" not in phrase
+        ):
+            continue
+        quantities = _quantities(phrase)
+        if len(quantities) != 1:
+            continue
+        quantity = quantities[0]
+        expected = _decimal(value)
+        if "운용손실" in phrase and "운용손익" not in phrase:
+            if quantity >= 0 and expected == -quantity:
+                return True
+        elif "운용수익" in phrase and "운용손익" not in phrase:
+            if quantity >= 0 and expected == quantity:
+                return True
+        elif "운용손익" in phrase and expected == quantity:
+            return True
+    return False
+
+
+def _matches_final_average_wage_source(source: str, value: Any) -> bool:
+    return _matches_retirement_money_source(
+        source,
+        value,
+        required_groups=(
+            ("DB→DC 전환 기준", "DB에서 DC로 전환 기준", "전환 기준", "전환기준"),
+            ("최종 30일 평균임금", "최종 30일평균임금"),
+        ),
+        forbidden=("평균일급", "월급", "연간임금", "과거"),
+        ignored_tokens=("30일",),
+    )
+
+
+def _matches_final_annual_wages_source(source: str, value: Any) -> bool:
+    return _matches_retirement_money_source(
+        source,
+        value,
+        required_groups=(
+            ("DB→DC 전환 기준", "DB에서 DC로 전환 기준", "전환 기준", "전환기준"),
+            ("최종 연간임금총액", "최종 연간 임금총액"),
+        ),
+        forbidden=("최근 3개월", "30일 평균임금", "누적 부담금"),
+    )
+
+
+def _matches_retirement_money_source(
+    source: str,
+    value: Any,
+    *,
+    required_groups: tuple[tuple[str, ...], ...],
+    forbidden: tuple[str, ...],
+    ignored_tokens: tuple[str, ...] = (),
+) -> bool:
+    return any(
+        all(any(label in phrase for label in group) for group in required_groups)
+        and not any(label in phrase for label in forbidden)
+        and not _is_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and "원" in phrase
+        and _matches_single_quantity(_without_tokens(phrase, ignored_tokens), value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _without_tokens(source: str, tokens: tuple[str, ...]) -> str:
+    for token in tokens:
+        source = source.replace(token, "")
+    return source
+
+
+def _is_non_exact_phrase(phrase: str) -> bool:
+    if any(expression in phrase for expression in _NON_EXACT_EXPRESSIONS):
+        return True
+    return bool(re.search(r"\d(?:[\d,.]*\d)?\s*[~∼]\s*\d", phrase))
 
 
 def _matches_pension_tax_credit_source(field: str, source: str, value: Any) -> bool:
