@@ -125,10 +125,13 @@ graph TD;
 	PolicyModelCallLimit\2ebefore_model("PolicyModelCallLimit.before_model")
 	PolicyModelCallLimit\2eafter_model("PolicyModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
+	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model("ToolCallLimitMiddleware[calculate_dc_medical_withdrawal_threshold].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
+	EnforcePolicyToolSequence\2eafter_model("EnforcePolicyToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
 	CompletePolicyResult\2ebefore_model -.-> PolicyModelCallLimit\2ebefore_model;
 	CompletePolicyResult\2ebefore_model -.-> __end__;
+	EnforcePolicyToolSequence\2eafter_model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
 	PolicyModelCallLimit\2eafter_model --> SinglePolicySubmitPerModelCall\2eafter_model;
 	PolicyModelCallLimit\2ebefore_model -.-> __end__;
 	PolicyModelCallLimit\2ebefore_model -.-> model;
@@ -136,12 +139,14 @@ graph TD;
 	RequirePolicyTool\2eafter_model -.-> __end__;
 	RequirePolicyTool\2eafter_model -.-> tools;
 	SinglePolicySubmitPerModelCall\2eafter_model --> RequirePolicyTool\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> PolicyModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
 	__start__ --> CompletePolicyResult\2ebefore_model;
-	model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
+	model --> EnforcePolicyToolSequence\2eafter_model;
 	tools -.-> CompletePolicyResult\2ebefore_model;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
@@ -183,6 +188,8 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model("ToolCallLimitMiddleware[calculate_deferred_retirement_withdrawal_tax].after_model")
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_allocation\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_withdrawal_allocation].after_model")
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_withdrawal_tax_breakdown].after_model")
+	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_limit\5d\2eafter_model("ToolCallLimitMiddleware[calculate_medical_care_withdrawal_tax_limit].after_model")
+	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model("ToolCallLimitMiddleware[calculate_medical_care_withdrawal_tax_breakdown].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	EnforceTaxPayoutToolSequence\2eafter_model("EnforceTaxPayoutToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
@@ -198,6 +205,10 @@ graph TD;
 	TaxPayoutModelCallLimit\2ebefore_model -.-> model;
 	ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_limit\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_limit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_limit\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_income_tax\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_pension_annual_limit_installment\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model;
@@ -218,7 +229,7 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> TaxPayoutModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
 	__start__ --> CompleteTaxPayoutResult\2ebefore_model;
 	model --> EnforceTaxPayoutToolSequence\2eafter_model;
