@@ -31,7 +31,9 @@ from pension_agent.agent.calculation import (
     CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
     CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
     CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
+    CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+    CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
     calculation_evidence_chunk_ids,
     create_deferred_retirement_withdrawal_tax_tool,
     create_non_pension_withdrawal_tax_tool,
@@ -40,7 +42,9 @@ from pension_agent.agent.calculation import (
     create_pension_period_installment_tool,
     create_pension_tax_credit_tool,
     create_pension_unit_installment_tool,
+    create_pension_withdrawal_allocation_tool,
     create_pension_withdrawal_limit_tool,
+    create_pension_withdrawal_tax_breakdown_tool,
     format_calculation_summary,
 )
 from pension_agent.agent.contracts import (
@@ -76,6 +80,7 @@ _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION = "해당 연도 사적연금 �
 _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION = "종합과세 또는 16.5% 분리과세 선택 필요"
 _PENSION_INCOME_TAX_CALCULATOR_ID = "pension_income_tax"
 _NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID = "non_pension_withdrawal_tax"
+_PENSION_WITHDRAWAL_TAX_BREAKDOWN_CALCULATOR_ID = "pension_withdrawal_tax_breakdown"
 _PENSION_TAX_COMPARISON_TOOL_NAMES = frozenset(
     {
         CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
@@ -173,7 +178,10 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
                 "calculate_pension_income_tax Tool을, 같은 재원의 연금외수령 세금이면 "
                 "calculate_non_pension_withdrawal_tax Tool을 호출하세요. 이연퇴직소득 재원의 "
                 "연금·연금외수령 세금이면 calculate_deferred_retirement_withdrawal_tax Tool을 "
-                "호출하고 두 재원을 혼용하지 마세요. "
+                "호출하고 두 재원을 혼용하지 마세요. 재원별 인출 배분만 필요하거나 세금 "
+                "조건이 부족하면 calculate_pension_withdrawal_allocation Tool을, 재원별 세금과 "
+                "세후액 조건이 모두 확인되면 calculate_pension_withdrawal_tax_breakdown Tool을 "
+                "둘 중 하나만 호출하세요. "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
         else:
@@ -254,6 +262,8 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
                 CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
                 CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
                 CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
+                CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
+                CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
@@ -312,6 +322,8 @@ def create_tax_payout_react_agent(
     pension_income_tax_tool = create_pension_income_tax_tool()
     non_pension_withdrawal_tax_tool = create_non_pension_withdrawal_tax_tool()
     deferred_retirement_tax_tool = create_deferred_retirement_withdrawal_tax_tool()
+    withdrawal_allocation_tool = create_pension_withdrawal_allocation_tool()
+    withdrawal_tax_breakdown_tool = create_pension_withdrawal_tax_breakdown_tool()
     graph = create_agent(
         model=model,
         tools=(
@@ -324,6 +336,8 @@ def create_tax_payout_react_agent(
             pension_income_tax_tool,
             non_pension_withdrawal_tax_tool,
             deferred_retirement_tax_tool,
+            withdrawal_allocation_tool,
+            withdrawal_tax_breakdown_tool,
             _create_tax_payout_result_tool(),
         ),
         system_prompt=system_prompt,
@@ -377,6 +391,16 @@ def create_tax_payout_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=deferred_retirement_tax_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=withdrawal_allocation_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=withdrawal_tax_breakdown_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),
@@ -624,6 +648,20 @@ def _build_tax_payout_result(
                     *normalized_missing,
                     _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
                 ]
+        if _has_unresolved_withdrawal_breakdown_tax(calculations):
+            status = "conditional"
+            if _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION not in normalized_missing:
+                normalized_missing = [
+                    *normalized_missing,
+                    _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION,
+                ]
+        if _has_withdrawal_breakdown_separate_tax_option(calculations):
+            status = "conditional"
+            if _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION not in normalized_missing:
+                normalized_missing = [
+                    *normalized_missing,
+                    _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
+                ]
     elif status != "not_applicable":
         status, normalized_conclusion, normalized_missing, normalized_warnings = (
             _apply_numeric_claim_guard(
@@ -692,6 +730,30 @@ def _requires_pension_tax_filing_choice(
     return any(
         calculation["calculator_id"] == _PENSION_INCOME_TAX_CALCULATOR_ID
         and calculation["outputs"].get("filing_choice_required") is True
+        for calculation in calculations
+    )
+
+
+def _has_unresolved_withdrawal_breakdown_tax(
+    calculations: list[CalculationResult],
+) -> bool:
+    return any(
+        calculation["calculator_id"] == _PENSION_WITHDRAWAL_TAX_BREAKDOWN_CALCULATOR_ID
+        and "annual_private_pension_taxable_income_krw" not in calculation["inputs"]
+        and (
+            calculation["outputs"].get("current_withdrawal_tax_krw") is None
+            or calculation["outputs"].get("current_withdrawal_after_tax_krw") is None
+        )
+        for calculation in calculations
+    )
+
+
+def _has_withdrawal_breakdown_separate_tax_option(
+    calculations: list[CalculationResult],
+) -> bool:
+    return any(
+        calculation["calculator_id"] == _PENSION_WITHDRAWAL_TAX_BREAKDOWN_CALCULATOR_ID
+        and "annual_private_pension_separate_tax_option_tax_krw" in calculation["outputs"]
         for calculation in calculations
     )
 

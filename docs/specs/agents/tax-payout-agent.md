@@ -161,6 +161,42 @@ warning이 `calculations`에 포함된다.
 - 호출은 한 번으로 제한하며 다른 계산기와 동시에 호출하지 않는다. #113의 정확한 두 Tool
   비교 조합 예외에는 포함되지 않는다.
 
+### `calculate_pension_withdrawal_allocation`
+
+- 사용자가 세 재원의 인출 순서·배분만 묻거나, 요청액과 비과세·이연퇴직소득·세액공제
+  원금 및 운용수익 잔액은 확인됐지만 세금 명세 조건이 부족할 때 사용한다.
+- 필수 입력은 `requested_withdrawal_krw`와 세 재원 잔액 및 각 값의 `source`다. Tool은
+  재원별 인출액과 남은 잔액을 반환하며 세액을 추정하지 않는다.
+- 배분만 묻는 질문은 계산 결과가 완전하면 `determined`일 수 있다. allocation 결과만 있다는
+  이유로 Python이 `conditional`로 바꾸지 않는다.
+- 한 실행에서 아래 breakdown Tool과 둘 중 하나만, 최대 한 번 호출한다.
+
+### `calculate_pension_withdrawal_tax_breakdown`
+
+- 재원 배분과 재원·pension/non-pension 경로별 세액·세후액을 함께 요구하고 필요한 조건이
+  모두 확인됐을 때 사용한다. 필수 입력은 allocation의 네 금액, pension/non-pension 처리액과
+  각 source다. 실제 배분 경로에 따라 실제수령연차, 수령자 나이, 종신 여부, 연간 사적연금
+  과세대상 합계, 해당 부분 인출분에 배분된 이연퇴직소득세와 source가 조건부 필수다.
+- 계좌 전체 퇴직소득세를 부분 인출 배분세액으로 사용할 수 없다. 값과 source는 같은 의미와
+  같은 금액이 포함된 구절이어야 하며 Tool이 provenance를 검증해 `input_sources`와 계산 근거
+  evidence를 보존한다.
+- breakdown은 내부에서 allocation과 #113·#114 Rules 순수 함수를 합성하는 단일 Calculation
+  Tool이다. Agent의 Tool chaining이 아니며 먼저 allocation을 호출하지 않는다.
+- 출력은 0을 포함한 여섯 경로의 인출액·세액·세후액, 현재 인출 합계 세액·세후액이며 해당할
+  때 연간 전체 과세대상 사적연금소득 기준 16.5% 분리과세 선택세액을 별도로 반환한다.
+  presentation은 실제 인출액이 0보다 큰 경로만 표시한다.
+- Rules의 null은 그대로 전파하며 Agent나 presentation이 0으로 보완하거나 재계산·반올림하지
+  않는다. 현재 인출 합계와 연간 전체 합계 기준 선택세액은 분리하고 선택세액을 현재 인출
+  세액, 초과분 세액 또는 환급액으로 표현하거나 현재 인출 세액에 합산하지 않는다.
+- 연간 합계 입력 없이 현재 인출 세액 또는 세후액이 null이면 모델 제출과 무관하게 Python이
+  `conditional` 및 `해당 연도 사적연금 과세대상 합계 확인 필요`를 강제한다. 연간 16.5%
+  선택세액이 있으면 `conditional` 및 `종합과세 또는 16.5% 분리과세 선택 필요`를 강제한다.
+  기존 누락 조건은 보존하고 중복하지 않는다.
+- 비과세 재원도 연금수령한도를 소진한다는 Rules warning을 보존한다. 한 실행에서 두 #115
+  Tool 중 하나만 성공할 수 있고 각 Tool은 최대 한 번 호출한다. breakdown이 Rules 오류로
+  실패해 `calculations`가 기록되지 않은 경우, 필요한 입력이 확인되면 allocation으로 복구할
+  수 있다. 성공한 #115 계산 뒤에는 다른 계산 Tool을 차단하고 제출만 허용한다.
+
 ### `submit_domain_result`
 
 `status="not_applicable"`은 검색 없이 바로 제출할 수 있다 — Product·Policy 책임
@@ -234,6 +270,8 @@ DomainRequest
 | 연금수령 세금 Tool | 최대 1회 |
 | 연금외수령 세금 Tool | 최대 1회 |
 | 이연퇴직소득세 Tool | 최대 1회 |
+| 연금 인출 재원 배분 Tool | 최대 1회 |
+| 연금 인출 세금 명세 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |

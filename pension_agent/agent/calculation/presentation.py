@@ -42,6 +42,12 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
             lines.extend(
                 _deferred_retirement_withdrawal_tax_lines(calculation["inputs"], outputs, units)
             )
+        elif calculator_id == "pension_withdrawal_allocation":
+            lines.extend(
+                _pension_withdrawal_allocation_lines(calculation["inputs"], outputs, units)
+            )
+        elif calculator_id == "pension_withdrawal_tax_breakdown":
+            lines.extend(_pension_withdrawal_tax_breakdown_lines(outputs, units))
         elif calculator_id == "fund_standard_price":
             lines.append(
                 "펀드 1,000좌당 기준가격: "
@@ -170,6 +176,74 @@ def _deferred_retirement_withdrawal_tax_lines(
     return lines
 
 
+def _pension_withdrawal_allocation_lines(
+    inputs: dict[str, object],
+    outputs: dict[str, object],
+    units: dict[str, str],
+) -> list[str]:
+    return [
+        f"요청 인출액: {_value(inputs, units, 'requested_withdrawal_krw')}",
+        (
+            "비과세 재원 인출액: "
+            f"{_value(outputs, units, 'tax_free_withdrawal_krw')}, 남은 잔액: "
+            f"{_value(outputs, units, 'tax_free_remaining_balance_krw')}"
+        ),
+        (
+            "이연퇴직소득 인출액: "
+            f"{_value(outputs, units, 'deferred_retirement_withdrawal_krw')}, 남은 잔액: "
+            f"{_value(outputs, units, 'deferred_retirement_remaining_balance_krw')}"
+        ),
+        (
+            "세액공제 원금·운용수익 인출액: "
+            f"{_value(outputs, units, 'credited_and_earnings_withdrawal_krw')}, 남은 잔액: "
+            f"{_value(outputs, units, 'credited_and_earnings_remaining_balance_krw')}"
+        ),
+    ]
+
+
+def _pension_withdrawal_tax_breakdown_lines(
+    outputs: dict[str, object],
+    units: dict[str, str],
+) -> list[str]:
+    labels = {
+        "tax_free_pension": "비과세 재원·연금 처리",
+        "tax_free_non_pension": "비과세 재원·연금외 처리",
+        "deferred_retirement_pension": "이연퇴직소득·연금 처리",
+        "deferred_retirement_non_pension": "이연퇴직소득·연금외 처리",
+        "credited_and_earnings_pension": "세액공제 원금·운용수익·연금 처리",
+        "credited_and_earnings_non_pension": "세액공제 원금·운용수익·연금외 처리",
+    }
+    lines: list[str] = []
+    for path, label in labels.items():
+        withdrawal_key = f"{path}_withdrawal_krw"
+        if not _is_positive(outputs.get(withdrawal_key)):
+            continue
+        tax_key = f"{path}_tax_krw"
+        after_tax_key = f"{path}_after_tax_krw"
+        lines.append(
+            f"{label} 인출액: {_value(outputs, units, withdrawal_key)}, "
+            f"세액: {_value_or_unresolved(outputs, units, tax_key)}, "
+            f"세후액: {_value_or_unresolved(outputs, units, after_tax_key)}"
+        )
+    if (
+        outputs.get("current_withdrawal_tax_krw") is None
+        or outputs.get("current_withdrawal_after_tax_krw") is None
+    ):
+        lines.append("현재 인출 합계 세액·세후액: 확정할 수 없음")
+    else:
+        lines.append(
+            "현재 인출 합계 세액: "
+            f"{_value(outputs, units, 'current_withdrawal_tax_krw')}, 세후액: "
+            f"{_value(outputs, units, 'current_withdrawal_after_tax_krw')}"
+        )
+    if outputs.get("annual_private_pension_separate_tax_option_tax_krw") is not None:
+        lines.append(
+            "연간 전체 과세대상 사적연금소득 기준 16.5% 분리과세 선택세액: "
+            f"{_value(outputs, units, 'annual_private_pension_separate_tax_option_tax_krw')}"
+        )
+    return lines
+
+
 def _is_positive(value: object) -> bool:
     if value is None:
         return False
@@ -187,3 +261,11 @@ def _value(
     value = str(outputs[key])
     unit = units.get(key)
     return f"{value} {unit}" if unit else value
+
+
+def _value_or_unresolved(
+    outputs: dict[str, object],
+    units: dict[str, str],
+    key: str,
+) -> str:
+    return "확정할 수 없음" if outputs.get(key) is None else _value(outputs, units, key)
