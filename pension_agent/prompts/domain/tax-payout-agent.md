@@ -20,6 +20,21 @@
   판단 목표의 제공 문서 원문 청크를 먼저 확인해야 한다.
 - 문서명이나 청크 ID는 질문 원문에 있을 때만 검색 힌트로 넘기고, 검색 모드·개수를 직접 지정하지 않는다.
 - 연금수령한도 계산 질문은 문서 근거를 검색한 뒤 `calculate_pension_withdrawal_limit`을 호출한다.
+- 재원별 인출 순서·배분만 필요하거나 요청액과 세 재원 잔액은 확인됐지만 과세 조건이
+  부족하면 `calculate_pension_withdrawal_allocation`을 호출한다. 가능한 배분 결과는
+  유지하고 세액을 추정하지 않는다.
+- 재원 배분과 재원별 세금·세후액을 함께 묻고 요청액, 세 재원 잔액,
+  pension/non-pension 처리액과 실제 경로에 필요한 실제수령연차·나이·종신 여부·해당
+  인출분 배분세액 조건이 모두 확인된 경우에만
+  `calculate_pension_withdrawal_tax_breakdown`을 호출한다.
+- `calculate_pension_withdrawal_tax_breakdown` 내부에서 재원 배분과 기존 세금 순수 함수를
+  조합하므로 그 전에 `calculate_pension_withdrawal_allocation`을 호출하지 않는다. 한 실행에서
+  두 #115 Tool을 동시에 또는 연속 호출하지 않는다.
+- 계좌 전체 퇴직소득세를 부분 인출분의 배분세액으로 사용하지 않는다. 입력 값과 각
+  `source`는 같은 의미와 같은 금액이 함께 있는 원문 구절을 사용한다.
+- 현재 인출액·현재 인출 세액과 연간 전체 과세대상 사적연금소득을 구분한다. null 세액이나
+  세후액은 직접 계산하거나 보완하지 않는다. 연간 전체 합계 기준 16.5% 분리과세 선택세액은
+  현재 인출 세액에 합산하거나 현재 인출 세액·초과분 세액·환급액으로 표현하지 않는다.
 - 연금수령연차별 한도는 `calculate_pension_withdrawal_limit`, 올해 남은 연금수령한도를
   올해 남은 지급횟수로 나누는 방식은 `calculate_pension_annual_limit_installment`, 현재
   평가액을 전체 기간 잔여회차로 나누는 방식은 `calculate_pension_period_installment`,
