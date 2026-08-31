@@ -122,3 +122,14 @@
   근거만 포함한다.
 - `submit_domain_result`가 결론의 확정 수치를 이유로 재제출을 요청하면, 그 안내에 따라
   숫자 없는 결론(또는 `conditional`과 계산 Tool 필요 조건)으로 한 번만 다시 제출한다.
+
+# 의료·요양 저율과세
+
+- 세법상 부득이한 사유의 3개월 이상 요양 조건을 확인하며, DC 중도인출의 6개월 조건과 혼용하지 않는다.
+- 저율과세 한도만 묻거나 세액 질문에 정확한 수령자 나이가 없으면 `calculate_medical_care_withdrawal_tax_limit`를 호출한다. 세액 질문이면 한도 결과를 보존하고 정확한 나이를 누락 조건으로 남긴다.
+- 적용 사유, 한도 원 입력과 정확한 나이가 모두 확인된 경우에만 `calculate_medical_care_withdrawal_tax_breakdown`을 호출한다.
+- breakdown은 내부에서 limit과 기존 부득이한 사유 세금 Rules를 조합하므로 그 전에 limit 또는 `calculate_pension_income_tax`를 호출하지 않는다.
+- 두 #117 Tool을 동시에 또는 연속 호출하지 않으며 #114·#115·#116 Tool과 chaining하지 않는다.
+- 성공한 #117 계산 뒤에는 다른 계산 Tool을 호출하지 않고 `submit_domain_result`만 호출한다. breakdown 실패로 calculation이 기록되지 않은 경우에는 limit으로 복구할 수 있다.
+- 초과액이 있으면 그 재원과 연금수령·연금외수령 구분 없이 세액을 추정하지 않는다. null 세액·세후액을 0으로 보완하지 않는다.
+- #117 저율과세 한도는 일반 연금수령한도 및 재원 배분 계산과 별도 의미다.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import operator
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, NotRequired, Protocol, cast
@@ -21,7 +22,14 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.types import Command
 from pydantic import Field, ValidationError
 
+from pension_agent.agent.calculation import (
+    CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME,
+    calculation_evidence_chunk_ids,
+    create_dc_medical_withdrawal_threshold_tool,
+    format_calculation_summary,
+)
 from pension_agent.agent.contracts import (
+    CalculationResult,
     DecisionStatus,
     DomainRequest,
     DomainResult,
@@ -38,6 +46,9 @@ SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 SUBMIT_DOMAIN_RESULT_TOOL_NAME = "submit_domain_result"
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
+_DC_ELIGIBILITY_MISSING_CONDITION = (
+    "DC 의료비 중도인출의 6개월 이상 요양·가족관계·서류 요건 확인 필요"
+)
 
 
 class PolicyAgentState(AgentState):
@@ -46,6 +57,7 @@ class PolicyAgentState(AgentState):
     question: NotRequired[str]
     objective: NotRequired[str]
     search_result: NotRequired[SearchResult]
+    calculations: NotRequired[Annotated[list[CalculationResult], operator.add]]
     domain_result: NotRequired[DomainResult]
 
 
@@ -77,6 +89,7 @@ class PolicyReactAgent:
             {
                 "question": request["question"],
                 "objective": request["objective"],
+                "calculations": [],
                 "messages": [{"role": "user", "content": _request_text(request)}],
             },
             context=ExecutionContext(deadline=deadline),
@@ -104,11 +117,16 @@ class RequirePolicyTool(AgentMiddleware[Any, Any, Any]):
         last_message = state.get("messages", [])[-1]
         if not isinstance(last_message, AIMessage) or last_message.tool_calls:
             return None
-        instruction = (
-            "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
-            if state.get("search_result") is not None
-            else "search_documents Tool로 제공 문서 근거를 검색하세요."
-        )
+        if state.get("calculations"):
+            instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+        elif state.get("search_result") is not None:
+            instruction = (
+                "DC 의료비 중도인출의 임금 12.5% 기준 계산이면 "
+                "calculate_dc_medical_withdrawal_threshold Tool을 호출하고, "
+                "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+            )
+        else:
+            instruction = "search_documents Tool로 제공 문서 근거를 검색하세요."
         return {
             "jump_to": "model",
             "messages": [
@@ -138,6 +156,37 @@ class SinglePolicySubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
         if tool_calls == last_message.tool_calls:
             return None
         return {"messages": [last_message.model_copy(update={"tool_calls": tool_calls})]}
+
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.after_model(state, runtime)
+
+
+class EnforcePolicyToolSequence(AgentMiddleware[Any, Any, Any]):
+    """검색·DC 계산·결과 제출 순서에서 허용된 Tool 호출만 남긴다."""
+
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        last_message = state.get("messages", [])[-1]
+        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+            return None
+        allowed: tuple[str, ...]
+        if state.get("search_result") is None:
+            allowed = (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
+        elif state.get("calculations"):
+            allowed = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
+        else:
+            allowed = (
+                CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME,
+                SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+            )
+        allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed]
+        calculation_calls = [
+            call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
+        ]
+        kept_calls = calculation_calls[:1] if calculation_calls else allowed_calls[:1]
+        if kept_calls == last_message.tool_calls:
+            return None
+        return {"messages": [last_message.model_copy(update={"tool_calls": kept_calls})]}
 
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.after_model(state, runtime)
@@ -173,9 +222,14 @@ def create_policy_react_agent(
 ) -> PolicyReactAgent:
     """Policy 패키지가 소유하는 ReAct graph를 만든다."""
 
+    threshold_tool = create_dc_medical_withdrawal_threshold_tool()
     graph = create_agent(
         model=model,
-        tools=(_create_policy_search_tool(search_service), _create_policy_result_tool()),
+        tools=(
+            _create_policy_search_tool(search_service),
+            threshold_tool,
+            _create_policy_result_tool(),
+        ),
         system_prompt=system_prompt,
         state_schema=PolicyAgentState,
         context_schema=ExecutionContext,
@@ -191,10 +245,16 @@ def create_policy_react_agent(
                 exit_behavior="continue",
             ),
             ToolCallLimitMiddleware(
+                tool_name=threshold_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
                 tool_name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                 run_limit=config.max_submit_calls,
                 exit_behavior="continue",
             ),
+            EnforcePolicyToolSequence(),
         ),
         name="policy_agent",
     )
@@ -289,6 +349,14 @@ def _create_policy_result_tool() -> Any:
             Field(description="결론에 실제 사용한 SearchResult 청크 UUID 목록"),
         ],
         runtime: ToolRuntime[ExecutionContext, PolicyAgentState],
+        dc_medical_eligibility_conditions_confirmed: Annotated[
+            bool,
+            Field(
+                description=(
+                    "DC 의료비 중도인출의 6개월 요양·가족관계·서류 요건이 모두 확인됐는지 여부"
+                )
+            ),
+        ] = False,
     ) -> Command | str:
         search_result = runtime.state.get("search_result")
         if search_result is None:
@@ -299,11 +367,15 @@ def _create_policy_result_tool() -> Any:
         try:
             result = _build_policy_result(
                 search_result=search_result,
+                calculations=list(runtime.state.get("calculations", [])),
                 status=status,
                 conclusion=conclusion,
                 missing_conditions=missing_conditions,
                 warnings=warnings,
                 evidence_chunk_ids=evidence_chunk_ids,
+                dc_medical_eligibility_conditions_confirmed=(
+                    dc_medical_eligibility_conditions_confirmed
+                ),
             )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
@@ -332,11 +404,13 @@ def _create_policy_result_tool() -> Any:
 def _build_policy_result(
     *,
     search_result: SearchResult,
+    calculations: list[CalculationResult],
     status: DecisionStatus,
     conclusion: str,
     missing_conditions: list[str],
     warnings: list[str],
     evidence_chunk_ids: list[str],
+    dc_medical_eligibility_conditions_confirmed: bool = False,
 ) -> DomainResult:
     if search_result.execution_status != "completed":
         return failed_domain_result(
@@ -344,11 +418,34 @@ def _build_policy_result(
             search_result.error or "검색을 완료하지 못했습니다.",
             execution_status=search_result.execution_status,
         )
-    selected_chunks = _select_evidence(search_result, evidence_chunk_ids)
+    required_evidence_ids = calculation_evidence_chunk_ids(calculations)
+    selected_chunks = _select_evidence(
+        search_result,
+        list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
+    )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_warnings.extend(search_result.limitations)
     normalized_conclusion = conclusion.strip()
+    if calculations:
+        normalized_conclusion = (
+            "검증된 Python 계산 결과:\n"
+            + format_calculation_summary(calculations)
+            + "\n제도 판단:\n"
+            + normalized_conclusion
+        )
+        normalized_warnings.extend(
+            warning for calculation in calculations for warning in calculation["warnings"]
+        )
+        has_dc_threshold = any(
+            calculation["calculator_id"] == "dc_medical_withdrawal_threshold"
+            for calculation in calculations
+        )
+        if has_dc_threshold and not dc_medical_eligibility_conditions_confirmed:
+            if status == "determined":
+                status = "conditional"
+            if _DC_ELIGIBILITY_MISSING_CONDITION not in normalized_missing:
+                normalized_missing.append(_DC_ELIGIBILITY_MISSING_CONDITION)
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
@@ -359,6 +456,7 @@ def _build_policy_result(
         normalized_missing = []
         normalized_warnings = []
         selected_chunks = []
+        calculations = []
     return {
         "domain": "policy",
         "execution_status": "completed",
@@ -368,7 +466,7 @@ def _build_policy_result(
             "missing_conditions": normalized_missing,
         },
         "evidence": [_evidence_from_chunk(chunk) for chunk in selected_chunks],
-        "calculations": [],
+        "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
 
