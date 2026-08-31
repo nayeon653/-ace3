@@ -52,6 +52,18 @@ Domain Agent 입력으로 사용할 수 없다.
 - 비교 기준이 없는 계좌·제도 비교는 Policy와 Tax/Payout을 함께 사용한다.
 - 구체적인 펀드·펀드 클래스의 특성 비교는 Product를 사용한다.
 
+### 의료비·요양 인출 라우팅
+
+- 제도상 가능 여부, 자격, 적용 조건, 계좌별 인출 사유와 증빙 조건만 요청하면 Policy만
+  호출한다.
+- 한도, 세율, 세액, 과세와 세후액만 요청하면 Tax/Payout만 호출한다.
+- 가능 여부와 한도·세금·세후액을 함께 요청하면 Policy와 Tax/Payout을 각각 한 번
+  호출한다. 의료비·요양이라는 단어 자체는 복수 Domain 호출 조건이 아니다.
+- Main은 DC의 제도상 요양 조건과 세법상 의료 목적 요양 조건을 하나로 합치거나 직접
+  판정하지 않는다. 세액·한도·세후액도 계산하지 않고 각 Domain Agent의 결과를 통합한다.
+- 한 Domain의 결과가 `conditional` 또는 `undetermined`여도 다른 Domain의 확정된
+  결론과 계산을 제거하지 않는다.
+
 ## Domain Tool 결과
 
 Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`만 전달한다.
@@ -65,6 +77,10 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 
 전체 `DomainResult`는 `SupervisorState.domain_results`에 별도로 누적되며 API의
 `retrieved_context`와 `think_trace` 조립에 사용된다.
+
+복합 질문에서도 각 결과의 `calculations`, 계산별 `input_sources`, `evidence`, `warnings`를
+그대로 보존한다. Main에 전달되는 축약 결과나 한 Domain의 상태가 다른 Domain의 전체
+결과를 덮어쓰지 않는다.
 
 ## 최종 답변
 
