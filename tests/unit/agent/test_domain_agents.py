@@ -27,9 +27,14 @@ from pension_agent.agent.contracts import (
 from pension_agent.agent.domain_runner import GuardedDomainRunner
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.policy.react import (
+    _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION,
     _DC_ELIGIBILITY_MISSING_CONDITION,
+    _SERVICE_RECOGNITION_MISSING_CONDITION,
     EnforcePolicyToolSequence,
     _build_policy_result,
+)
+from pension_agent.agent.policy.react import (
+    _RETIREMENT_SCHEME_MISSING_CONDITION as _POLICY_RETIREMENT_SCHEME_MISSING_CONDITION,
 )
 from pension_agent.agent.product import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
@@ -4848,6 +4853,11 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "calculate_dc_medical_withdrawal_threshold" in policy_prompt
     assert "6개월 이상 요양" in policy_prompt
     assert "IRP" in policy_prompt
+    assert "DB·DC 퇴직급여 제도 판단" in policy_prompt
+    assert "평균임금 제외기간" in policy_prompt
+    assert "계속근로·근속 인정 여부" in policy_prompt
+    assert "DB→DC 전환 가능 여부" in policy_prompt
+    assert "#118 퇴직급여 Calculation Tool을 호출하지 않는다" in policy_prompt
     assert "calculate_medical_care_withdrawal_tax_limit" in tax_prompt
     assert "calculate_medical_care_withdrawal_tax_breakdown" in tax_prompt
     assert "3개월 이상 요양" in tax_prompt
@@ -4925,6 +4935,38 @@ def test_policy_dc_threshold_requires_separate_eligibility_confirmation() -> Non
     ]
     assert result["calculations"] == [_dc_threshold_calculation()]
     assert "DC 의료비 기준 적용 임금" in result["decision"]["conclusion"]
+
+
+@pytest.mark.parametrize(
+    ("question", "condition"),
+    [
+        ("퇴직급여가 얼마인지 판단해줘", _POLICY_RETIREMENT_SCHEME_MISSING_CONDITION),
+        ("이 근속기간이 인정되는지 판단해줘", _SERVICE_RECOGNITION_MISSING_CONDITION),
+        ("DB에서 DC로 전환 가능한지 판단해줘", _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION),
+    ],
+)
+def test_policy_standardizes_unresolved_retirement_conditions(
+    question: str, condition: str
+) -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_policy_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[],
+        question=question,
+        status="conditional",
+        conclusion="추가 조건에 따라 달라집니다.",
+        missing_conditions=["기존 확인 조건"],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"].count(condition) == 1
+    assert "기존 확인 조건" in result["decision"]["missing_conditions"]
+    assert result["calculations"] == []
 
 
 def _medical_care_calculation(

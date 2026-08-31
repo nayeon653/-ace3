@@ -49,6 +49,9 @@ _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못
 _DC_ELIGIBILITY_MISSING_CONDITION = (
     "DC 의료비 중도인출의 6개월 이상 요양·가족관계·서류 요건 확인 필요"
 )
+_RETIREMENT_SCHEME_MISSING_CONDITION = "DB 또는 DC 제도 유형 확인 필요"
+_SERVICE_RECOGNITION_MISSING_CONDITION = "계속근로·근속 인정 여부 확인 필요"
+_DB_TO_DC_ELIGIBILITY_MISSING_CONDITION = "DB→DC 전환 가능 조건 확인 필요"
 
 
 class PolicyAgentState(AgentState):
@@ -368,6 +371,7 @@ def _create_policy_result_tool() -> Any:
             result = _build_policy_result(
                 search_result=search_result,
                 calculations=list(runtime.state.get("calculations", [])),
+                question=runtime.state.get("question", ""),
                 status=status,
                 conclusion=conclusion,
                 missing_conditions=missing_conditions,
@@ -405,6 +409,7 @@ def _build_policy_result(
     *,
     search_result: SearchResult,
     calculations: list[CalculationResult],
+    question: str = "",
     status: DecisionStatus,
     conclusion: str,
     missing_conditions: list[str],
@@ -451,6 +456,15 @@ def _build_policy_result(
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
         normalized_missing = ["제공 문서의 관련 근거"]
         normalized_warnings.append("검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.")
+    elif status in {"conditional", "undetermined"}:
+        normalized_missing = list(
+            dict.fromkeys(
+                [
+                    *normalized_missing,
+                    *_retirement_policy_missing_conditions(question),
+                ]
+            )
+        )
     if status == "not_applicable":
         normalized_conclusion = _NOT_APPLICABLE_CONCLUSION
         normalized_missing = []
@@ -469,6 +483,21 @@ def _build_policy_result(
         "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
+
+
+def _retirement_policy_missing_conditions(question: str) -> list[str]:
+    """미확정 #118 제도 판단에 필요한 표준 확인 조건을 반환한다."""
+
+    conditions: list[str] = []
+    if "퇴직급여" in question and "DB" not in question and "DC" not in question:
+        conditions.append(_RETIREMENT_SCHEME_MISSING_CONDITION)
+    if any(label in question for label in ("계속근로", "근속")) and any(
+        label in question for label in ("인정", "포함")
+    ):
+        conditions.append(_SERVICE_RECOGNITION_MISSING_CONDITION)
+    if ("DB→DC" in question or "DB에서 DC" in question) and "가능" in question:
+        conditions.append(_DB_TO_DC_ELIGIBILITY_MISSING_CONDITION)
+    return conditions
 
 
 def _select_evidence(search_result: SearchResult, evidence_chunk_ids: list[str]) -> list[Any]:
