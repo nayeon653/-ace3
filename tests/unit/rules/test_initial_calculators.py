@@ -16,8 +16,11 @@ from pension_agent.rules.calculators.fund_var_risk import classify_var_risk_grad
 def test_calculator_map_contains_registered_set() -> None:
     assert CALCULATORS.keys() == {
         "deferred_retirement_withdrawal_tax",
+        "dc_medical_withdrawal_threshold",
         "fund_standard_price",
         "fund_var_risk",
+        "medical_care_withdrawal_tax_breakdown",
+        "medical_care_withdrawal_tax_limit",
         "non_pension_withdrawal_tax",
         "pension_annual_limit_installment",
         "pension_income_tax",
