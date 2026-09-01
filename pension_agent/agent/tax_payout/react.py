@@ -24,9 +24,13 @@ from langgraph.types import Command
 from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
+    CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+    CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
     CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
     calculation_evidence_chunk_ids,
+    create_non_pension_withdrawal_tax_tool,
+    create_pension_income_tax_tool,
     create_pension_tax_credit_tool,
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
@@ -60,6 +64,16 @@ _NUMERIC_CLAIM_UNDETERMINED_CONCLUSION = (
 _UNDETERMINED_MISSING_FALLBACK = "제공 문서의 관련 근거 또는 필수 조건"
 _CONDITIONAL_MISSING_FALLBACK = "판단에 필요한 사용자 조건"
 _INCOME_BASIS_MISSING_CONDITION = "총급여 또는 종합소득금액 확인 필요"
+_ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION = "해당 연도 사적연금 과세대상 합계 확인 필요"
+_PENSION_TAX_FILING_CHOICE_MISSING_CONDITION = "종합과세 또는 16.5% 분리과세 선택 필요"
+_PENSION_INCOME_TAX_CALCULATOR_ID = "pension_income_tax"
+_NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID = "non_pension_withdrawal_tax"
+_PENSION_TAX_COMPARISON_TOOL_NAMES = frozenset(
+    {
+        CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
+        CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+    }
+)
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
 _NUMERIC_CLAIM_REMOVED_WARNING = "근거 없이 제출된 확정 수치는 결과에서 제거했습니다."
 _NUMERIC_CLAIM_RESUBMIT_INSTRUCTION = (
@@ -142,6 +156,10 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
             instruction = (
                 "연금수령한도 계산이면 calculate_pension_withdrawal_limit Tool을, "
                 "연금계좌 세액공제 계산이면 calculate_pension_tax_credit Tool을 호출하고, "
+                "세액공제 원금·운용수익의 연금수령 세금이면 "
+                "calculate_pension_income_tax Tool을, 같은 재원의 연금외수령 세금이면 "
+                "calculate_non_pension_withdrawal_tax Tool을 호출하세요. 이연퇴직소득 "
+                "과세에는 두 연금소득세 Tool을 사용하지 말고, "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
         else:
@@ -181,7 +199,7 @@ class SingleTaxPayoutSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
 
 
 class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
-    """검색·계산·결과 제출 순서에서 현재 허용된 Tool 호출 하나만 남긴다."""
+    """검색·계산·결과 제출 순서에서 현재 허용된 Tool 호출만 남긴다."""
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
@@ -195,15 +213,41 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
             # submit_domain_result 안에서 계속 수행한다.
             allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
         elif state.get("calculations"):
-            allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
+            completed_ids = {calculation["calculator_id"] for calculation in state["calculations"]}
+            completed_comparison_ids = completed_ids & {
+                _PENSION_INCOME_TAX_CALCULATOR_ID,
+                _NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID,
+            }
+            if completed_comparison_ids == {_PENSION_INCOME_TAX_CALCULATOR_ID}:
+                allowed_tools = (
+                    CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+                    SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                )
+            elif completed_comparison_ids == {_NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID}:
+                allowed_tools = (
+                    CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
+                    SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                )
+            else:
+                allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
         else:
             allowed_tools = (
                 CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
                 CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
+                CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
+                CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
-        kept_calls = allowed_calls[:1]
+        calculation_calls = [
+            call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
+        ]
+        if {call["name"] for call in calculation_calls} == _PENSION_TAX_COMPARISON_TOOL_NAMES:
+            kept_calls = calculation_calls
+        elif calculation_calls:
+            kept_calls = calculation_calls[:1]
+        else:
+            kept_calls = allowed_calls[:1]
         if kept_calls == last_message.tool_calls:
             return None
         return {"messages": [last_message.model_copy(update={"tool_calls": kept_calls})]}
@@ -244,12 +288,16 @@ def create_tax_payout_react_agent(
 
     calculation_tool = create_pension_withdrawal_limit_tool()
     tax_credit_tool = create_pension_tax_credit_tool()
+    pension_income_tax_tool = create_pension_income_tax_tool()
+    non_pension_withdrawal_tax_tool = create_non_pension_withdrawal_tax_tool()
     graph = create_agent(
         model=model,
         tools=(
             _create_tax_payout_search_tool(search_service),
             calculation_tool,
             tax_credit_tool,
+            pension_income_tax_tool,
+            non_pension_withdrawal_tax_tool,
             _create_tax_payout_result_tool(),
         ),
         system_prompt=system_prompt,
@@ -273,6 +321,16 @@ def create_tax_payout_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=tax_credit_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=pension_income_tax_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=non_pension_withdrawal_tax_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),
@@ -506,6 +564,20 @@ def _build_tax_payout_result(
             status = "conditional"
             if _INCOME_BASIS_MISSING_CONDITION not in normalized_missing:
                 normalized_missing = [*normalized_missing, _INCOME_BASIS_MISSING_CONDITION]
+        if _has_unknown_ordinary_pension_income_threshold(calculations):
+            status = "conditional"
+            if _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION not in normalized_missing:
+                normalized_missing = [
+                    *normalized_missing,
+                    _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION,
+                ]
+        if _requires_pension_tax_filing_choice(calculations):
+            status = "conditional"
+            if _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION not in normalized_missing:
+                normalized_missing = [
+                    *normalized_missing,
+                    _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
+                ]
     elif status != "not_applicable":
         status, normalized_conclusion, normalized_missing, normalized_warnings = (
             _apply_numeric_claim_guard(
@@ -552,6 +624,28 @@ def _has_unconditioned_pension_tax_credit_rate_scenarios(
         and "income_amount_krw" not in calculation["inputs"]
         and "lower_income_rate_percent" in calculation["outputs"]
         and "other_income_rate_percent" in calculation["outputs"]
+        for calculation in calculations
+    )
+
+
+def _has_unknown_ordinary_pension_income_threshold(
+    calculations: list[CalculationResult],
+) -> bool:
+    return any(
+        calculation["calculator_id"] == _PENSION_INCOME_TAX_CALCULATOR_ID
+        and calculation["inputs"].get("pension_treatment") == "ordinary"
+        and "annual_private_pension_taxable_income_krw" not in calculation["inputs"]
+        and calculation["outputs"].get("annual_threshold_status") == "unknown"
+        for calculation in calculations
+    )
+
+
+def _requires_pension_tax_filing_choice(
+    calculations: list[CalculationResult],
+) -> bool:
+    return any(
+        calculation["calculator_id"] == _PENSION_INCOME_TAX_CALCULATOR_ID
+        and calculation["outputs"].get("filing_choice_required") is True
         for calculation in calculations
     )
 

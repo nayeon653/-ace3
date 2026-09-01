@@ -19,6 +19,8 @@ from pension_agent.rules import CalculationError, CalculationRequest, calculate
 
 CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME = "calculate_pension_withdrawal_limit"
 CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME = "calculate_pension_tax_credit"
+CALCULATE_PENSION_INCOME_TAX_TOOL_NAME = "calculate_pension_income_tax"
+CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME = "calculate_non_pension_withdrawal_tax"
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
 
@@ -234,6 +236,169 @@ def create_pension_tax_credit_tool() -> BaseTool:
         )
 
     return calculate_pension_tax_credit
+
+
+def create_pension_income_tax_tool() -> BaseTool:
+    """Tax/Payout Agent용 연금소득세 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
+        description=(
+            "일반 연금수령 또는 부득이한 사유 인출의 기본세율과 확정 가능한 세액을 "
+            "계산한다. 선택 입력은 값과 출처를 함께 전달하거나 함께 생략한다."
+        ),
+    )
+    async def calculate_pension_income_tax(
+        pension_treatment: Annotated[
+            Literal["ordinary", "unavoidable"],
+            Field(description="연금수령 과세 구분"),
+        ],
+        recipient_age: Annotated[int, Field(ge=0, description="수령자 나이")],
+        pension_treatment_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="연금수령 또는 부득이한 사유 의미가 있는 원문 구절",
+            ),
+        ],
+        recipient_age_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="나이 의미와 정확한 세 값이 있는 원문 구절",
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+        target_taxable_amount_krw: Annotated[
+            Decimal | None,
+            Field(ge=0, description="현재 연금수령 과세대상액(원)"),
+        ] = None,
+        target_taxable_amount_krw_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="연금수령 과세대상 재원과 금액이 있는 원문 구절",
+            ),
+        ] = None,
+        is_lifetime_annuity: Annotated[
+            bool | None,
+            Field(description="종신연금 여부"),
+        ] = None,
+        is_lifetime_annuity_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="종신 또는 비종신 의미가 있는 원문 구절",
+            ),
+        ] = None,
+        annual_private_pension_taxable_income_krw: Annotated[
+            Decimal | None,
+            Field(ge=0, description="연간 사적연금 과세대상 합계(원)"),
+        ] = None,
+        annual_private_pension_taxable_income_krw_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="연간 사적연금 과세대상 합계와 금액이 있는 원문 구절",
+            ),
+        ] = None,
+    ) -> Command | str:
+        optional_entries: tuple[tuple[str, Any, str | None], ...] = (
+            (
+                "target_taxable_amount_krw",
+                target_taxable_amount_krw,
+                target_taxable_amount_krw_source,
+            ),
+            (
+                "is_lifetime_annuity",
+                is_lifetime_annuity,
+                is_lifetime_annuity_source,
+            ),
+            (
+                "annual_private_pension_taxable_income_krw",
+                annual_private_pension_taxable_income_krw,
+                annual_private_pension_taxable_income_krw_source,
+            ),
+        )
+        inputs: dict[str, Any] = {
+            "pension_treatment": pension_treatment,
+            "recipient_age": recipient_age,
+        }
+        input_sources = {
+            "pension_treatment": pension_treatment_source,
+            "recipient_age": recipient_age_source,
+        }
+        for field, value, source in optional_entries:
+            if (value is None) != (source is None):
+                return json.dumps(
+                    {"error": "선택 입력값과 출처는 함께 제공해야 합니다."},
+                    ensure_ascii=False,
+                )
+            if value is not None:
+                inputs[field] = value
+                input_sources[field] = cast(str, source)
+
+        return _execute_calculation(
+            calculator_id="pension_income_tax",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_pension_income_tax
+
+
+def create_non_pension_withdrawal_tax_tool() -> BaseTool:
+    """Tax/Payout Agent용 연금외수령 세액 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+        description=(
+            "연금외수령의 16.5% 세율과 과세대상액이 있을 때 세액을 계산한다. "
+            "과세대상액과 출처는 함께 전달하거나 함께 생략한다."
+        ),
+    )
+    async def calculate_non_pension_withdrawal_tax(
+        runtime: ToolRuntime[ExecutionContext, Any],
+        taxable_amount_krw: Annotated[
+            Decimal | None,
+            Field(ge=0, description="연금외수령 과세대상액(원)"),
+        ] = None,
+        taxable_amount_krw_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="연금외수령 의미와 과세대상 재원·금액이 있는 원문 구절",
+            ),
+        ] = None,
+    ) -> Command | str:
+        inputs: dict[str, Any] = {}
+        input_sources: dict[str, str] = {}
+        if (taxable_amount_krw is None) != (taxable_amount_krw_source is None):
+            return json.dumps(
+                {"error": "선택 입력값과 출처는 함께 제공해야 합니다."},
+                ensure_ascii=False,
+            )
+        if taxable_amount_krw is not None:
+            inputs["taxable_amount_krw"] = taxable_amount_krw
+            input_sources["taxable_amount_krw"] = cast(str, taxable_amount_krw_source)
+
+        return _execute_calculation(
+            calculator_id="non_pension_withdrawal_tax",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_non_pension_withdrawal_tax
 
 
 def create_fund_standard_price_tool() -> BaseTool:

@@ -17,6 +17,8 @@ def test_calculator_map_contains_registered_set() -> None:
     assert CALCULATORS.keys() == {
         "fund_standard_price",
         "fund_var_risk",
+        "non_pension_withdrawal_tax",
+        "pension_income_tax",
         "pension_tax_credit",
         "pension_withdrawal_limit",
     }

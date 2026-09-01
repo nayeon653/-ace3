@@ -42,6 +42,8 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 |---|---|---|
 | `pension_withdrawal_limit` | 평가액 ÷ (11 - 수령연차) × 120%, 1~10년차 | `doc2.pdf` 1쪽 |
 | `pension_tax_credit` | 일반 납입 한도(연금저축 600만원·통합 900만원), 소득 경계 16.5%/13.2%, ISA 추가공제(전환액 10%·동일 만기 누적 300만원) | `doc41.docx` 1쪽, `doc6.docx` 3쪽 |
+| `pension_income_tax` | 일반 연금수령·부득이한 사유 인출의 연령별 세율과 연간 사적연금소득 1,500만원 경계 | `doc38.docx` `#/tables/0`, `#/texts/4`, `#/texts/5`, `#/texts/14`, `#/texts/15`; `doc20.docx` `#/texts/53`, `#/tables/2` |
+| `non_pension_withdrawal_tax` | 세액공제 원금·운용수익의 연금외수령 16.5% | `doc39.docx` `#/texts/22`, `#/tables/0` |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 
@@ -88,6 +90,79 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 `CalculationOutput.warnings`에 남긴다(계산 결과가 실제 환급액이 아니라는 warning도 함께
 포함).
 
+### `pension_income_tax` 계약
+
+**필수 입력**: `pension_treatment`(`ordinary` 또는 `unavoidable`), `recipient_age`(0 이상의
+정수). `ordinary`는 `recipient_age >= 55`이고 `is_lifetime_annuity`가 필수다.
+
+**선택 입력**: `target_taxable_amount_krw`, `is_lifetime_annuity`,
+`annual_private_pension_taxable_income_krw`. `is_lifetime_annuity`와 연간 합계는
+`ordinary`에서만 받으며 `unavoidable`에 전달하면 입력 오류다. 대상액과 연간 합계가 함께
+있으면 대상액은 연간 합계보다 작거나 같아야 한다.
+
+Tool provenance에서 `target_taxable_amount_krw`는 현재·이번·해당 인출 또는 수령의
+과세대상액과 정확한 금액이 같은 구절에 있어야 한다. `ordinary`는 현재 연금수령 의미를,
+`unavoidable`은 부득이한 사유로 인출한 현재 대상액 의미를 요구한다. 반대로
+`annual_private_pension_taxable_income_krw`는 연간·사적연금·과세대상·합계 의미를 같은
+구절에서 요구한다. 연간·합계·전체 사적연금소득 구절은 현재 대상액 source로 사용할 수
+없고 동일 source를 두 필드에 재사용할 수 없다.
+
+수령 유형과 종신 여부는 같은 구절의 `아님`, `아닌`, `아니다`, `해당하지 않음`,
+`해당하지 않는다` 같은 부정 표현을 먼저 판정한다. 다만 종신연금이 아니라는 명시적 표현은
+`is_lifetime_annuity=false`의 근거로 허용한다. `recipient_age`는 `나이 N세`, `연령 N세`,
+`만 N세`처럼 정확한 단일 나이만 허용한다. 이상·이하·초과·미만, 범위(`55~69세`,
+`55세부터 69세`)와 근사(`70세 전후`) 표현은 정확한 나이 source로 사용하지 않고
+생년월일에서 나이를 계산하거나 추정하지 않는다.
+
+**생략/0/null/음수 계약**: 선택 필드 생략은 정보가 확인되지 않았다는 뜻이고 명시적 `0`은
+확인된 값으로 보존한다. 명시적 `null`, 음수 금액·나이와 정의되지 않은 extra 입력은
+거부한다. `CalculationResult.inputs`에는 실제 전달한 필드만 남는다.
+
+**일반 연금수령 세율**: 종신연금은 나이와 관계없이 3.3%, 비종신은 55~69세 5.5%,
+70~79세 4.4%, 80세 이상 3.3%다. `base_rate_percent`에 적용 기본세율을 반환한다.
+
+**연간 합계 경계**: 연간 합계는 현재 대상액을 포함한 전 금융기관의 과세대상 사적연금소득
+합계이며 세액공제를 받지 않은 원금과 이연퇴직소득은 제외한다.
+
+- 합계 생략: `annual_threshold_status=unknown`. 대상액이 있어도 `tax_krw`와
+  `after_tax_krw`를 생성하지 않는다.
+- 15,000,000원 이하(정확히 15,000,000원 포함): `annual_threshold_status=within`,
+  `filing_choice_required=false`. 대상액이 있으면 기본세율로 세액과 세후 금액을 계산한다.
+- 15,000,000원 초과: `annual_threshold_status=exceeded`,
+  `filing_choice_required=true`. `separate_tax_option_rate_percent=16.5`와 연간 합계 전체에
+  16.5%를 적용한 `separate_tax_option_tax_krw`, `separate_tax_option_after_tax_krw`를
+  반환한다. 초과분이나 현재 대상액에 16.5%를 적용하지 않으며 종합과세 최종세액과 현재
+  대상액의 확정 세액을 생성하지 않는다.
+
+**부득이한 사유 인출**: 70세 미만 5.5%, 70~79세 4.4%, 80세 이상 3.3%이며 55세 미만도
+허용한다. 연간 1,500만원 기준은 적용하지 않고 대상액이 있을 때만 `tax_krw`와
+`after_tax_krw`를 반환한다. 해당 사유의 법률상 적격성은 Agent가 판단한다.
+
+### `non_pension_withdrawal_tax` 계약
+
+**선택 입력**: `taxable_amount_krw`. 생략하면 `base_rate_percent=16.5`만 반환하고 명시적
+`0`이면 0원 세액과 세후 금액을 반환한다. 명시적 `null`, 음수와 다른 계산기의 extra 입력은
+거부한다. 금액이 있으면 `tax_krw = taxable_amount_krw × 16.5%`,
+`after_tax_krw = taxable_amount_krw - tax_krw`를 반환한다.
+
+이 계산기는 세액공제를 받은 원금·운용수익의 연금외수령에만 사용한다. 나이, 연간 합계,
+이연퇴직소득 입력을 받지 않으며 재원 적격성은 Agent가 판단한다.
+
+### 연금소득세 계산 공통 경계
+
+두 계산기는 금액과 세율을 `Decimal`로만 계산하고 원문에 없는 원 단위 반올림·절사를
+적용하지 않는다. Rules는 확정된 입력의 검증과 산술만 담당하고 검색, LLM, 외부 API,
+법률상 사유·재원 추론을 수행하지 않는다. Tool은 선택 값/source 쌍과 같은 구절의 의미·값
+대응을 검증하고, Agent는 계산기 선택과 법률상 적격성·누락 조건을 판단한다.
+
+일반적으로 계산 Tool은 하나만 실행한다. 연금수령과 연금외수령 비교 질문에 한해
+`calculate_pension_income_tax`과 `calculate_non_pension_withdrawal_tax`을 각각 최대 한 번
+실행하고 두 결과를 함께 보존한다. 일반 연금수령의 연간 합계가 없어
+`annual_threshold_status=unknown`이면 Python 결과 경계가 `status=conditional`과 연간 합계
+확인 조건을 강제한다. `filing_choice_required=true`이면 같은 경계가 `status=conditional`과
+종합과세 또는 16.5% 분리과세 선택 조건을 강제한다. 금액이 생략된 단순 세율 질문에는
+금액 누락 조건을 추가하지 않는다.
+
 ## 실행 제한과 오류
 
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
@@ -118,7 +193,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 
 | 소비자 | 허용 계산기 |
 |---|---|
-| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_tax_credit` |
+| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax` |
 | Product Agent | `fund_standard_price`, `fund_var_risk` |
 | Policy Agent | 없음 |
 | Main Supervisor | 직접 호출 금지 |
@@ -138,6 +213,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 - `tests/unit/rules/test_calculation_service.py`
 - `tests/unit/rules/test_initial_calculators.py`
 - `tests/unit/rules/test_pension_tax_credit.py`
+- `tests/unit/rules/test_pension_income_tax.py`
 - `tests/unit/agent/test_calculation_tools.py`
 - `tests/unit/agent/test_domain_agents.py`
 - `tests/test_agent_import_boundaries.py`
