@@ -3,6 +3,9 @@
 from pension_agent.rules.calculators.deferred_retirement_withdrawal_tax import (
     DEFERRED_RETIREMENT_WITHDRAWAL_TAX,
 )
+from pension_agent.rules.calculators.executive_retirement_income_limit import (
+    EXECUTIVE_RETIREMENT_INCOME_LIMIT,
+)
 from pension_agent.rules.calculators.fund_standard_price import FUND_STANDARD_PRICE
 from pension_agent.rules.calculators.fund_var_risk import FUND_VAR_RISK
 from pension_agent.rules.calculators.medical_care_withdrawal import (
@@ -45,6 +48,7 @@ CALCULATORS = {
     "dc_retirement_benefit": DC_RETIREMENT_BENEFIT,
     "deferred_retirement_withdrawal_tax": DEFERRED_RETIREMENT_WITHDRAWAL_TAX,
     "dc_medical_withdrawal_threshold": DC_MEDICAL_WITHDRAWAL_THRESHOLD,
+    "executive_retirement_income_limit": EXECUTIVE_RETIREMENT_INCOME_LIMIT,
     "fund_standard_price": FUND_STANDARD_PRICE,
     "fund_var_risk": FUND_VAR_RISK,
     "medical_care_withdrawal_tax_breakdown": MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN,
@@ -68,6 +72,7 @@ __all__ = [
     "DC_MINIMUM_EMPLOYER_CONTRIBUTION",
     "DC_RETIREMENT_BENEFIT",
     "DEFERRED_RETIREMENT_WITHDRAWAL_TAX",
+    "EXECUTIVE_RETIREMENT_INCOME_LIMIT",
     "FUND_STANDARD_PRICE",
     "FUND_VAR_RISK",
     "MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN",
