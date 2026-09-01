@@ -5,6 +5,7 @@ from pension_agent.rules.calculators.deferred_retirement_withdrawal_tax import (
 )
 from pension_agent.rules.calculators.fund_standard_price import FUND_STANDARD_PRICE
 from pension_agent.rules.calculators.fund_var_risk import FUND_VAR_RISK
+from pension_agent.rules.calculators.isa_transfer_deadline import ISA_TRANSFER_DEADLINE
 from pension_agent.rules.calculators.medical_care_withdrawal import (
     DC_MEDICAL_WITHDRAWAL_THRESHOLD,
     MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN,
@@ -47,6 +48,7 @@ CALCULATORS = {
     "dc_medical_withdrawal_threshold": DC_MEDICAL_WITHDRAWAL_THRESHOLD,
     "fund_standard_price": FUND_STANDARD_PRICE,
     "fund_var_risk": FUND_VAR_RISK,
+    "isa_transfer_deadline": ISA_TRANSFER_DEADLINE,
     "medical_care_withdrawal_tax_breakdown": MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN,
     "medical_care_withdrawal_tax_limit": MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT,
     "non_pension_withdrawal_tax": NON_PENSION_WITHDRAWAL_TAX,
@@ -70,6 +72,7 @@ __all__ = [
     "DEFERRED_RETIREMENT_WITHDRAWAL_TAX",
     "FUND_STANDARD_PRICE",
     "FUND_VAR_RISK",
+    "ISA_TRANSFER_DEADLINE",
     "MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN",
     "MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT",
     "NON_PENSION_WITHDRAWAL_TAX",

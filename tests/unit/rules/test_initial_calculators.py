@@ -23,6 +23,7 @@ def test_calculator_map_contains_registered_set() -> None:
         "dc_retirement_benefit",
         "fund_standard_price",
         "fund_var_risk",
+        "isa_transfer_deadline",
         "medical_care_withdrawal_tax_breakdown",
         "medical_care_withdrawal_tax_limit",
         "non_pension_withdrawal_tax",
