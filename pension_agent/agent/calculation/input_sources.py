@@ -58,7 +58,24 @@ _SOURCE_REQUIREMENTS = {
     "total_liabilities_krw": (("부채총액", "총부채", "부채"), ("원",)),
     "total_units": (("총좌수", "좌수"), ("좌",)),
     "daily_loss_percentile_percent": (("손실률",), ("%", "퍼센트")),
+    "subscription_amount_krw": (("납입금액", "가입금액"), ("원",)),
+    "redemption_amount_krw": (("환매금액",), ("원",)),
+    "redemption_profit_krw": (("이익금", "환매이익금", "환매차익"), ("원",)),
 }
+_FUND_FEE_RATE_LABELS: dict[str, tuple[str, ...]] = {
+    "fund_frontend_sales_fee": ("선취판매수수료율", "선취판매수수료"),
+    "fund_deferred_sales_fee": ("후취판매수수료율", "후취판매수수료"),
+    "fund_redemption_fee": ("환매수수료율", "환매수수료"),
+}
+_FUND_FEE_RATE_FORBIDDEN = (
+    "총보수",
+    "운용보수",
+    "판매보수",
+    "신탁보수",
+    "기타비용",
+    "총비용",
+    "TER",
+)
 _PENSION_TAX_CREDIT_SOURCE_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
     "pension_savings_net_contribution_krw": (("연금저축",), ("납입", "순납입")),
     "retirement_pension_net_contribution_krw": (("퇴직연금", "IRP"), ("납입", "순납입")),
@@ -297,6 +314,12 @@ def validated_input_sources(
             if not _matches_income_amount_source(source, inputs.get("income_basis")):
                 return None
             if not _matches_single_quantity(source, value):
+                return None
+        elif field == "selected_rate_percent":
+            if not _matches_fund_fee_rate_source(calculator_id, source, value):
+                return None
+        elif field == "rate_kind":
+            if not _matches_fund_fee_rate_kind_source(value, source):
                 return None
         else:
             if field in _PENSION_TAX_CREDIT_SOURCE_GROUPS:
@@ -561,6 +584,30 @@ def _matches_grouped_money_source(
         and _matches_single_quantity(phrase, value)
         for phrase in _source_phrases(source)
     )
+
+
+def _matches_fund_fee_rate_source(calculator_id: str | None, source: str, value: Any) -> bool:
+    labels = _FUND_FEE_RATE_LABELS.get(calculator_id or "")
+    if labels is None:
+        return False
+    return any(
+        any(label in phrase for label in labels)
+        and not any(forbidden in phrase for forbidden in _FUND_FEE_RATE_FORBIDDEN)
+        and not _is_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and any(unit in phrase for unit in ("%", "퍼센트"))
+        and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_fund_fee_rate_kind_source(value: Any, source: str) -> bool:
+    has_maximum_expression = any(label in source for label in ("이내", "상한"))
+    if value == "maximum":
+        return has_maximum_expression
+    if value == "fixed":
+        return not has_maximum_expression
+    return False
 
 
 def _matches_pension_treatment_source(value: Any, source: str) -> bool:
