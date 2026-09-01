@@ -59,7 +59,18 @@ Product Catalog Query Planner에 질문 원문과 판단 목표를 전달하고 
 - 단일 상품 문서 검색 후 일간 2.5퍼센타일 손실률이 확인된 경우에만 실행한다.
 - Calculation Service의 `fund_var_risk`만 호출하며 한 번으로 제한한다.
 
-두 Tool 모두 사용자 질문 또는 검증된 검색 근거에 없는 입력을 추정하지 않는다. 각 입력은
+### `calculate_fund_reported_var_risk`
+
+- 단일 상품 문서 검색 후 결과값으로 공시된 연환산 97.5% VaR가 확인된 경우에만 실행한다.
+- 공시값을 그대로 `fund_reported_var_risk`에 전달하며 다시 연환산하거나 반올림하지 않는다.
+- 식별된 단일 `product_code`의 문서와 질문의 명시적 클래스가 source와 일치해야 한다.
+- 현재·최신 값 요청은 검색 순위가 아니라 신뢰 가능한 공시일 metadata로 최신성을 확인해야 한다.
+  현재 검색 청크 계약에는 공시일 metadata가 없으므로 최신성 요구가 있으면 계산을 차단하고
+  `최신 공시 기준일 확인 필요`를 누락 조건으로 남긴다.
+- 연환산 여부가 불명확하거나 일간 VaR·변동성·표준편차·위험등급 숫자만 확인되면 실행하지
+  않는다.
+
+세 Tool 모두 사용자 질문 또는 검증된 검색 근거에 없는 입력을 추정하지 않는다. 각 입력은
 필드명, 값 하나와 단위를 포함한 원문 `source` 구절을 함께 제출하며, Python이 필드 의미,
 구절 포함 여부와 정규화 수치 일치를 검증한다. 검색 청크에서 가져온 입력은 해당 `chunk_id`를
 계산 결과에 기록하고 최종 evidence에 자동 포함한다. 계산한 결과는 state에서 직접
@@ -98,7 +109,7 @@ lookup_product_codes
   -> 단일 product_code 확정
   -> 해당 상품 문서 search_documents
   -> 필요 시 검색 목표를 바꿔 1회 추가 검색
-  -> 기준가격 또는 VaR 계산이면 해당 Calculation Tool
+  -> 기준가격, 공시 연환산 VaR 또는 일간 VaR 계산이면 의미에 맞는 Calculation Tool 하나
   -> submit_domain_result
 ```
 
@@ -125,6 +136,11 @@ Middleware는 한 모델 응답에서 현재 단계에 허용된 Tool 호출 하
 - 카탈로그 조회 후에는 정해진 확정 제출만 허용한다.
 - 단일 상품 식별 후 상품 범위 검색 전 최종 제출을 거부한다.
 - 상품 범위 검색 전 Calculation Tool 호출을 거부한다.
+- 공시 연환산 VaR 근거가 있으면 일간 VaR Tool 호출을 거부하고 reported Tool만 허용한다.
+- 질문 클래스와 source 클래스가 다르거나 최신 공시를 확정할 metadata가 없으면 reported
+  Tool 호출을 거부한다.
+- Calculation Tool과 제출을 동시에 요청하면 계산을 먼저 실행하고, 성공 후에는 제출만
+  허용한다.
 - 한 모델 응답의 결과 제출은 하나로 제한한다.
 
 ## 실행 제한
@@ -135,7 +151,8 @@ Middleware는 한 모델 응답에서 현재 단계에 허용된 Tool 호출 하
 | Catalog Tool | 최대 1회 |
 | 검색 Tool | 최대 2회 |
 | 기준가격 Tool | 최대 1회 |
-| VaR 위험등급 Tool | 최대 1회 |
+| 공시 연환산 VaR Tool | 최대 1회 |
+| 일간 VaR 위험등급 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |

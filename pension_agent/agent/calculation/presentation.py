@@ -67,9 +67,14 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
                 "펀드 1,000좌당 기준가격: "
                 f"{_value(outputs, units, 'standard_price_per_1000_units')}"
             )
-        elif calculator_id == "fund_var_risk":
+        elif calculator_id in {"fund_reported_var_risk", "fund_var_risk"}:
+            label = (
+                "공시 연환산 97.5% VaR"
+                if calculator_id == "fund_reported_var_risk"
+                else "연환산 97.5% VaR"
+            )
             lines.append(
-                "연환산 97.5% VaR: "
+                f"{label}: "
                 f"{_value(outputs, units, 'annualized_var_percent')}, "
                 f"위험등급: {outputs['risk_grade']}등급 ({outputs['risk_label']})"
             )
