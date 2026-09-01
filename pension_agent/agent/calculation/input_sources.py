@@ -295,6 +295,21 @@ def validated_input_sources(
                 return None
             if not _matches_single_quantity(source, value):
                 return None
+        elif field == "average_annualized_salary_2012_2019_krw":
+            if not _matches_executive_salary_2012_2019_source(source, value):
+                return None
+        elif field == "average_annualized_salary_2020_onward_krw":
+            if not _matches_executive_salary_2020_onward_source(source, value):
+                return None
+        elif field == "service_months_2012_2019":
+            if not _matches_executive_service_months_2012_2019_source(source, value):
+                return None
+        elif field == "service_months_2020_onward":
+            if not _matches_executive_service_months_2020_onward_source(source, value):
+                return None
+        elif field == "post_2011_limit_subject_payment_krw":
+            if not _matches_post_2011_limit_subject_payment_source(source, value):
+                return None
         else:
             if field in _PENSION_TAX_CREDIT_SOURCE_GROUPS:
                 if not _matches_pension_tax_credit_source(field, source, value):
@@ -556,6 +571,101 @@ def _matches_grouped_money_source(
         "원" in phrase
         and all(any(token in phrase for token in group) for group in groups)
         and _matches_single_quantity(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+_EXECUTIVE_APPROXIMATE_EXPRESSIONS = ("대략", "최대")
+# "부터"는 일반적으로 개방형 범위 표현(예: "55세부터")이라 거부 대상이지만, 임원 한도
+# 기간 필드는 "2012" "2019"(또는 "2020") 양쪽 연도가 모두 요구되는 닫힌 구간이므로
+# "2012년부터 2019년까지"처럼 원문 그대로의 폐구간 표현을 허용한다.
+_EXECUTIVE_NON_EXACT_EXPRESSIONS = tuple(
+    expression for expression in _NON_EXACT_EXPRESSIONS if expression != "부터"
+)
+
+
+def _is_executive_non_exact_phrase(phrase: str) -> bool:
+    if any(expression in phrase for expression in _EXECUTIVE_APPROXIMATE_EXPRESSIONS):
+        return True
+    if any(expression in phrase for expression in _EXECUTIVE_NON_EXACT_EXPRESSIONS):
+        return True
+    return bool(re.search(r"\d(?:[\d,.]*\d)?\s*[~∼]\s*\d", phrase))
+
+
+_EXECUTIVE_YEAR_TOKENS = ("2012", "2019", "2020", "2011")
+
+
+def _matches_executive_salary_2012_2019_source(source: str, value: Any) -> bool:
+    return any(
+        "2012" in phrase
+        and "2019" in phrase
+        and "2020" not in phrase
+        and any(label in phrase for label in ("연평균", "연환산"))
+        and any(label in phrase for label in ("총급여", "급여"))
+        and "퇴직급여" not in phrase
+        and "퇴직금" not in phrase
+        and not _is_executive_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and "원" in phrase
+        and _matches_single_quantity(_without_tokens(phrase, _EXECUTIVE_YEAR_TOKENS), value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_executive_salary_2020_onward_source(source: str, value: Any) -> bool:
+    return any(
+        "2020" in phrase
+        and "2019" not in phrase
+        and any(label in phrase for label in ("연평균", "연환산"))
+        and any(label in phrase for label in ("총급여", "급여"))
+        and "퇴직급여" not in phrase
+        and "퇴직금" not in phrase
+        and not _is_executive_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and "원" in phrase
+        and _matches_single_quantity(_without_tokens(phrase, _EXECUTIVE_YEAR_TOKENS), value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_executive_service_months_2012_2019_source(source: str, value: Any) -> bool:
+    return any(
+        "2012" in phrase
+        and "2019" in phrase
+        and "2020" not in phrase
+        and any(label in phrase for label in ("근무월수", "근무기간", "근속월수"))
+        and "개월" in phrase
+        and not _is_executive_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and _matches_single_quantity(_without_tokens(phrase, _EXECUTIVE_YEAR_TOKENS), value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_executive_service_months_2020_onward_source(source: str, value: Any) -> bool:
+    return any(
+        "2020" in phrase
+        and "2019" not in phrase
+        and any(label in phrase for label in ("근무월수", "근무기간", "근속월수"))
+        and "개월" in phrase
+        and not _is_executive_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and _matches_single_quantity(_without_tokens(phrase, _EXECUTIVE_YEAR_TOKENS), value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_post_2011_limit_subject_payment_source(source: str, value: Any) -> bool:
+    return any(
+        any(
+            label in phrase
+            for label in ("2012년 이후", "2012년이후", "한도 적용대상", "한도적용대상")
+        )
+        and any(label in phrase for label in ("지급액", "퇴직금"))
+        and not _is_executive_non_exact_phrase(phrase)
+        and not _is_negated_phrase(phrase)
+        and "원" in phrase
+        and _matches_single_quantity(_without_tokens(phrase, _EXECUTIVE_YEAR_TOKENS), value)
         for phrase in _source_phrases(source)
     )
 
