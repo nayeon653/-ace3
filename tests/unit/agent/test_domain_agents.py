@@ -29,6 +29,10 @@ from pension_agent.agent.policy import create_policy_agent, load_policy_agent_pr
 from pension_agent.agent.policy.react import (
     _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION,
     _DC_ELIGIBILITY_MISSING_CONDITION,
+    _ISA_MATURITY_DATE_MISSING_CONDITION,
+    _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
+    _ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION,
+    _ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION,
     _SERVICE_RECOGNITION_MISSING_CONDITION,
     EnforcePolicyToolSequence,
     _build_policy_result,
@@ -444,6 +448,7 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                 else {
                     "search_documents",
                     "calculate_dc_medical_withdrawal_threshold",
+                    "calculate_isa_transfer_deadline",
                     "submit_domain_result",
                 }
             )
@@ -4851,6 +4856,7 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "검색된 청크 전체가 아니라 결론에 실제 인용한 최소" in tax_prompt
     assert "근거 부족 판단을 계산 필요 판단으로 바꾸지 않는다" in tax_prompt
     assert "calculate_dc_medical_withdrawal_threshold" in policy_prompt
+    assert "calculate_isa_transfer_deadline" in policy_prompt
     assert "6개월 이상 요양" in policy_prompt
     assert "IRP" in policy_prompt
     assert "DB·DC 퇴직급여 제도 판단" in policy_prompt
@@ -4864,7 +4870,9 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "그 전에 limit 또는 `calculate_pension_income_tax`를 호출하지 않는다" in tax_prompt
 
 
-def _policy_sequence_tool_names(calculations: list[Any], tool_names: list[str]) -> list[str]:
+def _policy_sequence_tool_names(
+    calculations: list[Any], tool_names: list[str], *, question: str = ""
+) -> list[str]:
     message = AIMessage(
         content="",
         tool_calls=[
@@ -4877,6 +4885,7 @@ def _policy_sequence_tool_names(calculations: list[Any], tool_names: list[str]) 
             "messages": [message],
             "search_result": SearchResult(execution_status="completed"),
             "calculations": calculations,
+            "question": question,
         },
         None,
     )
@@ -4891,6 +4900,24 @@ def test_policy_separates_dc_threshold_submit_and_blocks_after_success() -> None
     assert _policy_sequence_tool_names(
         [{"calculator_id": "dc_medical_withdrawal_threshold"}],
         ["calculate_dc_medical_withdrawal_threshold", "submit_domain_result"],
+    ) == ["submit_domain_result"]
+
+
+def test_policy_selects_isa_deadline_tool_and_blocks_conflicting_calculation() -> None:
+    question = "ISA 만기자금 연금전환 60일 기한을 계산해줘"
+    assert _policy_sequence_tool_names(
+        [],
+        [
+            "calculate_dc_medical_withdrawal_threshold",
+            "calculate_isa_transfer_deadline",
+            "submit_domain_result",
+        ],
+        question=question,
+    ) == ["calculate_isa_transfer_deadline"]
+    assert _policy_sequence_tool_names(
+        [{"calculator_id": "isa_transfer_deadline"}],
+        ["calculate_isa_transfer_deadline", "submit_domain_result"],
+        question=question,
     ) == ["submit_domain_result"]
 
 
@@ -4911,6 +4938,276 @@ def _dc_threshold_calculation() -> Any:
         },
         "warnings": [],
     }
+
+
+def _isa_deadline_calculation(
+    *, completion_date: str | None = None, within_deadline: bool | None = None
+) -> Any:
+    inputs: dict[str, Any] = {"isa_maturity_date": "2026-06-30"}
+    outputs: dict[str, Any] = {"transfer_deadline_date": "2026-08-29"}
+    if completion_date is not None:
+        inputs["transfer_completion_date"] = completion_date
+    if within_deadline is not None:
+        outputs["within_deadline"] = within_deadline
+    return {
+        "calculator_id": "isa_transfer_deadline",
+        "inputs": inputs,
+        "input_sources": {},
+        "outputs": outputs,
+        "units": {},
+        "warnings": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("question", "calculations", "expected_status", "expected_condition"),
+    [
+        (
+            "ISA 만기자금 연금전환 마감일이 언제야?",
+            [],
+            "conditional",
+            _ISA_MATURITY_DATE_MISSING_CONDITION,
+        ),
+        (
+            "ISA는 6월 30일 만기고 8월 20일 신청했어. 기한 안이야?",
+            [_isa_deadline_calculation()],
+            "conditional",
+            _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
+        ),
+        (
+            "ISA는 6월 30일 만기고 8월 20일에 입금했어. 기한 안이야?",
+            [_isa_deadline_calculation()],
+            "conditional",
+            _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
+        ),
+        (
+            "ISA는 6월 30일 만기고 8월 20일에 처리했어. 기한 안이야?",
+            [_isa_deadline_calculation()],
+            "conditional",
+            _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
+        ),
+        (
+            "ISA 만기자금 연금전환 마감일까지 오늘 기준 며칠 남았어?",
+            [_isa_deadline_calculation()],
+            "conditional",
+            _ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION,
+        ),
+        (
+            "ISA 만기자금 연금전환 가능 여부를 알려줘",
+            [_isa_deadline_calculation(completion_date="2026-08-29", within_deadline=True)],
+            "conditional",
+            _ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION,
+        ),
+    ],
+)
+def test_policy_enforces_isa_deadline_conditional_boundaries(
+    question: str,
+    calculations: list[Any],
+    expected_status: str,
+    expected_condition: str,
+) -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_policy_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=calculations,
+        question=question,
+        status="determined",
+        conclusion="기한을 확인했습니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == expected_status
+    assert result["decision"]["missing_conditions"] == [expected_condition]
+    assert result["calculations"] == calculations
+
+
+@pytest.mark.parametrize(
+    ("completion_date", "within_deadline", "label"),
+    [
+        ("2026-08-29", True, "60일 기한: 충족"),
+        ("2026-08-30", False, "60일 기한: 초과"),
+    ],
+)
+def test_policy_presents_rules_isa_completion_result_without_recalculation(
+    completion_date: str,
+    within_deadline: bool,
+    label: str,
+) -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_policy_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[
+            _isa_deadline_calculation(
+                completion_date=completion_date, within_deadline=within_deadline
+            )
+        ],
+        question="ISA 만기자금 연금전환 입금확인 완료가 기한 안이야?",
+        status="determined",
+        conclusion="60일 기한만 판정했습니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert "ISA 만기일: 2026-06-30" in result["decision"]["conclusion"]
+    assert "연금전환 마감일: 2026-08-29" in result["decision"]["conclusion"]
+    assert f"입금확인·전환완료 처리일: {completion_date}" in result["decision"]["conclusion"]
+    assert label in result["decision"]["conclusion"]
+
+
+@pytest.mark.anyio
+async def test_policy_agent_runs_isa_deadline_before_simultaneous_submit() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    maturity_source = "ISA 만기일은 2026-06-30"
+    completion_source = "입금확인 처리일은 2026-08-29"
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                chunk.model_copy(update={"content": f"{maturity_source}; {completion_source}"})
+            ],
+        )
+    )
+    submit_call = {
+        "name": "submit_domain_result",
+        "args": {
+            "status": "determined",
+            "conclusion": "60일 기한 기준으로 판정했습니다.",
+            "missing_conditions": [],
+            "warnings": [],
+            "evidence_chunk_ids": [chunk.chunk_id],
+        },
+        "id": "submit-call",
+        "type": "tool_call",
+    }
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "ISA 연금전환 60일 기한 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_isa_transfer_deadline",
+                        "args": {
+                            "isa_maturity_date": "2026-06-30",
+                            "transfer_completion_date": "2026-08-29",
+                            "isa_maturity_date_source": maturity_source,
+                            "transfer_completion_date_source": completion_source,
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    },
+                    submit_call,
+                ],
+            ),
+            AIMessage(content="", tool_calls=[submit_call]),
+        ]
+    )
+    agent = create_policy_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {
+            "question": f"{maturity_source}; {completion_source}. ISA 연금전환 기한 안이야?",
+            "objective": "ISA 만기자금 연금전환 60일 기한 판정",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"][0]["calculator_id"] == "isa_transfer_deadline"
+    assert result["calculations"][0]["outputs"]["within_deadline"] is True
+    assert result["calculations"][0]["input_sources"]
+    assert result["evidence"]
+
+
+@pytest.mark.anyio
+async def test_policy_agent_preserves_deadline_when_only_application_date_exists() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    maturity_source = "ISA 만기일은 2026-06-30"
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[chunk.model_copy(update={"content": maturity_source})],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "ISA 연금전환 60일 기한 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_isa_transfer_deadline",
+                        "args": {
+                            "isa_maturity_date": "2026-06-30",
+                            "isa_maturity_date_source": maturity_source,
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "신청일은 확인했습니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_policy_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {
+            "question": f"{maturity_source}; 2026-08-20에 신청했어. ISA 연금전환 기한 안이야?",
+            "objective": "ISA 만기자금 연금전환 완료 여부",
+        }
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [
+        _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION
+    ]
+    assert result["calculations"][0]["outputs"] == {"transfer_deadline_date": "2026-08-29"}
 
 
 def test_policy_dc_threshold_requires_separate_eligibility_confirmation() -> None:
