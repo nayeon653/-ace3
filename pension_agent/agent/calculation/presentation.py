@@ -73,6 +73,39 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
                 f"{_value(outputs, units, 'annualized_var_percent')}, "
                 f"위험등급: {outputs['risk_grade']}등급 ({outputs['risk_label']})"
             )
+        elif calculator_id == "fund_frontend_sales_fee":
+            lines.extend(
+                _fund_fee_lines(
+                    calculation["inputs"],
+                    outputs,
+                    units,
+                    amount_field="subscription_amount_krw",
+                    amount_label="납입금액",
+                    fee_label="선취판매수수료",
+                )
+            )
+        elif calculator_id == "fund_deferred_sales_fee":
+            lines.extend(
+                _fund_fee_lines(
+                    calculation["inputs"],
+                    outputs,
+                    units,
+                    amount_field="redemption_amount_krw",
+                    amount_label="환매금액",
+                    fee_label="후취판매수수료",
+                )
+            )
+        elif calculator_id == "fund_redemption_fee":
+            lines.extend(
+                _fund_fee_lines(
+                    calculation["inputs"],
+                    outputs,
+                    units,
+                    amount_field="redemption_profit_krw",
+                    amount_label="이익금",
+                    fee_label="환매수수료",
+                )
+            )
         else:
             rendered = ", ".join(f"{key}={_value(outputs, units, key)}" for key in outputs)
             lines.append(f"{calculator_id}: {rendered}")
@@ -359,6 +392,30 @@ def _db_to_dc_transfer_amount_lines(
         ),
         f"검증된 근속연수: {_value(outputs, units, 'verified_service_years')}",
         f"DB→DC 전환금액: {_value(outputs, units, 'transfer_amount')}",
+    ]
+
+
+def _fund_fee_lines(
+    inputs: dict[str, object],
+    outputs: dict[str, object],
+    units: dict[str, str],
+    *,
+    amount_field: str,
+    amount_label: str,
+    fee_label: str,
+) -> list[str]:
+    if "maximum_fee_amount_krw" in outputs:
+        rate_label = f"{fee_label} 상한율"
+        fee_line_label = f"최대 {fee_label}"
+        fee_key = "maximum_fee_amount_krw"
+    else:
+        rate_label = f"{fee_label}율"
+        fee_line_label = fee_label
+        fee_key = "fee_amount_krw"
+    return [
+        f"{amount_label}: {_value(inputs, {amount_field: 'KRW'}, amount_field)}",
+        f"{rate_label}: {_value(inputs, {'selected_rate_percent': '%'}, 'selected_rate_percent')}",
+        f"{fee_line_label}: {_value(outputs, units, fee_key)}",
     ]
 
 
