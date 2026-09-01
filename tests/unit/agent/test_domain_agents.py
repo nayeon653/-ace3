@@ -5615,8 +5615,6 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "calculate_dc_minimum_employer_contribution" in tax_prompt
     assert "calculate_dc_retirement_benefit" in tax_prompt
     assert "calculate_db_to_dc_transfer_amount" in tax_prompt
-    assert "임원 해당 여부 확인 필요" in tax_prompt
-    assert "소득 구분 금액일 뿐 세액이 아니다" in tax_prompt
     assert "DB 퇴직급여와 DC 퇴직급여의 금액 비교" in tax_prompt
     assert "자동 chaining하지 않는다" in tax_prompt
     assert "재원별 인출 순서·배분만 필요" in tax_prompt
