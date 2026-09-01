@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -51,6 +52,23 @@ _AGE_NON_EXACT_EXPRESSIONS = (
     "무렵",
 )
 _RECEIPT_YEAR_PATTERN = re.compile(r"([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))\s*년차")
+_ISO_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
+_KOREAN_DATE_PATTERN = re.compile(
+    r"(?<!\d)(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일(?!\s*(?:경|쯤))"
+)
+_DATE_NON_EXACT_EXPRESSIONS = (
+    "초순",
+    "중순",
+    "하순",
+    "월초",
+    "월말",
+    "전후",
+    "무렵",
+    "예정",
+    "약 ",
+    "정도",
+    "쯤",
+)
 _SOURCE_REQUIREMENTS = {
     "account_valuation_krw": (("평가액",), ("원",)),
     "pension_year": (("수령연차", "연금수령연차", "년차"), ("년", "연차")),
@@ -153,10 +171,23 @@ def validated_input_sources(
     ]
     if len(withdrawal_sources) != len(set(withdrawal_sources)):
         return None
+    date_sources = [
+        _normalize_text(input_sources[field])
+        for field in inputs
+        if field in {"isa_maturity_date", "transfer_completion_date"}
+    ]
+    if len(date_sources) != len(set(date_sources)):
+        return None
     validated: dict[str, CalculationInputSource] = {}
     for field, value in inputs.items():
         source = _normalize_text(input_sources[field])
-        if field == "wages_for_average_period_krw":
+        if field == "isa_maturity_date":
+            if not _matches_isa_maturity_date_source(source, value):
+                return None
+        elif field == "transfer_completion_date":
+            if not _matches_transfer_completion_date_source(source, value):
+                return None
+        elif field == "wages_for_average_period_krw":
             if not _matches_average_period_wages_source(source, value):
                 return None
         elif field == "included_days_for_average_wage":
@@ -315,6 +346,66 @@ def validated_input_sources(
             return None
         validated[field] = matched_source
     return validated
+
+
+def _matches_isa_maturity_date_source(source: str, value: Any) -> bool:
+    return any(
+        "ISA" in phrase.upper()
+        and "만기일" in phrase
+        and not any(
+            label in phrase
+            for label in (
+                "해지일",
+                "계약일",
+                "작성일",
+                "신청일",
+                "입금일",
+                "입금확인일",
+                "처리일",
+            )
+        )
+        and not _is_negated_phrase(phrase)
+        and _matches_exact_date(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_transfer_completion_date_source(source: str, value: Any) -> bool:
+    return any(
+        (
+            "입금확인일" in phrase
+            or "입금확인 처리일" in phrase
+            or "전환완료일" in phrase
+            or "전환완료 처리일" in phrase
+        )
+        and "신청일" not in phrase
+        and "문서 작성일" not in phrase
+        and not _is_negated_phrase(phrase)
+        and _matches_exact_date(phrase, value)
+        for phrase in _source_phrases(source)
+    )
+
+
+def _matches_exact_date(source: str, value: Any) -> bool:
+    if any(expression in source for expression in _DATE_NON_EXACT_EXPRESSIONS):
+        return False
+    dates = _exact_dates(source)
+    return len(dates) == 1 and dates[0] == value
+
+
+def _exact_dates(source: str) -> list[date]:
+    values: list[date] = []
+    for match in _ISO_DATE_PATTERN.finditer(source):
+        try:
+            values.append(date.fromisoformat(match.group(1)))
+        except ValueError:
+            continue
+    for match in _KOREAN_DATE_PATTERN.finditer(source):
+        try:
+            values.append(date(*(int(part) for part in match.groups())))
+        except ValueError:
+            continue
+    return values
 
 
 def _matches_average_period_wages_source(source: str, value: Any) -> bool:

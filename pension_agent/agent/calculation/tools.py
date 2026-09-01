@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from decimal import Decimal
 from typing import Annotated, Any, Literal, cast
 
@@ -42,6 +43,7 @@ CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME = (
 )
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
+CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME = "calculate_isa_transfer_deadline"
 
 
 def create_pension_withdrawal_limit_tool() -> BaseTool:
@@ -1099,6 +1101,61 @@ def create_fund_standard_price_tool() -> BaseTool:
         )
 
     return calculate_fund_standard_price
+
+
+def create_isa_transfer_deadline_tool() -> BaseTool:
+    """Policy Agent 연결 전용 ISA 연금전환 마감일 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME,
+        description=(
+            "검증된 ISA 만기일로부터 초일불산입 60 calendar days 마감일을 계산하고, "
+            "선택적으로 입금확인·전환완료 처리일의 적기 여부를 판정한다."
+        ),
+    )
+    async def calculate_isa_transfer_deadline(
+        isa_maturity_date: Annotated[
+            date,
+            Field(description="검증된 ISA 만기일"),
+        ],
+        isa_maturity_date_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="ISA 만기일 하나를 정확한 날짜로 명시한 질문 또는 검색 원문",
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+        transfer_completion_date: Annotated[
+            date | None,
+            Field(description="선택적인 입금확인·전환완료 처리일"),
+        ] = None,
+        transfer_completion_date_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="입금확인·전환완료 처리일 하나를 정확히 명시한 원문",
+            ),
+        ] = None,
+    ) -> Command | str:
+        if (transfer_completion_date is None) != (transfer_completion_date_source is None):
+            return "계산 Tool 오류: 선택 입력은 값과 source를 함께 전달하거나 함께 생략해야 합니다."
+        inputs: dict[str, Any] = {"isa_maturity_date": isa_maturity_date}
+        input_sources = {"isa_maturity_date": isa_maturity_date_source}
+        if transfer_completion_date is not None:
+            inputs["transfer_completion_date"] = transfer_completion_date
+            input_sources["transfer_completion_date"] = cast(str, transfer_completion_date_source)
+        return _execute_calculation(
+            calculator_id="isa_transfer_deadline",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_isa_transfer_deadline
 
 
 def create_fund_var_risk_tool() -> BaseTool:
