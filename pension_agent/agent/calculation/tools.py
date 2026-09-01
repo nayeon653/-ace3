@@ -41,6 +41,7 @@ CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME = (
     "calculate_medical_care_withdrawal_tax_breakdown"
 )
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
+CALCULATE_FUND_REPORTED_VAR_RISK_TOOL_NAME = "calculate_fund_reported_var_risk"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
 
 
@@ -1137,6 +1138,45 @@ def create_fund_var_risk_tool() -> BaseTool:
         )
 
     return calculate_fund_var_risk
+
+
+def create_fund_reported_var_risk_tool() -> BaseTool:
+    """Product Agent용 공시 연환산 VaR 위험등급 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_FUND_REPORTED_VAR_RISK_TOOL_NAME,
+        description=(
+            "투자설명서에 결과값으로 공시된 연환산 97.5% VaR를 추가 변환 없이 "
+            "위험등급으로 판정한다. 검증된 단일 상품 검색 근거의 정확한 공시값만 사용한다."
+        ),
+    )
+    async def calculate_fund_reported_var_risk(
+        annualized_var_percent: Annotated[
+            Decimal,
+            Field(ge=0, description="공시된 연환산 97.5% VaR(%)"),
+        ],
+        annualized_var_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=200,
+                description=(
+                    "공시·연환산·97.5% VaR 문맥과 결과값 하나를 포함하며 검색 원문에 "
+                    "그대로 있는 구절"
+                ),
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        return _execute_calculation(
+            calculator_id="fund_reported_var_risk",
+            inputs={"annualized_var_percent": annualized_var_percent},
+            input_sources={"annualized_var_percent": annualized_var_source},
+            tool_name=CALCULATE_FUND_REPORTED_VAR_RISK_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_fund_reported_var_risk
 
 
 def _execute_calculation(
