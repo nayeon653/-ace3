@@ -14,6 +14,7 @@ from pension_agent.agent.calculation import (
     create_dc_minimum_employer_contribution_tool,
     create_dc_retirement_benefit_tool,
     create_deferred_retirement_withdrawal_tax_tool,
+    create_fund_reported_var_risk_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
     create_medical_care_withdrawal_tax_breakdown_tool,
@@ -140,6 +141,81 @@ async def test_product_tools_record_only_their_calculator_results() -> None:
     assert isinstance(var_risk, Command)
     assert standard_price.update["calculations"][0]["calculator_id"] == "fund_standard_price"
     assert var_risk.update["calculations"][0]["calculator_id"] == "fund_var_risk"
+
+
+@pytest.mark.anyio
+async def test_reported_var_tool_preserves_exact_evidence_source() -> None:
+    source = "투자설명서 공시 연환산 97.5% VaR는 12.3456%"
+    result = await create_fund_reported_var_risk_tool().coroutine(
+        annualized_var_percent=Decimal("12.3456"),
+        annualized_var_source=source,
+        runtime=_runtime(question="이 상품 위험등급은?", chunk_content=source),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "fund_reported_var_risk"
+    assert calculation["inputs"] == {"annualized_var_percent": "12.3456"}
+    assert calculation["outputs"]["annualized_var_percent"] == "12.3456"
+    assert calculation["outputs"]["risk_grade"] == 4
+    assert calculation["input_sources"]["annualized_var_percent"] == {
+        "origin": "evidence",
+        "text": source,
+        "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "source",
+    [
+        "공시 일간 97.5% VaR는 12%",
+        "공시 연환산 변동성은 12%",
+        "공시 연환산 표준편차는 12%",
+        "공시 연환산 97.5% VaR 위험등급은 4등급",
+        "다른 상품 공시 연환산 97.5% VaR는 12%",
+        "타 클래스 공시 연환산 97.5% VaR는 12%",
+        "공시 연환산 97.5% VaR는 약 12%",
+        "공시 연환산 97.5% VaR는 10~12%",
+        "공시 연환산 97.5% VaR는 12% 이상",
+        "공시 연환산 97.5% VaR는 12%가 아님",
+    ],
+)
+async def test_reported_var_tool_rejects_wrong_or_non_exact_source(source: str) -> None:
+    result = await create_fund_reported_var_risk_tool().coroutine(
+        annualized_var_percent=Decimal(12),
+        annualized_var_source=source,
+        runtime=_runtime(question="이 상품 위험등급은?", chunk_content=source),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_reported_var_tool_accepts_disclosed_maximum_loss_context() -> None:
+    source = "투자설명서 공표 일간 수익률 최대손실예상액의 연환산 결과는 0%"
+    result = await create_fund_reported_var_risk_tool().coroutine(
+        annualized_var_percent=Decimal(0),
+        annualized_var_source=source,
+        runtime=_runtime(question="위험등급을 알려줘", chunk_content=source),
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"]["risk_grade"] == 6
+
+
+@pytest.mark.anyio
+async def test_reported_var_tool_rejects_daily_percentile_as_reported_var() -> None:
+    source = "과거 3년 일간 수익률의 2.5퍼센타일 손실률은 -1%"
+    result = await create_fund_reported_var_risk_tool().coroutine(
+        annualized_var_percent=Decimal(1),
+        annualized_var_source=source,
+        runtime=_runtime(question="위험등급을 알려줘", chunk_content=source),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
 
 
 @pytest.mark.anyio

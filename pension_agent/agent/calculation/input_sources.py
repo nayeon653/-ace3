@@ -237,6 +237,9 @@ def validated_input_sources(
         elif field == "actual_pension_receipt_year":
             if not _matches_actual_pension_receipt_year_source(value, source):
                 return None
+        elif field == "annualized_var_percent":
+            if not _matches_reported_annualized_var_source(source, value):
+                return None
         elif field == "allocated_deferred_retirement_tax_krw":
             if not _matches_allocated_deferred_retirement_tax_source(source, value):
                 return None
@@ -904,6 +907,37 @@ def _matches_income_amount_source(source: str, income_basis: Any) -> bool:
 def _matches_single_quantity(source: str, value: Any) -> bool:
     quantities = _quantities(source)
     return len(quantities) == 1 and quantities[0] == _decimal(value)
+
+
+def _matches_reported_annualized_var_source(source: str, value: Any) -> bool:
+    forbidden = (
+        "일간 VaR",
+        "일별 VaR",
+        "변동성",
+        "표준편차",
+        "다른 상품",
+        "타 상품",
+        "다른 클래스",
+        "타 클래스",
+    )
+    for phrase in _source_phrases(source):
+        normalized = phrase.replace(" ", "")
+        has_var_context = "97.5%VaR" in normalized or (
+            "일간수익률" in normalized and "최대손실예상액" in normalized
+        )
+        if (
+            not has_var_context
+            or "연환산" not in phrase
+            or not any(label in phrase for label in ("공시", "공표"))
+            or any(label in phrase for label in forbidden)
+            or _is_non_exact_phrase(phrase)
+            or _is_negated_phrase(phrase)
+        ):
+            continue
+        value_phrase = re.sub(r"97\.5\s*%\s*VaR", "VaR", phrase, flags=re.IGNORECASE)
+        if _matches_single_quantity(value_phrase, value):
+            return True
+    return False
 
 
 def calculation_evidence_chunk_ids(calculations: list[CalculationResult]) -> list[str]:
