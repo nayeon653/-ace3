@@ -50,6 +50,8 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
             lines.extend(_pension_withdrawal_tax_breakdown_lines(outputs, units))
         elif calculator_id == "dc_medical_withdrawal_threshold":
             lines.extend(_dc_medical_withdrawal_threshold_lines(outputs, units))
+        elif calculator_id == "isa_transfer_deadline":
+            lines.extend(_isa_transfer_deadline_lines(calculation["inputs"], outputs))
         elif calculator_id == "medical_care_withdrawal_tax_limit":
             lines.extend(_medical_care_withdrawal_tax_limit_lines(outputs, units))
         elif calculator_id == "medical_care_withdrawal_tax_breakdown":
@@ -152,6 +154,22 @@ def _pension_tax_credit_lines(
             "소득구간 초과 시(13.2%) 이론상 세액: "
             f"{_value(outputs, units, 'other_income_theoretical_credit_krw')}"
         )
+    return lines
+
+
+def _isa_transfer_deadline_lines(
+    inputs: dict[str, object], outputs: dict[str, object]
+) -> list[str]:
+    lines = [
+        f"ISA 만기일: {inputs['isa_maturity_date']}",
+        f"연금전환 마감일: {outputs['transfer_deadline_date']}",
+    ]
+    completion_date = inputs.get("transfer_completion_date")
+    if completion_date is not None:
+        lines.append(f"입금확인·전환완료 처리일: {completion_date}")
+    within_deadline = outputs.get("within_deadline")
+    if within_deadline is not None:
+        lines.append(f"60일 기한: {'충족' if within_deadline is True else '초과'}")
     return lines
 
 
