@@ -346,6 +346,9 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
             "calculate_fund_standard_price",
             "calculate_fund_reported_var_risk",
             "calculate_fund_var_risk",
+            "calculate_fund_frontend_sales_fee",
+            "calculate_fund_deferred_sales_fee",
+            "calculate_fund_redemption_fee",
             "submit_domain_result",
         }
         for names, _kwargs in react_model.bindings
@@ -426,6 +429,9 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                 "calculate_fund_standard_price",
                 "calculate_fund_reported_var_risk",
                 "calculate_fund_var_risk",
+                "calculate_fund_frontend_sales_fee",
+                "calculate_fund_deferred_sales_fee",
+                "calculate_fund_redemption_fee",
                 "submit_domain_result",
             }
             if domain == "product"
@@ -3952,6 +3958,43 @@ def test_withdrawal_presentations_show_allocation_and_only_positive_breakdown_pa
     assert "비과세 재원도 연금수령한도를 소진합니다." in breakdown["warnings"]
 
 
+def test_fund_fee_presentations_distinguish_fixed_and_maximum() -> None:
+    fixed = {
+        "calculator_id": "fund_frontend_sales_fee",
+        "inputs": {
+            "subscription_amount_krw": "1000000",
+            "selected_rate_percent": "1.0",
+            "rate_kind": "fixed",
+        },
+        "input_sources": {},
+        "outputs": {"fee_amount_krw": "10000.0"},
+        "units": {"fee_amount_krw": "KRW"},
+        "warnings": [],
+    }
+    maximum = {
+        "calculator_id": "fund_redemption_fee",
+        "inputs": {
+            "redemption_profit_krw": "1000000",
+            "selected_rate_percent": "1.0",
+            "rate_kind": "maximum",
+        },
+        "input_sources": {},
+        "outputs": {"maximum_fee_amount_krw": "10000.0"},
+        "units": {"maximum_fee_amount_krw": "KRW"},
+        "warnings": [],
+    }
+
+    summary = format_calculation_summary([fixed, maximum])
+
+    assert "- 납입금액: 1000000 KRW" in summary
+    assert "- 선취판매수수료율: 1.0 %" in summary
+    assert "- 선취판매수수료: 10000.0 KRW" in summary
+    assert "- 이익금: 1000000 KRW" in summary
+    assert "- 환매수수료 상한율: 1.0 %" in summary
+    assert "- 최대 환매수수료: 10000.0 KRW" in summary
+    assert "- 환매수수료: 10000.0 KRW" not in summary
+
+
 def test_pension_income_presentations_do_not_misstate_tax_meaning() -> None:
     summary = format_calculation_summary(
         [
@@ -4384,6 +4427,419 @@ def test_reported_var_context_blocks_daily_tool_and_keeps_reported_tool() -> Non
     ).after_model(state, None)
     assert update is not None
     assert update["messages"][0].tool_calls == [reported_call]
+
+
+@pytest.mark.anyio
+async def test_product_agent_records_and_presents_fixed_frontend_sales_fee() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.FUND_PROSPECTUS,
+                    source_file_name="R2_KR510902511M.pdf",
+                    title="선취판매수수료",
+                    content="납입금액 1,000,000원; 선취판매수수료율 1.0%를 부과합니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "선취판매수수료율 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_frontend_sales_fee",
+                        "args": {
+                            "subscription_amount_krw": "1000000",
+                            "selected_rate_percent": "1.0",
+                            "rate_kind": "fixed",
+                            "subscription_amount_source": "납입금액 1,000,000원",
+                            "selected_rate_source": "선취판매수수료율 1.0%를 부과합니다.",
+                            "rate_kind_source": "선취판매수수료율 1.0%를 부과합니다.",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 상품에 납입금액 100만원을 넣으면 선취판매수수료는 얼마인가요?",
+            "objective": "선취판매수수료 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"][0]["calculator_id"] == "fund_frontend_sales_fee"
+    assert result["calculations"][0]["outputs"] == {"fee_amount_krw": "10000.0"}
+    conclusion = result["decision"]["conclusion"]
+    assert "- 납입금액: 1000000 KRW" in conclusion
+    assert "- 선취판매수수료율: 1.0 %" in conclusion
+    assert "- 선취판매수수료: 10000.0 KRW" in conclusion
+    assert "임의 결론" not in conclusion
+
+
+@pytest.mark.anyio
+async def test_product_agent_runs_reported_var_and_frontend_fee_in_one_conversation() -> None:
+    var_source = "A 클래스 투자설명서 공시 연환산 97.5% VaR는 10%"
+    fee_source = "납입금액 1,000,000원; 선취판매수수료율 1.0%를 부과합니다."
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.FUND_PROSPECTUS,
+                    source_file_name="R2_KR510902511M.pdf",
+                    title="위험등급과 수수료",
+                    content=f"{var_source}; {fee_source}",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "위험등급과 선취판매수수료 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_reported_var_risk",
+                        "args": {
+                            "annualized_var_percent": "10",
+                            "annualized_var_source": var_source,
+                        },
+                        "id": "var-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_frontend_sales_fee",
+                        "args": {
+                            "subscription_amount_krw": "1000000",
+                            "selected_rate_percent": "1.0",
+                            "rate_kind": "fixed",
+                            "subscription_amount_source": "납입금액 1,000,000원",
+                            "selected_rate_source": fee_source,
+                            "rate_kind_source": fee_source,
+                        },
+                        "id": "fee-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 A 클래스의 위험등급과 선취판매수수료를 알려줘",
+            "objective": "위험등급과 선취판매수수료 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    calculator_ids = {calculation["calculator_id"] for calculation in result["calculations"]}
+    assert calculator_ids == {"fund_reported_var_risk", "fund_frontend_sales_fee"}
+
+
+@pytest.mark.anyio
+async def test_product_agent_presents_maximum_redemption_fee_as_upper_bound() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.FUND_PROSPECTUS,
+                    source_file_name="R2_KR5194450018.pdf",
+                    title="환매수수료",
+                    content="이익금 1,000,000원; 환매수수료율 1.0% 이내를 부과합니다.",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "환매수수료율 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_redemption_fee",
+                        "args": {
+                            "redemption_profit_krw": "1000000",
+                            "selected_rate_percent": "1.0",
+                            "rate_kind": "maximum",
+                            "redemption_profit_source": "이익금 1,000,000원",
+                            "selected_rate_source": "환매수수료율 1.0% 이내를 부과합니다.",
+                            "rate_kind_source": "환매수수료율 1.0% 이내를 부과합니다.",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 상품의 환매수수료는 최대 얼마인가요?",
+            "objective": "환매수수료 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"][0]["calculator_id"] == "fund_redemption_fee"
+    assert result["calculations"][0]["outputs"] == {"maximum_fee_amount_krw": "10000.0"}
+    conclusion = result["decision"]["conclusion"]
+    assert "- 환매수수료 상한율: 1.0 %" in conclusion
+    assert "- 최대 환매수수료: 10000.0 KRW" in conclusion
+    assert "- 환매수수료: 10000.0 KRW" not in conclusion
+
+
+@pytest.mark.anyio
+async def test_product_agent_rejects_aggregate_expense_as_fee_rate_and_stays_conditional() -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.FUND_PROSPECTUS,
+                    source_file_name="R2_KR510902511M.pdf",
+                    title="펀드 수수료",
+                    content="납입금액 1,000,000원; 총보수 1.0%",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "펀드 수수료 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_frontend_sales_fee",
+                        "args": {
+                            "subscription_amount_krw": "1000000",
+                            "selected_rate_percent": "1.0",
+                            "rate_kind": "fixed",
+                            "subscription_amount_source": "납입금액 1,000,000원",
+                            "selected_rate_source": "총보수 1.0%",
+                            "rate_kind_source": "총보수 1.0%",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "conditional",
+                            "conclusion": "수수료 종류 확인이 필요합니다.",
+                            "missing_conditions": ["수수료 종류 확인 필요"],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 상품 수수료가 얼마인가요?",
+            "objective": "펀드 수수료 확인",
+        }
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == ["수수료 종류 확인 필요"]
+    assert result["calculations"] == []
 
 
 @pytest.mark.parametrize(
@@ -5134,6 +5590,11 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "calculate_fund_standard_price" in product_prompt
     assert "calculate_fund_var_risk" in product_prompt
     assert "calculate_fund_reported_var_risk" in product_prompt
+    assert "calculate_fund_frontend_sales_fee" in product_prompt
+    assert "calculate_fund_deferred_sales_fee" in product_prompt
+    assert "calculate_fund_redemption_fee" in product_prompt
+    assert "총보수·운용보수·판매보수·신탁보수·기타비용·총비용비율(TER)" in product_prompt
+    assert "실제 부과금액처럼 말하지 않는다" in product_prompt
     assert "2회" not in product_prompt
     assert "두 번" not in product_prompt
     assert '"product_code":"KR510902511M"' not in product_prompt
@@ -5154,6 +5615,8 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "calculate_dc_minimum_employer_contribution" in tax_prompt
     assert "calculate_dc_retirement_benefit" in tax_prompt
     assert "calculate_db_to_dc_transfer_amount" in tax_prompt
+    assert "임원 해당 여부 확인 필요" in tax_prompt
+    assert "소득 구분 금액일 뿐 세액이 아니다" in tax_prompt
     assert "DB 퇴직급여와 DC 퇴직급여의 금액 비교" in tax_prompt
     assert "자동 chaining하지 않는다" in tax_prompt
     assert "재원별 인출 순서·배분만 필요" in tax_prompt
@@ -5179,7 +5642,9 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "그 전에 limit 또는 `calculate_pension_income_tax`를 호출하지 않는다" in tax_prompt
 
 
-def _policy_sequence_tool_names(calculations: list[Any], tool_names: list[str]) -> list[str]:
+def _policy_sequence_tool_names(
+    calculations: list[Any], tool_names: list[str], *, question: str = ""
+) -> list[str]:
     message = AIMessage(
         content="",
         tool_calls=[

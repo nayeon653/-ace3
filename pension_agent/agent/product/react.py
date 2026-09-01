@@ -26,6 +26,9 @@ from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
     calculation_evidence_chunk_ids,
+    create_fund_deferred_sales_fee_tool,
+    create_fund_frontend_sales_fee_tool,
+    create_fund_redemption_fee_tool,
     create_fund_reported_var_risk_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
@@ -299,6 +302,9 @@ def create_product_react_agent(
         create_fund_standard_price_tool(),
         create_fund_reported_var_risk_tool(),
         create_fund_var_risk_tool(),
+        create_fund_frontend_sales_fee_tool(),
+        create_fund_deferred_sales_fee_tool(),
+        create_fund_redemption_fee_tool(),
     )
     calculation_tool_names = tuple(tool.name for tool in calculation_tools)
     result_tool = _create_product_result_tool()
@@ -470,8 +476,6 @@ def _allowed_product_tools(
         return (lookup_tool_name,)
     if not state.get("product_scoped_search_completed"):
         return (SEARCH_DOCUMENTS_TOOL_NAME,)
-    if state.get("calculations"):
-        return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
     unused_calculation_tools = tuple(
         name for name in calculation_tool_names if not _tool_was_called(state, name)
     )
@@ -568,7 +572,7 @@ def _product_next_tool_instruction(
     ]
     if unused_calculation_tools:
         return (
-            "기준가격이나 VaR 계산이면 해당 Calculation Tool을 호출하고, "
+            "질문에 해당하는 계산이 있으면 그 계산 하나에 맞는 Calculation Tool만 호출하고, "
             "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
         )
     return "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
