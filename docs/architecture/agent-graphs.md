@@ -278,6 +278,7 @@ graph TD;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model("ToolCallLimitMiddleware[lookup_product_codes].after_model")
 	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_standard_price].after_model")
+	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_reported_var_risk].after_model")
 	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_var_risk].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	EnforceProductToolSequence\2eafter_model("EnforceProductToolSequence.after_model")
@@ -292,9 +293,11 @@ graph TD;
 	RequireProductTool\2eafter_model -.-> __end__;
 	RequireProductTool\2eafter_model -.-> tools;
 	SingleProductSubmitPerModelCall\2eafter_model --> RequireProductTool\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model -.-> ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> __end__;
