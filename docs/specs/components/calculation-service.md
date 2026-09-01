@@ -59,9 +59,42 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | `db_to_dc_transfer_amount` | 두 월 기준 중 큰 값과 검증된 근속연수로 DB→DC 전환금액 계산 | Issue #118; 원본 knowledge locator 미매핑 |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
+| `fund_reported_var_risk` | 공시된 연환산 97.5% VaR를 추가 변환 없이 6단계 상한표에 적용 | `R2_KR5131420025.pdf` 19~20쪽 |
 
 검증 문서 정보는 개발 기록이며 런타임 결과에 직렬화하지 않는다. 문서에 없는 표시
 자릿수나 최종 지급 단위 반올림은 임의로 적용하지 않고 warning에 남긴다.
+
+### 공시 연환산 VaR 위험등급 계약
+
+**입력과 산술**: `fund_reported_var_risk`는 공시 문서에 결과값으로 명시된
+`annualized_var_percent` 하나를 받는다. 입력은 0 이상의 유한한 `Decimal`이어야 하며 생략,
+명시적 `null`, 음수와 extra 입력을 거부한다. 이미 연환산된 값을 그대로 사용하므로 √250을
+다시 곱하거나 반올림하지 않는다. Rules는 `> 50`, `> 30`, `> 20`, `> 10`, `> 1` 순서의
+경계를 적용한다. 따라서 경계값 50, 30, 20, 10, 1은 각각 2, 3, 4, 5, 6등급이고 0도
+6등급이다. Agent와 presentation은 이 결과를 다시 계산하지 않는다.
+
+**기존 일간 VaR와의 구분**: `fund_var_risk`는 실제 일간 2.5퍼센타일 손실률을 입력받아
+절대값과 √250으로 연환산하는 기존 경로다. `fund_reported_var_risk`는 문서가 이미 산출한
+연환산 97.5% VaR 결과를 받는 경로다. 공시 연환산 값을 `fund_var_risk`에 전달하거나 두
+계산기를 연결해 중복 연환산하지 않는다.
+
+**책임과 provenance 경계**: Product Agent는 상품명과 상품코드·식별자, 필요한 경우 share
+class, 공시 기준일, reported annualized VaR인지 daily/raw VaR인지를 확인한 뒤 의미에 맞는
+Tool 하나를 선택한다. 상품코드를 이름보다 강한 식별자로 사용하고, 유사한 상품명이나 다른
+상품·class의 근거를 재사용하지 않는다. 현재 검색 metadata로 공시 날짜를 신뢰성 있게 비교할
+수 없는 `현재`·`최신` 요청은 검색 순위로 추정하지 않고 `최신 공시 기준일 확인 필요`인
+conditional 결과로 남긴다.
+
+Tool은 같은 출처 구절에 공시·연환산·97.5% VaR 의미와 정확한 단일 수치가 함께 있는지
+검증한다. VaR와 변동성·표준편차·위험등급 숫자, 다른 상품·class, 과거 공시, 근사값·범위·
+부등식·부정 표현은 서로 대체하지 않는다. 상품·class·공시 기준·VaR 의미와 값이 각각
+명확한 경우에만 같은 source를 재사용한다. Rules는 검증된 `Decimal` 값의 등급 판정만
+담당하고 presentation은 Rules 결과를 그대로 표시한다. Main Supervisor의 routing은 변경하지
+않는다.
+
+검증 locator는 corpus manifest의 `KR5131420025` →
+`data/raw/prospectus/KR5131420025/R2_KR5131420025.pdf` 매핑을 따르며, 19쪽은 최근 결산일
+기준 연환산 최대손실예상액과 등급을, 20쪽은 97.5% VaR 6단계 경계표를 제공한다.
 
 ### 연금수령한도·분할지급 계산 계약
 
@@ -406,7 +439,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 | 소비자 | 허용 계산기 |
 |---|---|
 | Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown`, `db_retirement_benefit`, `dc_minimum_employer_contribution`, `dc_retirement_benefit`, `db_to_dc_transfer_amount` |
-| Product Agent | `fund_standard_price`, `fund_var_risk` |
+| Product Agent | `fund_standard_price`, `fund_var_risk`, `fund_reported_var_risk` |
 | Policy Agent | `dc_medical_withdrawal_threshold` |
 | Main Supervisor | 직접 호출 금지 |
 
@@ -424,6 +457,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 
 - `tests/unit/rules/test_calculation_service.py`
 - `tests/unit/rules/test_initial_calculators.py`
+- `tests/unit/rules/test_fund_reported_var_risk.py`
 - `tests/unit/rules/test_pension_installments.py`
 - `tests/unit/rules/test_pension_tax_credit.py`
 - `tests/unit/rules/test_pension_income_tax.py`
