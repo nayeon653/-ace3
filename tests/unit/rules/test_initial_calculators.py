@@ -21,6 +21,9 @@ def test_calculator_map_contains_registered_set() -> None:
         "dc_medical_withdrawal_threshold",
         "dc_minimum_employer_contribution",
         "dc_retirement_benefit",
+        "fund_deferred_sales_fee",
+        "fund_frontend_sales_fee",
+        "fund_redemption_fee",
         "fund_standard_price",
         "fund_var_risk",
         "medical_care_withdrawal_tax_breakdown",
@@ -120,6 +123,75 @@ def test_fund_var_uses_absolute_loss_and_returns_grade() -> None:
     assert result.outputs["annualized_var_percent"] == Decimal(250).sqrt()
     assert result.outputs["risk_grade"] == 4
     assert result.outputs["risk_label"] == "보통 위험"
+
+
+_FUND_FEE_CALCULATORS = {
+    "fund_frontend_sales_fee": "subscription_amount_krw",
+    "fund_deferred_sales_fee": "redemption_amount_krw",
+    "fund_redemption_fee": "redemption_profit_krw",
+}
+
+
+@pytest.mark.parametrize("calculator_id", sorted(_FUND_FEE_CALCULATORS))
+@pytest.mark.parametrize(
+    ("rate_percent", "rate_kind", "expected_key", "expected_amount"),
+    [
+        ("1", "fixed", "fee_amount_krw", Decimal(10_000)),
+        ("1", "maximum", "maximum_fee_amount_krw", Decimal(10_000)),
+        ("0", "fixed", "fee_amount_krw", Decimal(0)),
+        ("100", "fixed", "fee_amount_krw", Decimal(1_000_000)),
+    ],
+)
+def test_fund_fee_formula_and_rate_kind_boundaries(
+    calculator_id: str,
+    rate_percent: str,
+    rate_kind: str,
+    expected_key: str,
+    expected_amount: Decimal,
+) -> None:
+    money_field = _FUND_FEE_CALCULATORS[calculator_id]
+    result = calculate(
+        CalculationRequest(
+            calculator_id=calculator_id,
+            inputs={
+                money_field: 1_000_000,
+                "selected_rate_percent": rate_percent,
+                "rate_kind": rate_kind,
+            },
+        )
+    )
+
+    assert result.outputs == {expected_key: expected_amount}
+    assert result.units == {expected_key: "KRW"}
+
+
+@pytest.mark.parametrize("calculator_id", sorted(_FUND_FEE_CALCULATORS))
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"selected_rate_percent": "-1"},
+        {"selected_rate_percent": "100.01"},
+        {"rate_kind": "estimated"},
+    ],
+)
+def test_fund_fee_rejects_invalid_rate(calculator_id: str, overrides: dict[str, str]) -> None:
+    money_field = _FUND_FEE_CALCULATORS[calculator_id]
+    inputs: dict[str, str | int] = {
+        money_field: 1_000_000,
+        "selected_rate_percent": "1",
+        "rate_kind": "fixed",
+    }
+    inputs.update(overrides)
+    with pytest.raises(InvalidCalculationInputError):
+        calculate(CalculationRequest(calculator_id=calculator_id, inputs=inputs))
+
+
+@pytest.mark.parametrize("calculator_id", sorted(_FUND_FEE_CALCULATORS))
+def test_fund_fee_rejects_negative_amount(calculator_id: str) -> None:
+    money_field = _FUND_FEE_CALCULATORS[calculator_id]
+    inputs = {money_field: -1, "selected_rate_percent": "1", "rate_kind": "fixed"}
+    with pytest.raises(InvalidCalculationInputError):
+        calculate(CalculationRequest(calculator_id=calculator_id, inputs=inputs))
 
 
 def test_initial_calculators_are_json_serializable_without_binary_float() -> None:
