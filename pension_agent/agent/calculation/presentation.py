@@ -62,6 +62,10 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
             lines.extend(_dc_retirement_benefit_lines(outputs, units))
         elif calculator_id == "db_to_dc_transfer_amount":
             lines.extend(_db_to_dc_transfer_amount_lines(calculation["inputs"], outputs, units))
+        elif calculator_id == "executive_retirement_income_limit":
+            lines.extend(
+                _executive_retirement_income_limit_lines(calculation["inputs"], outputs, units)
+            )
         elif calculator_id == "fund_standard_price":
             lines.append(
                 "펀드 1,000좌당 기준가격: "
@@ -360,6 +364,24 @@ def _db_to_dc_transfer_amount_lines(
         f"검증된 근속연수: {_value(outputs, units, 'verified_service_years')}",
         f"DB→DC 전환금액: {_value(outputs, units, 'transfer_amount')}",
     ]
+
+
+def _executive_retirement_income_limit_lines(
+    inputs: dict[str, object], outputs: dict[str, object], units: dict[str, str]
+) -> list[str]:
+    lines = [
+        f"2012~2019년 한도 구성액: {_value(outputs, units, 'limit_2012_2019_krw')}",
+        f"2020년 이후 한도 구성액: {_value(outputs, units, 'limit_2020_onward_krw')}",
+        f"임원 퇴직소득 한도 합계: {_value(outputs, units, 'post_2011_total_limit_krw')}",
+    ]
+    if "retirement_income_amount_krw" in outputs:
+        lines.append(
+            "2012년 이후 한도 적용대상 퇴직급여: "
+            f"{_value(inputs, {'post_2011_limit_subject_payment_krw': 'KRW'}, 'post_2011_limit_subject_payment_krw')}"
+        )
+        lines.append(f"퇴직소득 인정액: {_value(outputs, units, 'retirement_income_amount_krw')}")
+        lines.append(f"한도 초과 근로소득 금액: {_value(outputs, units, 'wage_income_excess_krw')}")
+    return lines
 
 
 def _is_positive(value: object) -> bool:
