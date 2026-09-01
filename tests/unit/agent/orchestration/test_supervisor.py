@@ -193,6 +193,19 @@ def test_main_supervisor_prompt_has_retirement_benefit_routing_boundaries() -> N
     assert "기간·근속연수·급여·전환금액·세금을 직접 계산" in prompt
 
 
+def test_main_supervisor_prompt_has_executive_retirement_limit_routing_boundaries() -> None:
+    prompt = (
+        resources.files("pension_agent.prompts")
+        .joinpath("orchestration", "main-supervisor.md")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "임원 퇴직소득 한도, 임원 퇴직소득 인정액과 한도초과 근로소득은" in prompt
+    assert "DB/DC 제도 유형 판단과 무관하다" in prompt
+    assert "임원 해당 여부 자체를" in prompt
+    assert "임원 퇴직소득 한도가 얼마인가요?" in prompt
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("question", "tool_calls", "expected_domains"),
@@ -287,6 +300,10 @@ async def test_main_supervisor_routes_medical_care_intents_to_required_domains(
         ("내 경우 DB와 DC 중 어느 쪽이 적용되고 얼마 차이 나?", {"policy", "tax_payout"}),
         ("퇴직급여가 얼마야?", {"policy"}),
         ("DB 퇴직급여와 퇴직소득세까지 계산해줘", {"tax_payout"}),
+        ("임원 퇴직소득 한도가 얼마야?", {"tax_payout"}),
+        ("임원 퇴직금 중 세법상 퇴직소득으로 얼마까지 인정돼?", {"tax_payout"}),
+        ("임원 퇴직소득 한도 초과분이 얼마야?", {"tax_payout"}),
+        ("임원 퇴직소득 한도와 초과분 세금까지 계산해줘", {"tax_payout"}),
     ],
 )
 async def test_main_supervisor_routes_retirement_benefit_intents(
