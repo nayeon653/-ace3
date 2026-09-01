@@ -26,6 +26,7 @@ from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
     calculation_evidence_chunk_ids,
+    create_fund_reported_var_risk_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
     format_calculation_summary,
@@ -49,6 +50,15 @@ SUBMIT_DOMAIN_RESULT_TOOL_NAME = "submit_domain_result"
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
 _NUMERIC_CLAIM_PATTERN = re.compile(r"(?:\d|%|퍼센트|프로|만\s*원|억\s*원|금액|가격|등급)")
+_VAR_QUESTION_PATTERN = re.compile(r"(?:VaR|최대손실예상액|위험등급)", re.IGNORECASE)
+_CLASS_PATTERN = re.compile(
+    r"(?:클래스|class)\s*([A-Z](?:-[A-Za-z]+)?)|([A-Z](?:-[A-Za-z]+)?)\s*(?:클래스|class)",
+    re.IGNORECASE,
+)
+_TARGET_FUND_MISSING_CONDITION = "대상 펀드 확인 필요"
+_FUND_CLASS_MISSING_CONDITION = "펀드 클래스 확인 필요"
+_LATEST_DISCLOSURE_MISSING_CONDITION = "최신 공시 기준일 확인 필요"
+_ANNUALIZED_VAR_MISSING_CONDITION = "연환산 VaR 확인 필요"
 ProductCodeResolver = Callable[[str], str]
 
 
@@ -59,6 +69,7 @@ class ProductAgentState(AgentState):
     objective: NotRequired[str]
     product_candidate_codes: NotRequired[list[str]]
     product_scoped_search_completed: NotRequired[bool]
+    product_scoped_source_file_name: NotRequired[str]
     product_catalog_result: NotRequired[DomainResult]
     search_result: NotRequired[SearchResult]
     calculations: NotRequired[Annotated[list[CalculationResult], operator.add]]
@@ -198,7 +209,10 @@ class EnforceProductToolSequence(AgentMiddleware[Any, Any, Any]):
             return {
                 "messages": [last_message.model_copy(update={"tool_calls": []})],
             }
-        kept_call = allowed_calls[0]
+        calculation_calls = [
+            call for call in allowed_calls if call["name"] in self._calculation_tool_names
+        ]
+        kept_call = calculation_calls[0] if calculation_calls else allowed_calls[0]
         if last_message.tool_calls == [kept_call]:
             return None
         return {
@@ -281,7 +295,11 @@ def create_product_react_agent(
         product_code_resolver=product_code_resolver,
         max_search_calls=config.max_search_calls,
     )
-    calculation_tools = (create_fund_standard_price_tool(), create_fund_var_risk_tool())
+    calculation_tools = (
+        create_fund_standard_price_tool(),
+        create_fund_reported_var_risk_tool(),
+        create_fund_var_risk_tool(),
+    )
     calculation_tool_names = tuple(tool.name for tool in calculation_tools)
     result_tool = _create_product_result_tool()
     graph = create_agent(
@@ -418,6 +436,8 @@ def _create_product_search_tool(
         }
         if terminal_result is not None:
             update["domain_result"] = terminal_result
+        if scoped_search and source_file_name is not None:
+            update["product_scoped_source_file_name"] = source_file_name
         return Command(update=update)
 
     return search_documents
@@ -450,6 +470,8 @@ def _allowed_product_tools(
         return (lookup_tool_name,)
     if not state.get("product_scoped_search_completed"):
         return (SEARCH_DOCUMENTS_TOOL_NAME,)
+    if state.get("calculations"):
+        return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
     unused_calculation_tools = tuple(
         name for name in calculation_tool_names if not _tool_was_called(state, name)
     )
@@ -487,6 +509,10 @@ def _product_tool_call_is_allowed(
     if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and not state.get("product_candidate_codes"):
         if state.get("product_catalog_result") is not None:
             return _is_product_catalog_submit_call(call)
+        return False
+    if call["name"] == "calculate_fund_reported_var_risk":
+        return _reported_var_call_missing_condition(call, state) is None
+    if call["name"] == "calculate_fund_var_risk" and _has_reported_var_evidence(state):
         return False
     if call["name"] != SEARCH_DOCUMENTS_TOOL_NAME:
         return True
@@ -641,6 +667,7 @@ def _create_product_result_tool() -> Any:
                 missing_conditions=missing_conditions,
                 warnings=warnings,
                 evidence_chunk_ids=evidence_chunk_ids,
+                enforced_missing_conditions=_product_var_missing_conditions(runtime.state),
             )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
@@ -675,6 +702,7 @@ def _build_product_result(
     missing_conditions: list[str],
     warnings: list[str],
     evidence_chunk_ids: list[str],
+    enforced_missing_conditions: tuple[str, ...] = (),
 ) -> DomainResult:
     if search_result.execution_status != "completed":
         return failed_domain_result(
@@ -689,9 +717,12 @@ def _build_product_result(
         evidence_chunk_ids=list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
     )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
+    normalized_missing = list(dict.fromkeys([*normalized_missing, *enforced_missing_conditions]))
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_limitations = list(search_result.limitations)
     normalized_conclusion = conclusion.strip()
+    if normalized_missing and status == "determined":
+        status = "conditional"
     if calculations:
         normalized_conclusion = "검증된 Python 계산 결과:\n" + format_calculation_summary(
             calculations
@@ -732,6 +763,99 @@ def _build_product_result(
         "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
+
+
+def _reported_var_call_missing_condition(
+    call: ToolCall,
+    state: Mapping[str, Any],
+) -> str | None:
+    """공시 VaR Tool 호출이 현재 상품·클래스·최신성 경계를 만족하는지 확인한다."""
+
+    candidate_codes = state.get("product_candidate_codes", [])
+    if len(candidate_codes) != 1 or not state.get("product_scoped_search_completed"):
+        return _TARGET_FUND_MISSING_CONDITION
+    source = call["args"].get("annualized_var_source")
+    if not isinstance(source, str) or not source.strip():
+        return _ANNUALIZED_VAR_MISSING_CONDITION
+    matching_chunks = _chunks_containing_source(state, source)
+    expected_file = state.get("product_scoped_source_file_name")
+    question = str(state.get("question", ""))
+    source_is_question = source in question
+    if not isinstance(expected_file, str):
+        return _TARGET_FUND_MISSING_CONDITION
+    if not source_is_question and not matching_chunks:
+        return _TARGET_FUND_MISSING_CONDITION
+    if matching_chunks and any(
+        chunk.source_file_name != expected_file for chunk in matching_chunks
+    ):
+        return _TARGET_FUND_MISSING_CONDITION
+    question_classes = _class_tokens(question)
+    if question_classes and not question_classes.intersection(_class_tokens(source)):
+        return _FUND_CLASS_MISSING_CONDITION
+    if _requests_latest_disclosure(question):
+        return _LATEST_DISCLOSURE_MISSING_CONDITION
+    if not _is_reported_annualized_var_text(source):
+        return _ANNUALIZED_VAR_MISSING_CONDITION
+    return None
+
+
+def _product_var_missing_conditions(state: Mapping[str, Any]) -> tuple[str, ...]:
+    """VaR 질문에서 Python이 확정하지 못한 선택 조건을 반환한다."""
+
+    question = str(state.get("question", ""))
+    if not _VAR_QUESTION_PATTERN.search(question) or state.get("calculations"):
+        return ()
+    missing: list[str] = []
+    if len(state.get("product_candidate_codes", [])) != 1 or not state.get(
+        "product_scoped_search_completed"
+    ):
+        missing.append(_TARGET_FUND_MISSING_CONDITION)
+    question_classes = _class_tokens(question)
+    evidence_text = "\n".join(_search_chunk_contents(state))
+    if question_classes and not question_classes.intersection(_class_tokens(evidence_text)):
+        missing.append(_FUND_CLASS_MISSING_CONDITION)
+    if _requests_latest_disclosure(question):
+        missing.append(_LATEST_DISCLOSURE_MISSING_CONDITION)
+    if not _has_reported_var_evidence(state):
+        missing.append(_ANNUALIZED_VAR_MISSING_CONDITION)
+    return tuple(dict.fromkeys(missing))
+
+
+def _has_reported_var_evidence(state: Mapping[str, Any]) -> bool:
+    return any(_is_reported_annualized_var_text(value) for value in _search_chunk_contents(state))
+
+
+def _is_reported_annualized_var_text(value: str) -> bool:
+    normalized = value.replace(" ", "").lower()
+    return "연환산" in value and (
+        "97.5%var" in normalized or ("일간수익률" in normalized and "최대손실예상액" in normalized)
+    )
+
+
+def _search_chunk_contents(state: Mapping[str, Any]) -> list[str]:
+    search_result = state.get("search_result")
+    if search_result is None:
+        return []
+    return [chunk.content for chunk in search_result.retrieved_chunks]
+
+
+def _chunks_containing_source(state: Mapping[str, Any], source: str) -> list[Any]:
+    search_result = state.get("search_result")
+    if search_result is None:
+        return []
+    return [chunk for chunk in search_result.retrieved_chunks if source in chunk.content]
+
+
+def _class_tokens(value: str) -> set[str]:
+    return {
+        (first or second).upper()
+        for first, second in _CLASS_PATTERN.findall(value)
+        if first or second
+    }
+
+
+def _requests_latest_disclosure(question: str) -> bool:
+    return any(label in question for label in ("현재", "최신", "최근 공시"))
 
 
 def _select_evidence_chunks(
