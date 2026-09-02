@@ -4538,6 +4538,119 @@ async def test_product_agent_records_and_presents_fixed_frontend_sales_fee() -> 
 
 
 @pytest.mark.anyio
+async def test_product_agent_runs_reported_var_and_frontend_fee_in_one_conversation() -> None:
+    var_source = "A 클래스 투자설명서 공시 연환산 97.5% VaR는 10%"
+    fee_source = "납입금액 1,000,000원; 선취판매수수료율 1.0%를 부과합니다."
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.FUND_PROSPECTUS,
+                    source_file_name="R2_KR510902511M.pdf",
+                    title="위험등급과 수수료",
+                    content=f"{var_source}; {fee_source}",
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "위험등급과 선취판매수수료 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_reported_var_risk",
+                        "args": {
+                            "annualized_var_percent": "10",
+                            "annualized_var_source": var_source,
+                        },
+                        "id": "var-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_frontend_sales_fee",
+                        "args": {
+                            "subscription_amount_krw": "1000000",
+                            "selected_rate_percent": "1.0",
+                            "rate_kind": "fixed",
+                            "subscription_amount_source": "납입금액 1,000,000원",
+                            "selected_rate_source": fee_source,
+                            "rate_kind_source": fee_source,
+                        },
+                        "id": "fee-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 A 클래스의 위험등급과 선취판매수수료를 알려줘",
+            "objective": "위험등급과 선취판매수수료 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    calculator_ids = {calculation["calculator_id"] for calculation in result["calculations"]}
+    assert calculator_ids == {"fund_reported_var_risk", "fund_frontend_sales_fee"}
+
+
+@pytest.mark.anyio
 async def test_product_agent_presents_maximum_redemption_fee_as_upper_bound() -> None:
     search = FakeSearchService(
         SearchResult(

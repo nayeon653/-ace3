@@ -476,8 +476,6 @@ def _allowed_product_tools(
         return (lookup_tool_name,)
     if not state.get("product_scoped_search_completed"):
         return (SEARCH_DOCUMENTS_TOOL_NAME,)
-    if state.get("calculations"):
-        return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
     unused_calculation_tools = tuple(
         name for name in calculation_tool_names if not _tool_was_called(state, name)
     )
