@@ -7163,3 +7163,81 @@ async def test_tax_agent_runs_db_benefit_and_blocks_later_calculation() -> None:
     assert [item["calculator_id"] for item in result["calculations"]] == ["db_retirement_benefit"]
     assert result["evidence"][0]["chunk_id"] == chunk.chunk_id
     assert "평균일급" in result["decision"]["conclusion"]
+
+
+@pytest.mark.anyio
+async def test_tax_agent_blocks_executive_limit_after_db_benefit_calculation() -> None:
+    content = (
+        "최근 3개월 임금 합계는 9,000,000원; "
+        "평균임금 산정 포함 일수는 90일; 검증된 근속연수는 3.5년"
+    )
+    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "DB 퇴직급여 입력 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_db_retirement_benefit",
+                        "args": {
+                            "wages_for_average_period_krw": "9000000",
+                            "included_days_for_average_wage": 90,
+                            "verified_service_years": "3.5",
+                            "wages_for_average_period_krw_source": (
+                                "최근 3개월 임금 합계는 9,000,000원"
+                            ),
+                            "included_days_for_average_wage_source": (
+                                "평균임금 산정 포함 일수는 90일"
+                            ),
+                            "verified_service_years_source": "검증된 근속연수는 3.5년",
+                        },
+                        "id": "db-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_executive_retirement_income_limit",
+                        "args": {},
+                        "id": "blocked-executive-call",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "DB 급여 계산 결과입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": "DB 퇴직급여를 계산해줘", "objective": "DB 급여 계산"})
+
+    assert result["decision"]["status"] == "determined"
+    assert [item["calculator_id"] for item in result["calculations"]] == [
+        "db_retirement_benefit"
+    ]
