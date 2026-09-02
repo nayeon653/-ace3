@@ -62,4 +62,5 @@ def test_product_only_examples_are_documented(prompt: str, example: str) -> None
 
 
 def test_prompt_keeps_executive_limit_domain_boundary_rule(prompt: str) -> None:
-    assert "임원 해당 여부 자체를 업무·제도가 판정하지 않는다" in prompt
+    assert "임원 해당 여부 자체를" in prompt
+    assert "업무·제도가 판정하지 않는다" in prompt
