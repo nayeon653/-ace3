@@ -40,7 +40,8 @@ warning이 `calculations`에 포함된다.
 
 ### `calculate_pension_withdrawal_limit`
 
-- 검색된 문서 근거가 있는 경우에만 실행한다.
+- 질문 원문에 연금수령연차와 (1~10년차의 경우) 평가액이 모두 명시돼 있으면 `search_documents`
+  없이 실행할 수 있다. 그렇지 않고 검색 근거에서 값을 가져와야 하면 검색을 먼저 완료해야 한다.
 - 필수 입력은 1 이상의 `pension_year`와 source다. 1~10년차에는 원 단위
   `account_valuation_krw`와 source가 필수이고, 11년차 이상에는 평가액 쌍을 생략할 수 있다.
 - 사용자 질문 또는 검증된 검색 근거에 없는 입력을 추정하지 않는다.
@@ -54,7 +55,9 @@ warning이 `calculations`에 포함된다.
 
 ### `calculate_pension_annual_limit_installment`
 
-- 올해 남은 연금수령한도를 당해연도 잔여 지급횟수로 나누는 방식에만 사용한다.
+- 질문 원문에 올해 남은 연금수령한도와 잔여 지급횟수가 모두 명시돼 있으면 `search_documents` 없이
+  실행할 수 있다. 그렇지 않고 검색 근거에서 값을 가져와야 하면 검색을 먼저 완료해야 한다. 올해 남은
+  연금수령한도를 당해연도 잔여 지급횟수로 나누는 방식에만 사용한다.
 - 입력은 `remaining_annual_limit_krw`, `remaining_payments_in_year`와 각각의 source이고,
   출력은 `installment_krw`다.
 - 당해연도 잔여 지급횟수를 전체 기간 잔여회차와 혼용하지 않는다.
@@ -62,7 +65,9 @@ warning이 `calculations`에 포함된다.
 
 ### `calculate_pension_period_installment`
 
-- 현재 계좌 평가액을 전체 기간 잔여회차로 나누는 방식에만 사용한다.
+- 질문 원문에 현재 계좌 평가액과 전체 기간 잔여회차가 모두 명시돼 있으면 `search_documents` 없이
+  실행할 수 있다. 그렇지 않고 검색 근거에서 값을 가져와야 하면 검색을 먼저 완료해야 한다. 현재 계좌
+  평가액을 전체 기간 잔여회차로 나누는 방식에만 사용한다.
 - 입력은 `current_valuation_krw`, `remaining_payments`와 각각의 source이고, 출력은
   `installment_krw`다.
 - 다음 연도에는 당시 평가액으로 다시 산정해야 하며 Rules는 미래 평가액을 추정하지 않는다.
@@ -70,7 +75,9 @@ warning이 `calculations`에 포함된다.
 
 ### `calculate_pension_unit_installment`
 
-- 잔고좌수와 1,000좌당 기준가격으로 회당 지급액을 계산하는 방식에만 사용한다.
+- 질문 원문에 잔고좌수, 기준가격, 잔여 지급횟수가 모두 명시돼 있으면 `search_documents` 없이 실행할
+  수 있다. 그렇지 않고 검색 근거에서 값을 가져와야 하면 검색을 먼저 완료해야 한다. 잔고좌수와
+  1,000좌당 기준가격으로 회당 지급액을 계산하는 방식에만 사용한다.
 - 입력은 `remaining_units`, `remaining_payments`,
   `standard_price_per_1000_units_krw`와 각각의 source이고, 출력은 `installment_krw`다.
 - 좌수와 원화 금액을 혼용하지 않으며 호출은 한 번으로 제한한다. 다른 #116 계산 Tool과
@@ -212,10 +219,13 @@ warning이 `calculations`에 포함된다.
 ```text
 DomainRequest
   -> not_applicable ? submit_domain_result(검색 없이 즉시 정규화) : (
-       search_documents 1회
-       -> 검색 실패/timeout/빈 결과면 Python 안전 종료
-       -> 질문과 입력에 맞는 Calculation Tool 1회
-          (연금수령·연금외수령 비교만 #113 두 Tool을 각각 1회 허용)
+       질문 원문만으로 연금수령한도/#116 지급액 계산이 확정되는가?
+         -> 예: 해당 계산 Tool 1회 (검색 생략 가능)
+         -> 아니오: search_documents 1회
+              -> 검색 실패/timeout/빈 결과면 Python 안전 종료
+              -> 질문과 입력에 맞는 Calculation Tool 1회
+                 (연금수령·연금외수령 비교만 #113 두 Tool을 각각 1회,
+                  명시적 DB/DC 비교만 #118 두 Tool을 각각 1회 허용)
        -> submit_domain_result(계산 없이 conclusion에 확정 수치가 있으면 비수치 재제출 1회 요청)
      )
   -> 검증된 DomainResult

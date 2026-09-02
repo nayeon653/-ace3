@@ -5901,6 +5901,8 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "Policy Agent 책임이므로" in tax_prompt
     assert "검색된 청크 전체가 아니라 결론에 실제 인용한 최소" in tax_prompt
     assert "근거 부족 판단을 계산 필요 판단으로 바꾸지 않는다" in tax_prompt
+    assert "search_documents 없이 바로" in tax_prompt
+    assert "origin=question" in tax_prompt
     assert "calculate_dc_medical_withdrawal_threshold" in policy_prompt
     assert "calculate_isa_transfer_deadline" in policy_prompt
     assert "6개월 이상 요양" in policy_prompt
