@@ -43,6 +43,9 @@ CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME = (
 CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME = "calculate_fund_standard_price"
 CALCULATE_FUND_REPORTED_VAR_RISK_TOOL_NAME = "calculate_fund_reported_var_risk"
 CALCULATE_FUND_VAR_RISK_TOOL_NAME = "calculate_fund_var_risk"
+CALCULATE_FUND_FRONTEND_SALES_FEE_TOOL_NAME = "calculate_fund_frontend_sales_fee"
+CALCULATE_FUND_DEFERRED_SALES_FEE_TOOL_NAME = "calculate_fund_deferred_sales_fee"
+CALCULATE_FUND_REDEMPTION_FEE_TOOL_NAME = "calculate_fund_redemption_fee"
 
 
 def create_pension_withdrawal_limit_tool() -> BaseTool:
@@ -1177,6 +1180,213 @@ def create_fund_reported_var_risk_tool() -> BaseTool:
         )
 
     return calculate_fund_reported_var_risk
+
+
+def create_fund_frontend_sales_fee_tool() -> BaseTool:
+    """Product Agent용 선취판매수수료 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_FUND_FRONTEND_SALES_FEE_TOOL_NAME,
+        description=(
+            "가입 시 납입금액과 상품·클래스·가입기간에 맞게 검색으로 확정한 선취판매수수료율로 "
+            "고정 수수료 또는 상한 수수료 금액을 계산한다. 사용자 질문 또는 검증된 검색 근거에 "
+            "명시된 입력만 사용한다."
+        ),
+    )
+    async def calculate_fund_frontend_sales_fee(
+        subscription_amount_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="가입 시 납입금액(원)"),
+        ],
+        selected_rate_percent: Annotated[
+            Decimal,
+            Field(ge=0, le=100, description="검색 근거로 확정한 선취판매수수료율(%)"),
+        ],
+        rate_kind: Annotated[
+            Literal["fixed", "maximum"],
+            Field(description="고정 요율인지 이내·상한 요율인지 구분"),
+        ],
+        subscription_amount_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="납입금액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        selected_rate_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="선취판매수수료율 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        rate_kind_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="고정 또는 이내·상한 의미가 있는 원문 구절",
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        return _execute_calculation(
+            calculator_id="fund_frontend_sales_fee",
+            inputs={
+                "subscription_amount_krw": subscription_amount_krw,
+                "selected_rate_percent": selected_rate_percent,
+                "rate_kind": rate_kind,
+            },
+            input_sources={
+                "subscription_amount_krw": subscription_amount_source,
+                "selected_rate_percent": selected_rate_source,
+                "rate_kind": rate_kind_source,
+            },
+            tool_name=CALCULATE_FUND_FRONTEND_SALES_FEE_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_fund_frontend_sales_fee
+
+
+def create_fund_deferred_sales_fee_tool() -> BaseTool:
+    """Product Agent용 후취판매수수료 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_FUND_DEFERRED_SALES_FEE_TOOL_NAME,
+        description=(
+            "환매 시 환매금액과 상품·클래스·보유기간에 맞게 검색으로 확정한 후취판매수수료율로 "
+            "고정 수수료 또는 상한 수수료 금액을 계산한다. 사용자 질문 또는 검증된 검색 근거에 "
+            "명시된 입력만 사용한다."
+        ),
+    )
+    async def calculate_fund_deferred_sales_fee(
+        redemption_amount_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="환매 시 환매금액(원)"),
+        ],
+        selected_rate_percent: Annotated[
+            Decimal,
+            Field(ge=0, le=100, description="검색 근거로 확정한 후취판매수수료율(%)"),
+        ],
+        rate_kind: Annotated[
+            Literal["fixed", "maximum"],
+            Field(description="고정 요율인지 이내·상한 요율인지 구분"),
+        ],
+        redemption_amount_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="환매금액 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        selected_rate_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="후취판매수수료율 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        rate_kind_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="고정 또는 이내·상한 의미가 있는 원문 구절",
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        return _execute_calculation(
+            calculator_id="fund_deferred_sales_fee",
+            inputs={
+                "redemption_amount_krw": redemption_amount_krw,
+                "selected_rate_percent": selected_rate_percent,
+                "rate_kind": rate_kind,
+            },
+            input_sources={
+                "redemption_amount_krw": redemption_amount_source,
+                "selected_rate_percent": selected_rate_source,
+                "rate_kind": rate_kind_source,
+            },
+            tool_name=CALCULATE_FUND_DEFERRED_SALES_FEE_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_fund_deferred_sales_fee
+
+
+def create_fund_redemption_fee_tool() -> BaseTool:
+    """Product Agent용 환매수수료 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_FUND_REDEMPTION_FEE_TOOL_NAME,
+        description=(
+            "환매 시 이익금과 상품·클래스·보유기간에 맞게 검색으로 확정한 환매수수료율로 "
+            "고정 수수료 또는 상한 수수료 금액을 계산한다. 사용자 질문 또는 검증된 검색 근거에 "
+            "명시된 입력만 사용한다."
+        ),
+    )
+    async def calculate_fund_redemption_fee(
+        redemption_profit_krw: Annotated[
+            Decimal,
+            Field(ge=0, description="환매 시 이익금(원)"),
+        ],
+        selected_rate_percent: Annotated[
+            Decimal,
+            Field(ge=0, le=100, description="검색 근거로 확정한 환매수수료율(%)"),
+        ],
+        rate_kind: Annotated[
+            Literal["fixed", "maximum"],
+            Field(description="고정 요율인지 이내·상한 요율인지 구분"),
+        ],
+        redemption_profit_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="이익금 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        selected_rate_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="환매수수료율 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ],
+        rate_kind_source: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="고정 또는 이내·상한 의미가 있는 원문 구절",
+            ),
+        ],
+        runtime: ToolRuntime[ExecutionContext, Any],
+    ) -> Command | str:
+        return _execute_calculation(
+            calculator_id="fund_redemption_fee",
+            inputs={
+                "redemption_profit_krw": redemption_profit_krw,
+                "selected_rate_percent": selected_rate_percent,
+                "rate_kind": rate_kind,
+            },
+            input_sources={
+                "redemption_profit_krw": redemption_profit_source,
+                "selected_rate_percent": selected_rate_source,
+                "rate_kind": rate_kind_source,
+            },
+            tool_name=CALCULATE_FUND_REDEMPTION_FEE_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_fund_redemption_fee
 
 
 def _execute_calculation(

@@ -60,6 +60,9 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 | `fund_reported_var_risk` | 공시된 연환산 97.5% VaR를 추가 변환 없이 6단계 상한표에 적용 | `R2_KR5131420025.pdf` 19~20쪽 |
+| `fund_frontend_sales_fee` | 납입금액 × 선택 요율 ÷ 100, `fixed`면 `fee_amount_krw`만 반환 | `R2_KR5160420009.pdf` 21쪽 |
+| `fund_deferred_sales_fee` | 환매금액 × 선택 요율 ÷ 100, `maximum`이면 `maximum_fee_amount_krw`만 반환 | `R2_KR5160420009.pdf` 21쪽 |
+| `fund_redemption_fee` | 이익금 × 선택 요율 ÷ 100 | `R2_KR5194450018.pdf` 30쪽(이익금 정의), 34쪽(클래스·보유기간별 요율표) |
 
 검증 문서 정보는 개발 기록이며 런타임 결과에 직렬화하지 않는다. 문서에 없는 표시
 자릿수나 최종 지급 단위 반올림은 임의로 적용하지 않고 warning에 남긴다.
@@ -408,6 +411,51 @@ Policy, 금액만 있으면 Tax/Payout, 둘 다 있으면 두 Domain으로 라�
 없으면 세금 숫자를 생성하지 않는다. 의미가 비슷하다는 이유로 기존 인출 세금 Tool을
 연쇄 호출하지 않고 세금 부분은 추가 입력과 별도 계산이 필요한 조건부 상태로 유지한다.
 
+### 펀드 수수료 계산 계약
+
+**`fund_frontend_sales_fee`**: 가입 시 납입금액에 검증된 선취판매수수료율을 곱한다. 필수
+입력은 0 이상의 `Decimal`인 `subscription_amount_krw`(KRW), 0~100의 `Decimal`인
+`selected_rate_percent`(%), `rate_kind`(`fixed` 또는 `maximum`)다. 산식은
+`subscription_amount_krw × selected_rate_percent / 100`이다.
+
+**`fund_deferred_sales_fee`**: 환매 시 환매금액에 검증된 후취판매수수료율을 곱한다. 필수
+입력은 0 이상의 `redemption_amount_krw`(KRW), `selected_rate_percent`, `rate_kind`다.
+산식은 `redemption_amount_krw × selected_rate_percent / 100`이다.
+
+**`fund_redemption_fee`**: 환매 시 이익금에 검증된 환매수수료율을 곱한다. 필수 입력은
+0 이상의 `redemption_profit_krw`(KRW), `selected_rate_percent`, `rate_kind`다. 산식은
+`redemption_profit_krw × selected_rate_percent / 100`이다.
+
+**출력 계약**: `rate_kind=fixed`면 `fee_amount_krw`만 반환하고 `maximum_fee_amount_krw`
+키는 생략한다. `rate_kind=maximum`이면 그 반대다. 두 키를 동시에 반환하거나 사용하지 않는
+키를 `null`로 채우지 않는다. 문서에 없는 원 단위 반올림·절사는 적용하지 않는다.
+
+**세 계산기는 서로 대체 관계가 아니다**: 선취판매수수료는 납입금액, 후취판매수수료는
+환매금액, 환매수수료는 이익금을 기준으로 하며 서로 다른 계산이다. 판매보수·총보수·
+운용보수·신탁보수·기타비용·총비용비율(TER)의 수치를 이 세 계산기의
+`selected_rate_percent`로 사용하지 않는다. Rules는 이 세 fee를 서로 합산하거나 다른
+보수·비용과 합산하지 않는다.
+
+**fixed vs maximum**: 요율 문구에 "이내", "상한", "최대" 표현이 있으면 `rate_kind=maximum`
+이며 그 결과는 상한일 뿐 실제 부과금액이 아니다. 그런 표현 없이 확정 요율만 있으면
+`rate_kind=fixed`다. 실제 적용 요율이 확인되지 않고 상한 요율만 문서에 있으면 상한 계산
+결과는 보존하되 실제 적용 수수료율은 별도로 확인해야 한다.
+
+**책임 경계**: 상품·클래스·판매채널과 가입 또는 환매 시점의 보유기간에 맞는 요율 선택은
+Product Agent가 검색 근거에서 확정하고, Rules는 구간표를 내장하거나 구간을 선택하지
+않는다. Tool은 값/source의 fee 종류·금액 의미·요율 의미·`rate_kind` 의미 대응을
+검증한다. Presentation은 Rules 결과를 재계산하지 않고 존재하는 출력 키만 표현한다.
+
+**입력 provenance**: 납입금액, 환매금액, 이익금은 서로 다른 의미이며 평가금액·원금·
+수익률로 대체하지 않는다. 선취판매수수료율, 후취판매수수료율, 환매수수료율은 각 계산기
+전용 라벨로만 확인하고 다른 계산기의 요율 라벨이나 판매보수·총보수 등 집계 비용 표현은
+요율 source로 인정하지 않는다.
+
+원본 문서에서 선취·후취판매수수료는 클래스별로 "이내" 상한 요율(예:
+납입금액의 0.10% 이내)로, 환매수수료는 30일·90일 보유기간 구간별 이익금 기준 고정
+비율(예: 30일 미만 이익금의 70%)로 각각 확인했으며, 두 rate_kind가 실제 문서에 모두
+존재한다.
+
 ## 실행 제한과 오류
 
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
@@ -439,7 +487,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 | 소비자 | 허용 계산기 |
 |---|---|
 | Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown`, `db_retirement_benefit`, `dc_minimum_employer_contribution`, `dc_retirement_benefit`, `db_to_dc_transfer_amount` |
-| Product Agent | `fund_standard_price`, `fund_var_risk`, `fund_reported_var_risk` |
+| Product Agent | `fund_standard_price`, `fund_var_risk`, `fund_reported_var_risk`, `fund_frontend_sales_fee`, `fund_deferred_sales_fee`, `fund_redemption_fee` |
 | Policy Agent | `dc_medical_withdrawal_threshold` |
 | Main Supervisor | 직접 호출 금지 |
 
