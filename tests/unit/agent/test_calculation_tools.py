@@ -14,6 +14,9 @@ from pension_agent.agent.calculation import (
     create_dc_minimum_employer_contribution_tool,
     create_dc_retirement_benefit_tool,
     create_deferred_retirement_withdrawal_tax_tool,
+    create_fund_deferred_sales_fee_tool,
+    create_fund_frontend_sales_fee_tool,
+    create_fund_redemption_fee_tool,
     create_fund_reported_var_risk_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
@@ -167,6 +170,34 @@ async def test_reported_var_tool_preserves_exact_evidence_source() -> None:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
+    ("rate_kind", "rate_phrase", "expected_key", "expected_output"),
+    [
+        ("fixed", "선취판매수수료율 1%", "fee_amount_krw", "10000"),
+        ("maximum", "선취판매수수료율 1% 이내", "maximum_fee_amount_krw", "10000"),
+    ],
+)
+async def test_fund_frontend_sales_fee_tool_applies_rate_kind(
+    rate_kind: str, rate_phrase: str, expected_key: str, expected_output: str
+) -> None:
+    money_source = "납입금액 1,000,000원"
+    result = await create_fund_frontend_sales_fee_tool().coroutine(
+        subscription_amount_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind=rate_kind,
+        subscription_amount_source=money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{money_source}; {rate_phrase}"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "fund_frontend_sales_fee"
+    assert calculation["outputs"] == {expected_key: expected_output}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
     "source",
     [
         "공시 일간 97.5% VaR는 12%",
@@ -212,6 +243,152 @@ async def test_reported_var_tool_rejects_daily_percentile_as_reported_var() -> N
         annualized_var_percent=Decimal(1),
         annualized_var_source=source,
         runtime=_runtime(question="위험등급을 알려줘", chunk_content=source),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("rate_kind", "rate_phrase", "expected_key", "expected_output"),
+    [
+        ("fixed", "후취판매수수료율 1%", "fee_amount_krw", "10000"),
+        ("maximum", "후취판매수수료율 1% 이내", "maximum_fee_amount_krw", "10000"),
+    ],
+)
+async def test_fund_deferred_sales_fee_tool_applies_rate_kind(
+    rate_kind: str, rate_phrase: str, expected_key: str, expected_output: str
+) -> None:
+    money_source = "환매금액 1,000,000원"
+    result = await create_fund_deferred_sales_fee_tool().coroutine(
+        redemption_amount_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind=rate_kind,
+        redemption_amount_source=money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{money_source}; {rate_phrase}"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "fund_deferred_sales_fee"
+    assert calculation["outputs"] == {expected_key: expected_output}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("rate_kind", "rate_phrase", "expected_key", "expected_output"),
+    [
+        ("fixed", "환매수수료율 1%", "fee_amount_krw", "10000"),
+        ("maximum", "환매수수료율 1% 이내", "maximum_fee_amount_krw", "10000"),
+    ],
+)
+async def test_fund_redemption_fee_tool_applies_rate_kind(
+    rate_kind: str, rate_phrase: str, expected_key: str, expected_output: str
+) -> None:
+    money_source = "이익금 1,000,000원"
+    result = await create_fund_redemption_fee_tool().coroutine(
+        redemption_profit_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind=rate_kind,
+        redemption_profit_source=money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{money_source}; {rate_phrase}"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "fund_redemption_fee"
+    assert calculation["outputs"] == {expected_key: expected_output}
+
+
+@pytest.mark.anyio
+async def test_fund_frontend_sales_fee_tool_rejects_cross_fee_type_rate_source() -> None:
+    money_source = "납입금액 1,000,000원"
+    rate_phrase = "후취판매수수료율 1%"
+    result = await create_fund_frontend_sales_fee_tool().coroutine(
+        subscription_amount_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind="fixed",
+        subscription_amount_source=money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{money_source}; {rate_phrase}"),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_fund_redemption_fee_tool_rejects_aggregate_expense_ratio_as_rate_source() -> None:
+    money_source = "이익금 1,000,000원"
+    rate_phrase = "총보수 1%"
+    result = await create_fund_redemption_fee_tool().coroutine(
+        redemption_profit_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind="fixed",
+        redemption_profit_source=money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{money_source}; {rate_phrase}"),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_fund_deferred_sales_fee_tool_rejects_amount_source_meaning_profit() -> None:
+    wrong_money_source = "이익금 1,000,000원"
+    rate_phrase = "후취판매수수료율 1%"
+    result = await create_fund_deferred_sales_fee_tool().coroutine(
+        redemption_amount_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind="fixed",
+        redemption_amount_source=wrong_money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{wrong_money_source}; {rate_phrase}"),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_fund_redemption_fee_tool_rejects_maximum_without_ceiling_expression() -> None:
+    money_source = "이익금 1,000,000원"
+    rate_phrase = "환매수수료율 1%"
+    result = await create_fund_redemption_fee_tool().coroutine(
+        redemption_profit_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind="maximum",
+        redemption_profit_source=money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{money_source}; {rate_phrase}"),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_fund_redemption_fee_tool_rejects_fixed_with_ceiling_expression() -> None:
+    money_source = "이익금 1,000,000원"
+    rate_phrase = "환매수수료율 1% 이내"
+    result = await create_fund_redemption_fee_tool().coroutine(
+        redemption_profit_krw=Decimal(1_000_000),
+        selected_rate_percent=Decimal(1),
+        rate_kind="fixed",
+        redemption_profit_source=money_source,
+        selected_rate_source=rate_phrase,
+        rate_kind_source=rate_phrase,
+        runtime=_runtime(question=f"{money_source}; {rate_phrase}"),
     )
 
     assert isinstance(result, str)
