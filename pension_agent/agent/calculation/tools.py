@@ -103,6 +103,7 @@ def create_pension_withdrawal_limit_tool() -> BaseTool:
             input_sources=input_sources,
             tool_name=CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
             runtime=runtime,
+            require_search=False,
         )
 
     return calculate_pension_withdrawal_limit
@@ -133,6 +134,7 @@ def create_pension_annual_limit_installment_tool() -> BaseTool:
             },
             tool_name=CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME,
             runtime=runtime,
+            require_search=False,
         )
 
     return calculate_pension_annual_limit_installment
@@ -163,6 +165,7 @@ def create_pension_period_installment_tool() -> BaseTool:
             },
             tool_name=CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
             runtime=runtime,
+            require_search=False,
         )
 
     return calculate_pension_period_installment
@@ -197,6 +200,7 @@ def create_pension_unit_installment_tool() -> BaseTool:
             },
             tool_name=CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
             runtime=runtime,
+            require_search=False,
         )
 
     return calculate_pension_unit_installment
@@ -1605,11 +1609,18 @@ def _execute_calculation(
     input_sources: dict[str, str],
     tool_name: str,
     runtime: ToolRuntime[ExecutionContext, Any],
+    require_search: bool = True,
 ) -> Command | str:
-    """검색 이후 계산을 실행하고 검증된 결과만 Agent state에 누적한다."""
+    """검색 이후 계산을 실행하고 검증된 결과만 Agent state에 누적한다.
+
+    require_search=False인 계산기는 사용자 질문 원문만으로 적용조건과 입력이
+    모두 확정되는 순수 산술 계산기뿐이다. 그 경우에도 evidence-origin 입력
+    출처는 검증 불가능하므로(검색 청크가 없음) 실제로는 question-origin
+    입력만 통과한다.
+    """
 
     search_result = runtime.state.get("search_result")
-    if (
+    if require_search and (
         search_result is None
         or search_result.execution_status != "completed"
         or not search_result.retrieved_chunks

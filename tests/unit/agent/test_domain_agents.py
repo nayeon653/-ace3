@@ -5259,6 +5259,272 @@ async def test_tax_agent_determined_still_requires_search_before_submit() -> Non
 
 
 @pytest.mark.anyio
+async def test_tax_agent_runs_question_sourced_calculation_without_search() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "100000000",
+                            "pension_year": 3,
+                            "account_valuation_source": "평가액 1억원",
+                            "pension_year_source": "연금수령연차 3년차",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "계산 결과를 제출합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "평가액 1억원, 연금수령연차 3년차의 연금수령한도를 계산해줘.",
+            "objective": "명시된 입력으로 연금수령한도 계산",
+        }
+    )
+
+    assert result["execution_status"] == "completed", result
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert model.invocation_count == 2
+
+
+@pytest.mark.anyio
+async def test_tax_agent_runs_period_installment_calculation_without_search() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_period_installment",
+                        "args": {
+                            "current_valuation_krw": "50000000",
+                            "remaining_payments": 10,
+                            "current_valuation_source": "현재 계좌 평가액 5천만원",
+                            "remaining_payments_source": "전체 기간 잔여회차 10회",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "계산 결과를 제출합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": (
+                "현재 계좌 평가액 5천만원을 전체 기간 잔여회차 10회로 나누면 "
+                "회당 얼마 받나요?"
+            ),
+            "objective": "명시된 입력으로 기간분할 지급액 계산",
+        }
+    )
+
+    assert result["execution_status"] == "completed", result
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"][0]["calculator_id"] == "pension_period_installment"
+    assert result["evidence"] == []
+    assert search.calls == []
+    assert model.invocation_count == 2
+
+
+@pytest.mark.anyio
+async def test_tax_agent_blocks_second_calculation_without_search_after_direct_calculation() -> (
+    None
+):
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_withdrawal_limit",
+                        "args": {
+                            "account_valuation_krw": "100000000",
+                            "pension_year": 3,
+                            "account_valuation_source": "평가액 1억원",
+                            "pension_year_source": "연금수령연차 3년차",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_executive_retirement_income_limit",
+                        "args": {},
+                        "id": "blocked-call",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "계산 결과를 제출합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "평가액 1억원, 연금수령연차 3년차의 연금수령한도를 계산해줘.",
+            "objective": "명시된 입력으로 연금수령한도 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert [item["calculator_id"] for item in result["calculations"]] == [
+        "pension_withdrawal_limit"
+    ]
+    assert search.calls == []
+
+
+@pytest.mark.anyio
+async def test_tax_agent_calculation_tool_still_requires_search_first() -> None:
+    chunk = _chunk(
+        DocumentType.PENSION_REFERENCE,
+        content="의료비 인출은 실제 지출한 의료비와 요양비 범위에서 저율과세를 적용합니다.",
+    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_medical_care_withdrawal_tax_limit",
+                        "args": {
+                            "requested_withdrawal_krw": "5000000",
+                            "actual_medical_expenses_krw": "3000000",
+                            "care_expenses_krw": "0",
+                            "own_leave_months": 4,
+                            "requested_withdrawal_krw_source": "인출 요청액 500만원",
+                            "actual_medical_expenses_krw_source": "실제 의료비 300만원",
+                            "care_expenses_krw_source": "요양비 0원",
+                            "own_leave_months_source": "휴직 4개월",
+                        },
+                        "id": "premature-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "의료비 인출 저율과세 적용 조건 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": (
+                                "실제 지출한 의료비와 요양비 범위에서 저율과세가 적용됩니다."
+                            ),
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {
+            "question": "의료비 인출에 저율과세 적용돼?",
+            "objective": "의료비 인출 저율과세 적용 여부 판단",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"] == []
+    assert len(search.calls) == 1
+    assert model.invocation_count == 3
+
+
+@pytest.mark.anyio
 async def test_tax_agent_accepts_qualitative_resubmit_after_numeric_conclusion() -> None:
     chunk = _chunk(DocumentType.PENSION_REFERENCE)
     search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
