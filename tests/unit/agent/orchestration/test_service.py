@@ -173,6 +173,70 @@ def _calculation_result() -> DomainResult:
     }
 
 
+def _retirement_benefit_result(*, conditional: bool = False) -> DomainResult:
+    return {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "conditional" if conditional else "determined",
+            "conclusion": "DB 퇴직급여를 계산했으며 퇴직소득세는 별도 계산이 필요합니다.",
+            "missing_conditions": (
+                ["퇴직소득세 산출에 필요한 별도 계산 계약과 입력 확인 필요"] if conditional else []
+            ),
+        },
+        "evidence": [
+            {
+                "chunk_id": "550e8400-e29b-41d4-a716-446655440002",
+                "source_file_name": "retirement.pdf",
+                "title": "DB 퇴직급여",
+                "locator": "3쪽",
+                "content": "DB 퇴직급여 계산 근거",
+            }
+        ],
+        "calculations": [
+            {
+                "calculator_id": "db_retirement_benefit",
+                "inputs": {
+                    "wages_for_average_period_krw": "9000000",
+                    "included_days_for_average_wage": 90,
+                    "verified_service_years": "10",
+                },
+                "input_sources": {
+                    "wages_for_average_period_krw": {
+                        "origin": "question",
+                        "text": "최근 3개월 임금 900만원",
+                        "chunk_id": None,
+                    },
+                    "included_days_for_average_wage": {
+                        "origin": "question",
+                        "text": "포함일수 90일",
+                        "chunk_id": None,
+                    },
+                    "verified_service_years": {
+                        "origin": "question",
+                        "text": "검증 근속 10년",
+                        "chunk_id": None,
+                    },
+                },
+                "outputs": {
+                    "average_daily_wage": "100000",
+                    "average_wage_30_days": "3000000",
+                    "verified_service_years": "10",
+                    "retirement_benefit": "30000000",
+                },
+                "units": {
+                    "average_daily_wage": "KRW/day",
+                    "average_wage_30_days": "KRW",
+                    "verified_service_years": "years",
+                    "retirement_benefit": "KRW",
+                },
+                "warnings": ["퇴직소득세는 이 계산에 포함되지 않습니다."],
+            }
+        ],
+        "warnings": ["최초 퇴직소득세 전체 계산기는 현재 제공되지 않습니다."],
+    }
+
+
 def _state(*, messages: list[Any], domain_results: list[DomainResult]) -> dict[str, Any]:
     return {
         "messages": messages,
@@ -340,6 +404,68 @@ async def test_answer_service_preserves_both_medical_care_domain_results() -> No
     assert "제도상 요양기간 확인" in result.answer.answer
     assert "계좌 유형을 확인해야 합니다." in result.answer.answer
     assert "연금수령한도: 1200000.0 KRW" in result.answer.answer
+
+
+@pytest.mark.parametrize(
+    ("policy_conditional", "tax_conditional"),
+    [(True, False), (False, True)],
+)
+async def test_answer_service_preserves_retirement_composite_domain_results(
+    policy_conditional: bool, tax_conditional: bool
+) -> None:
+    policy_result = _completed_result()
+    policy_result["decision"] = {
+        "status": "conditional" if policy_conditional else "determined",
+        "conclusion": "근속 인정 여부를 판단했습니다.",
+        "missing_conditions": ["계속근로·근속 인정 여부 확인 필요"] if policy_conditional else [],
+    }
+    policy_result["warnings"] = ["제도 판단 주의사항"]
+    tax_result = _retirement_benefit_result(conditional=tax_conditional)
+    question = "근속 인정 여부와 DB 퇴직급여를 알려줘"
+    state = _state(
+        messages=[AIMessage(content="임의 숫자 999원")],
+        domain_results=[policy_result, tax_result],
+    )
+    state["question"] = question
+
+    result = await AnswerService(FakeSupervisor(result=state)).run(
+        question_id="Q-001", question=question
+    )
+
+    assert result.state["domain_results"] == [policy_result, tax_result]
+    assert (
+        tax_result["calculations"][0]["input_sources"]
+        == result.state["domain_results"][1]["calculations"][0]["input_sources"]
+    )
+    assert tax_result["evidence"] == result.state["domain_results"][1]["evidence"]
+    assert "DB 퇴직급여: 30000000 KRW" in result.answer.answer
+    assert "999" not in result.answer.answer
+    if policy_conditional:
+        assert "계속근로·근속 인정 여부 확인 필요" in result.answer.answer
+    if tax_conditional:
+        assert "퇴직소득세 산출에 필요한 별도 계산 계약과 입력 확인 필요" in result.answer.answer
+
+
+async def test_answer_service_preserves_benefit_and_does_not_invent_retirement_tax() -> None:
+    tax_result = _retirement_benefit_result(conditional=True)
+    question = "DB 퇴직급여와 퇴직소득세까지 계산해줘"
+    state = _state(
+        messages=[AIMessage(content="퇴직소득세는 999원입니다.")],
+        domain_results=[tax_result],
+    )
+    state["question"] = question
+
+    result = await AnswerService(FakeSupervisor(result=state)).run(
+        question_id="Q-001", question=question
+    )
+
+    assert "DB 퇴직급여: 30000000 KRW" in result.answer.answer
+    assert "퇴직소득세 산출에 필요한 별도 계산 계약과 입력 확인 필요" in result.answer.answer
+    assert "최초 퇴직소득세 전체 계산기는 현재 제공되지 않습니다." in result.answer.answer
+    assert "999" not in result.answer.answer
+    assert [item["calculator_id"] for item in tax_result["calculations"]] == [
+        "db_retirement_benefit"
+    ]
 
 
 async def test_answer_service_normalizes_supervisor_execution_failure() -> None:

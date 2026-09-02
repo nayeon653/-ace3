@@ -179,6 +179,20 @@ def test_main_supervisor_prompt_has_medical_care_routing_boundaries() -> None:
     assert "세액, 한도 또는 세후액을 직접 계산하지 않는다" in prompt
 
 
+def test_main_supervisor_prompt_has_retirement_benefit_routing_boundaries() -> None:
+    prompt = (
+        resources.files("pension_agent.prompts")
+        .joinpath("orchestration", "main-supervisor.md")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "제도 유형이 불명확한 `퇴직급여가 얼마야?`" in prompt
+    assert "DB와 DC 퇴직급여 금액을 비교" in prompt
+    assert "DB→DC 전환 가능 여부와 전환금액" in prompt
+    assert "기존 인출 세금 Tool을 임의로 연쇄 호출하지 않는다" in prompt
+    assert "기간·근속연수·급여·전환금액·세금을 직접 계산" in prompt
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("question", "tool_calls", "expected_domains"),
@@ -248,6 +262,81 @@ async def test_main_supervisor_routes_medical_care_intents_to_required_domains(
     )
 
     assert {result["domain"] for result in result["domain_results"]} == expected_domains
+    assert len(requests) == len(expected_domains)
+    assert {request["question"] for request in requests} == {question}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("question", "expected_domains"),
+    [
+        ("DB와 DC의 적용 조건 차이가 뭐야?", {"policy"}),
+        ("이 근속기간이 DB 퇴직급여 근속연수에 포함돼?", {"policy"}),
+        ("DB에서 DC로 전환할 수 있어?", {"policy"}),
+        (
+            "최근 3개월 임금 900만원, 포함일수 90일, 검증 근속 10년이면 DB 퇴직급여 얼마야?",
+            {"tax_payout"},
+        ),
+        ("연간임금총액 6000만원이면 DC 최소 사용자 부담금 얼마야?", {"tax_payout"}),
+        ("누적 부담금 5000만원, 운용손실 500만원이면 DC 급여 얼마야?", {"tax_payout"}),
+        ("검증된 최종 평균임금·연간임금·근속연수로 DB→DC 전환금액을 계산해줘", {"tax_payout"}),
+        ("근속 인정 여부를 확인해서 DB 퇴직급여도 계산해줘", {"policy", "tax_payout"}),
+        ("DB→DC 전환 가능한지와 전환금액을 알려줘", {"policy", "tax_payout"}),
+        ("DB/DC 중 어떤 제도인지 확인하고 받을 금액도 계산해줘", {"policy", "tax_payout"}),
+        ("입력이 확인된 DB와 DC 퇴직급여 금액을 비교해줘", {"tax_payout"}),
+        ("내 경우 DB와 DC 중 어느 쪽이 적용되고 얼마 차이 나?", {"policy", "tax_payout"}),
+        ("퇴직급여가 얼마야?", {"policy"}),
+        ("DB 퇴직급여와 퇴직소득세까지 계산해줘", {"tax_payout"}),
+    ],
+)
+async def test_main_supervisor_routes_retirement_benefit_intents(
+    anyio_backend: str,
+    question: str,
+    expected_domains: set[str],
+) -> None:
+    del anyio_backend
+    requests: list[DomainRequest] = []
+    tools = [
+        create_domain_agent_tool(
+            name="analyze_policy",
+            description="업무 판단",
+            domain="policy",
+            runner=_runner("policy", "제도 판단 결과입니다.", requests),
+        ),
+        create_domain_agent_tool(
+            name="analyze_tax_payout",
+            description="급여·세제 판단",
+            domain="tax_payout",
+            runner=_runner("tax_payout", "금액 판단 결과입니다.", requests),
+        ),
+    ]
+    tool_calls = [
+        _tool_call(
+            "analyze_policy" if domain == "policy" else "analyze_tax_payout",
+            f"{domain}-call",
+            "제도 판단" if domain == "policy" else "금액 판단",
+        )
+        for domain in sorted(expected_domains)
+    ]
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=tool_calls),
+            AIMessage(content="도메인 결과를 통합했습니다."),
+        ]
+    )
+    supervisor = create_main_supervisor(model=model, tools=tools)
+
+    result = await supervisor.ainvoke(
+        {
+            "messages": [{"role": "user", "content": question}],
+            "question_id": "Q-RETIREMENT-ROUTING",
+            "question": question,
+            "domain_results": [],
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
+    )
+
+    assert {item["domain"] for item in result["domain_results"]} == expected_domains
     assert len(requests) == len(expected_domains)
     assert {request["question"] for request in requests} == {question}
 

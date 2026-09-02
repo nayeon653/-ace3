@@ -101,3 +101,10 @@ DomainRequest
 - 계산 결과, input source와 evidence를 `DomainResult.calculations` 및 `evidence`에 보존한다.
 - threshold 결과는 최종 eligibility가 아니다. 법적 요건 확인이 제출되지 않으면 Python 경계가 최소 `conditional`을 강제한다.
 - IRP에는 DC threshold Tool을 호출하지 않으며 12.5% 예외만으로 최종 가능 여부를 확정하지 않는다.
+
+## DB·DC 퇴직급여 제도 판단
+
+- Policy는 DB/DC 제도 유형, 평균임금 제외기간, 계속근로·근속 인정 여부, 검증된 근속연수의 사용 가능성과 DB→DC 전환 자격·조건·절차를 판단한다.
+- 제도 유형, 근속 인정 또는 전환 가능 조건이 미확정이면 각각 `DB 또는 DC 제도 유형 확인 필요`, `계속근로·근속 인정 여부 확인 필요`, `DB→DC 전환 가능 조건 확인 필요`를 조건으로 보존한다.
+- 평균일급, 30일 평균임금, 퇴직급여, 최소 사용자 부담금, 전환금액과 퇴직소득세 계산은 Tax/Payout 책임이다.
+- Policy는 #118 Calculation Tool을 등록하지 않으며, 전환금액 결과를 전환 가능 여부로 해석하거나 검증되지 않은 기간·근속연수를 생성하지 않는다.

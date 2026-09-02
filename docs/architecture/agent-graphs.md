@@ -190,6 +190,10 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_withdrawal_tax_breakdown].after_model")
 	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_limit\5d\2eafter_model("ToolCallLimitMiddleware[calculate_medical_care_withdrawal_tax_limit].after_model")
 	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model("ToolCallLimitMiddleware[calculate_medical_care_withdrawal_tax_breakdown].after_model")
+	ToolCallLimitMiddleware\5bcalculate_db_retirement_benefit\5d\2eafter_model("ToolCallLimitMiddleware[calculate_db_retirement_benefit].after_model")
+	ToolCallLimitMiddleware\5bcalculate_dc_minimum_employer_contribution\5d\2eafter_model("ToolCallLimitMiddleware[calculate_dc_minimum_employer_contribution].after_model")
+	ToolCallLimitMiddleware\5bcalculate_dc_retirement_benefit\5d\2eafter_model("ToolCallLimitMiddleware[calculate_dc_retirement_benefit].after_model")
+	ToolCallLimitMiddleware\5bcalculate_db_to_dc_transfer_amount\5d\2eafter_model("ToolCallLimitMiddleware[calculate_db_to_dc_transfer_amount].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	EnforceTaxPayoutToolSequence\2eafter_model("EnforceTaxPayoutToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
@@ -203,6 +207,14 @@ graph TD;
 	TaxPayoutModelCallLimit\2eafter_model --> SingleTaxPayoutSubmitPerModelCall\2eafter_model;
 	TaxPayoutModelCallLimit\2ebefore_model -.-> __end__;
 	TaxPayoutModelCallLimit\2ebefore_model -.-> model;
+	ToolCallLimitMiddleware\5bcalculate_db_retirement_benefit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_db_retirement_benefit\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_db_to_dc_transfer_amount\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_dc_retirement_benefit\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_db_to_dc_transfer_amount\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_dc_minimum_employer_contribution\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_db_retirement_benefit\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_dc_minimum_employer_contribution\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_dc_retirement_benefit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_dc_minimum_employer_contribution\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_dc_retirement_benefit\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_limit\5d\2eafter_model;
@@ -229,7 +241,7 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> TaxPayoutModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_db_to_dc_transfer_amount\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
 	__start__ --> CompleteTaxPayoutResult\2ebefore_model;
 	model --> EnforceTaxPayoutToolSequence\2eafter_model;

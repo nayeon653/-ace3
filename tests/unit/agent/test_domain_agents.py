@@ -27,9 +27,14 @@ from pension_agent.agent.contracts import (
 from pension_agent.agent.domain_runner import GuardedDomainRunner
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.policy.react import (
+    _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION,
     _DC_ELIGIBILITY_MISSING_CONDITION,
+    _SERVICE_RECOGNITION_MISSING_CONDITION,
     EnforcePolicyToolSequence,
     _build_policy_result,
+)
+from pension_agent.agent.policy.react import (
+    _RETIREMENT_SCHEME_MISSING_CONDITION as _POLICY_RETIREMENT_SCHEME_MISSING_CONDITION,
 )
 from pension_agent.agent.product import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
@@ -55,10 +60,16 @@ from pension_agent.agent.tax_payout import (
 )
 from pension_agent.agent.tax_payout.react import (
     _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION,
+    _DB_SERVICE_YEARS_MISSING_CONDITION,
+    _DC_ANNUAL_WAGES_MISSING_CONDITION,
+    _DC_CONTRIBUTIONS_MISSING_CONDITION,
+    _DC_GAIN_LOSS_MISSING_CONDITION,
     _INCOME_BASIS_MISSING_CONDITION,
     _MEDICAL_CARE_EXCESS_MISSING_CONDITION,
     _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
     _RECIPIENT_AGE_MISSING_CONDITION,
+    _RETIREMENT_SCHEME_MISSING_CONDITION,
+    _TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION,
     EnforceTaxPayoutToolSequence,
     _build_tax_payout_result,
 )
@@ -423,6 +434,10 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                     "calculate_pension_withdrawal_tax_breakdown",
                     "calculate_medical_care_withdrawal_tax_limit",
                     "calculate_medical_care_withdrawal_tax_breakdown",
+                    "calculate_db_retirement_benefit",
+                    "calculate_dc_minimum_employer_contribution",
+                    "calculate_dc_retirement_benefit",
+                    "calculate_db_to_dc_transfer_amount",
                     "submit_domain_result",
                 }
                 if domain == "tax_payout"
@@ -2616,7 +2631,10 @@ def _tool_call(name: str, call_id: str) -> dict[str, Any]:
 
 
 def _sequence_result_tool_names(
-    *, calculations: list[dict[str, Any]], tool_names: list[str]
+    *,
+    calculations: list[dict[str, Any]],
+    tool_names: list[str],
+    question: str = "",
 ) -> list[str]:
     message = AIMessage(
         content="",
@@ -2625,6 +2643,7 @@ def _sequence_result_tool_names(
     state = {
         "search_result": SearchResult(execution_status="completed"),
         "calculations": calculations,
+        "question": question,
         "messages": [message],
     }
     update = EnforceTaxPayoutToolSequence().after_model(state, None)
@@ -4816,6 +4835,12 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "calculate_pension_tax_credit" in tax_prompt
     assert "calculate_pension_withdrawal_allocation" in tax_prompt
     assert "calculate_pension_withdrawal_tax_breakdown" in tax_prompt
+    assert "calculate_db_retirement_benefit" in tax_prompt
+    assert "calculate_dc_minimum_employer_contribution" in tax_prompt
+    assert "calculate_dc_retirement_benefit" in tax_prompt
+    assert "calculate_db_to_dc_transfer_amount" in tax_prompt
+    assert "DB 퇴직급여와 DC 퇴직급여의 금액 비교" in tax_prompt
+    assert "자동 chaining하지 않는다" in tax_prompt
     assert "재원별 인출 순서·배분만 필요" in tax_prompt
     assert "그 전에 `calculate_pension_withdrawal_allocation`을 호출하지 않는다" in tax_prompt
     assert "두 #115 Tool을 동시에 또는 연속 호출하지 않는다" in tax_prompt
@@ -4828,6 +4853,11 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "calculate_dc_medical_withdrawal_threshold" in policy_prompt
     assert "6개월 이상 요양" in policy_prompt
     assert "IRP" in policy_prompt
+    assert "DB·DC 퇴직급여 제도 판단" in policy_prompt
+    assert "평균임금 제외기간" in policy_prompt
+    assert "계속근로·근속 인정 여부" in policy_prompt
+    assert "DB→DC 전환 가능 여부" in policy_prompt
+    assert "#118 퇴직급여 Calculation Tool을 호출하지 않는다" in policy_prompt
     assert "calculate_medical_care_withdrawal_tax_limit" in tax_prompt
     assert "calculate_medical_care_withdrawal_tax_breakdown" in tax_prompt
     assert "3개월 이상 요양" in tax_prompt
@@ -4905,6 +4935,38 @@ def test_policy_dc_threshold_requires_separate_eligibility_confirmation() -> Non
     ]
     assert result["calculations"] == [_dc_threshold_calculation()]
     assert "DC 의료비 기준 적용 임금" in result["decision"]["conclusion"]
+
+
+@pytest.mark.parametrize(
+    ("question", "condition"),
+    [
+        ("퇴직급여가 얼마인지 판단해줘", _POLICY_RETIREMENT_SCHEME_MISSING_CONDITION),
+        ("이 근속기간이 인정되는지 판단해줘", _SERVICE_RECOGNITION_MISSING_CONDITION),
+        ("DB에서 DC로 전환 가능한지 판단해줘", _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION),
+    ],
+)
+def test_policy_standardizes_unresolved_retirement_conditions(
+    question: str, condition: str
+) -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_policy_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[],
+        question=question,
+        status="conditional",
+        conclusion="추가 조건에 따라 달라집니다.",
+        missing_conditions=["기존 확인 조건"],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"].count(condition) == 1
+    assert "기존 확인 조건" in result["decision"]["missing_conditions"]
+    assert result["calculations"] == []
 
 
 def _medical_care_calculation(
@@ -5196,3 +5258,309 @@ async def test_tax_agent_runs_pure_medical_care_limit_as_determined() -> None:
     assert result["decision"]["status"] == "determined"
     assert result["calculations"][0]["calculator_id"] == "medical_care_withdrawal_tax_limit"
     assert "의료·요양 저율과세 한도" in result["decision"]["conclusion"]
+
+
+def _retirement_calculation(
+    calculator_id: str, *, negative_dc: bool = False, equal_transfer: bool = False
+) -> Any:
+    if calculator_id == "db_retirement_benefit":
+        return {
+            "calculator_id": calculator_id,
+            "inputs": {
+                "wages_for_average_period_krw": "9000000",
+                "included_days_for_average_wage": 90,
+                "verified_service_years": "3.5",
+            },
+            "input_sources": {},
+            "outputs": {
+                "average_daily_wage": "100000",
+                "average_wage_30_days": "3000000",
+                "verified_service_years": "3.5",
+                "retirement_benefit": "10500000.0",
+            },
+            "units": {
+                "average_daily_wage": "KRW/day",
+                "average_wage_30_days": "KRW",
+                "verified_service_years": "years",
+                "retirement_benefit": "KRW",
+            },
+            "warnings": [],
+        }
+    if calculator_id == "dc_retirement_benefit":
+        result = "-1000000" if negative_dc else "11000000"
+        gain_loss = "-11000000" if negative_dc else "1000000"
+        return {
+            "calculator_id": calculator_id,
+            "inputs": {
+                "accumulated_contributions_krw": "10000000",
+                "investment_gain_loss_krw": gain_loss,
+            },
+            "input_sources": {},
+            "outputs": {
+                "accumulated_contributions": "10000000",
+                "investment_gain_loss": gain_loss,
+                "retirement_benefit": result,
+            },
+            "units": {
+                "accumulated_contributions": "KRW",
+                "investment_gain_loss": "KRW",
+                "retirement_benefit": "KRW",
+            },
+            "warnings": ["DC 퇴직급여 계산 결과가 음수입니다."] if negative_dc else [],
+        }
+    if calculator_id == "db_to_dc_transfer_amount":
+        basis_type = "equal" if equal_transfer else "annual_wage_monthly_basis"
+        return {
+            "calculator_id": calculator_id,
+            "inputs": {
+                "final_average_wage_30_days_krw": "4000000",
+                "final_annual_total_wages_krw": "48000000",
+                "verified_service_years": "3.5",
+            },
+            "input_sources": {},
+            "outputs": {
+                "final_average_wage_30_days": "4000000",
+                "annual_wage_monthly_basis": "4000000",
+                "selected_basis": "4000000",
+                "selected_basis_type": basis_type,
+                "verified_service_years": "3.5",
+                "transfer_amount": "14000000.0",
+            },
+            "units": {
+                "final_average_wage_30_days": "KRW",
+                "annual_wage_monthly_basis": "KRW",
+                "selected_basis": "KRW",
+                "verified_service_years": "years",
+                "transfer_amount": "KRW",
+            },
+            "warnings": [],
+        }
+    return {
+        "calculator_id": "dc_minimum_employer_contribution",
+        "inputs": {"annual_total_wages_krw": "48000000"},
+        "input_sources": {},
+        "outputs": {
+            "annual_total_wages": "48000000",
+            "minimum_employer_contribution": "4000000",
+        },
+        "units": {"annual_total_wages": "KRW", "minimum_employer_contribution": "KRW"},
+        "warnings": [],
+    }
+
+
+def test_tax_sequence_allows_only_explicit_db_dc_benefit_comparison() -> None:
+    comparison = "DB 퇴직급여와 DC 퇴직급여를 비교해줘"
+    assert _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_db_retirement_benefit",
+            "calculate_dc_retirement_benefit",
+            "submit_domain_result",
+        ],
+        question=comparison,
+    ) == ["calculate_db_retirement_benefit", "calculate_dc_retirement_benefit"]
+    assert _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_db_retirement_benefit",
+            "calculate_dc_retirement_benefit",
+        ],
+        question="DB 퇴직급여를 계산해줘",
+    ) == ["calculate_db_retirement_benefit"]
+    assert _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_db_retirement_benefit",
+            "calculate_dc_minimum_employer_contribution",
+        ],
+        question="DB와 DC 부담금을 비교해줘",
+    ) == ["calculate_db_retirement_benefit"]
+
+
+def test_tax_sequence_finishes_db_dc_comparison_then_allows_only_submit() -> None:
+    comparison = "DB 퇴직급여와 DC 퇴직급여를 비교해줘"
+    assert _sequence_result_tool_names(
+        calculations=[{"calculator_id": "db_retirement_benefit"}],
+        tool_names=["calculate_dc_retirement_benefit", "submit_domain_result"],
+        question=comparison,
+    ) == ["calculate_dc_retirement_benefit"]
+    assert _sequence_result_tool_names(
+        calculations=[
+            {"calculator_id": "db_retirement_benefit"},
+            {"calculator_id": "dc_retirement_benefit"},
+        ],
+        tool_names=["calculate_db_retirement_benefit", "submit_domain_result"],
+        question=comparison,
+    ) == ["submit_domain_result"]
+    assert _sequence_result_tool_names(
+        calculations=[{"calculator_id": "db_retirement_benefit"}],
+        tool_names=["calculate_dc_retirement_benefit", "submit_domain_result"],
+        question="DB 퇴직급여를 계산해줘",
+    ) == ["submit_domain_result"]
+
+
+@pytest.mark.parametrize(
+    ("question", "content", "condition"),
+    [
+        (
+            "DB 퇴직급여를 계산해줘",
+            "최근 3개월 임금 합계 900만원; 평균임금 산정일수 90일",
+            _DB_SERVICE_YEARS_MISSING_CONDITION,
+        ),
+        (
+            "DC 최소 사용자 부담금을 계산해줘",
+            "DC 최소 사용자 부담금 안내",
+            _DC_ANNUAL_WAGES_MISSING_CONDITION,
+        ),
+        (
+            "DC 퇴직급여를 계산해줘",
+            "누적 운용손익 100만원",
+            _DC_CONTRIBUTIONS_MISSING_CONDITION,
+        ),
+        (
+            "DC 퇴직급여를 계산해줘",
+            "DC 누적 부담금 1,000만원",
+            _DC_GAIN_LOSS_MISSING_CONDITION,
+        ),
+        (
+            "DB→DC 전환금액을 계산해줘",
+            "최종 30일 평균임금 400만원; 계속근로연수 3.5년",
+            _TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION,
+        ),
+        (
+            "퇴직급여 금액을 계산해줘",
+            "최근 3개월 임금 합계 900만원",
+            _RETIREMENT_SCHEME_MISSING_CONDITION,
+        ),
+    ],
+)
+def test_tax_result_forces_specific_retirement_missing_condition(
+    question: str, content: str, condition: str
+) -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[chunk]),
+        calculations=[],
+        question=question,
+        status="determined",
+        conclusion="계산할 수 있습니다.",
+        missing_conditions=["기존 조건"],
+        warnings=[],
+        evidence_chunk_ids=[chunk.chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"].count(condition) == 1
+    assert "기존 조건" in result["decision"]["missing_conditions"]
+    assert result["calculations"] == []
+
+
+def test_retirement_presentations_preserve_intermediate_negative_and_equal_values() -> None:
+    summary = format_calculation_summary(
+        [
+            _retirement_calculation("db_retirement_benefit"),
+            _retirement_calculation("dc_minimum_employer_contribution"),
+            _retirement_calculation("dc_retirement_benefit", negative_dc=True),
+            _retirement_calculation("db_to_dc_transfer_amount", equal_transfer=True),
+        ]
+    )
+
+    assert "평균일급: 100000 KRW/day" in summary
+    assert "30일 평균임금: 3000000 KRW" in summary
+    assert "DC 최소 사용자 부담금: 4000000 KRW" in summary
+    assert "누적 운용손익: -11000000 KRW" in summary
+    assert "DC 퇴직급여: -1000000 KRW" in summary
+    assert "두 기준 동일" in summary
+    assert "더 큼" not in summary
+
+
+@pytest.mark.parametrize(
+    "calculation",
+    [
+        _retirement_calculation("dc_retirement_benefit", negative_dc=True),
+        _retirement_calculation("db_to_dc_transfer_amount", equal_transfer=True),
+    ],
+)
+def test_retirement_negative_and_equal_results_remain_determined(calculation: Any) -> None:
+    result = _build_result_with_calculations([calculation])
+
+    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["missing_conditions"] == []
+
+
+@pytest.mark.anyio
+async def test_tax_agent_runs_db_benefit_and_blocks_later_calculation() -> None:
+    content = (
+        "최근 3개월 임금 합계는 9,000,000원; "
+        "평균임금 산정 포함 일수는 90일; 검증된 근속연수는 3.5년"
+    )
+    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "DB 퇴직급여 입력 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_db_retirement_benefit",
+                        "args": {
+                            "wages_for_average_period_krw": "9000000",
+                            "included_days_for_average_wage": 90,
+                            "verified_service_years": "3.5",
+                            "wages_for_average_period_krw_source": (
+                                "최근 3개월 임금 합계는 9,000,000원"
+                            ),
+                            "included_days_for_average_wage_source": (
+                                "평균임금 산정 포함 일수는 90일"
+                            ),
+                            "verified_service_years_source": "검증된 근속연수는 3.5년",
+                        },
+                        "id": "db-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_dc_minimum_employer_contribution",
+                        "args": {},
+                        "id": "blocked-call",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "DB 급여 계산 결과입니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": "DB 퇴직급여를 계산해줘", "objective": "DB 급여 계산"})
+
+    assert result["decision"]["status"] == "determined"
+    assert [item["calculator_id"] for item in result["calculations"]] == ["db_retirement_benefit"]
+    assert result["evidence"][0]["chunk_id"] == chunk.chunk_id
+    assert "평균일급" in result["decision"]["conclusion"]

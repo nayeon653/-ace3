@@ -53,6 +53,10 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | `dc_medical_withdrawal_threshold` | DC 의료비 중도인출의 재직기간별 적용 임금과 12.5% 금액 기준 | `doc46.pdf` 1쪽; DC 12.5% 기준, 재직기간별 임금 기준, 더 낮은 직전 12개월 임금 적용, IRP 예외 |
 | `medical_care_withdrawal_tax_limit` | 의료·요양 인출의 저율과세 한도와 요청액의 한도 내·초과 금액 분리 | `doc5.pdf` 1쪽; 200만원 + 실제 의료비 + 간병비 + 본인 휴직월수 × 150만원 |
 | `medical_care_withdrawal_tax_breakdown` | 의료·요양 인출의 한도 내 부득이한 사유 세액·세후액과 미확정 초과액 분리 | `doc20.docx` 1~2쪽; 세법상 3개월 이상 요양, 부득이한 사유 연령별 세율, 관련 연간 1,500만원 예외 |
+| `db_retirement_benefit` | 평균일급과 30일 평균임금을 거쳐 검증된 계속근로연수 기준 DB 퇴직급여 계산 | Issue #118; 원본 knowledge locator 미매핑 |
+| `dc_minimum_employer_contribution` | 연간임금총액의 12분의 1인 DC 최소 사용자 부담금 계산 | Issue #118; 원본 knowledge locator 미매핑 |
+| `dc_retirement_benefit` | 실제 누적 부담금과 부호 있는 누적 운용손익을 합산한 DC 퇴직급여 계산 | Issue #118; 원본 knowledge locator 미매핑 |
+| `db_to_dc_transfer_amount` | 두 월 기준 중 큰 값과 검증된 근속연수로 DB→DC 전환금액 계산 | Issue #118; 원본 knowledge locator 미매핑 |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 
@@ -320,6 +324,57 @@ limit와 breakdown 선택 및 과세 의미를 판단한다. Main Supervisor는 
 
 세 계산기는 모든 금액을 `Decimal`로 계산하고 문서에 없는 반올림·절사를 적용하지 않는다.
 
+### DB·DC 퇴직급여 계산 계약
+
+**`db_retirement_benefit`**: 평균일급은 평균임금 산정 대상 최근 3개월 임금 합계를 검증된
+포함 일수로 나누고, 30일 평균임금은 평균일급에 30을 곱한다. DB 퇴직급여는 30일
+평균임금에 검증된 계속근로연수를 곱한다. 평균일급과 30일 평균임금을 중간 결과로
+보존한다. 포함 일수는 1 이상이며 평균임금 제외기간 반영을 끝낸 값이고, 계속근로연수는
+상위 계층에서 검증된 0 이상의 `Decimal`이다. Rules는 제외기간을 판단하거나 날짜에서
+근속연수를 계산하지 않고 부분연수를 절사하지 않는다.
+
+**`dc_minimum_employer_contribution`**: 0 이상의 연간임금총액을 12로 나눈 값을 DC 최소
+사용자 부담금으로 반환한다. 명시적 0은 0으로 보존한다. 실제 납입액·미납액을 판정하지
+않고, 원문 괄호가 불명확한 육아휴직 특수 산식을 추가하지 않는다.
+
+**`dc_retirement_benefit`**: 0 이상의 실제 누적 부담금에 부호 있는 누적 운용손익을
+더한다. 운용손익은 양수, 0과 음수를 허용한다. 결과가 음수여도 문서에 없는 0 하한을
+적용하지 않고 warning과 함께 음수 결과를 보존한다. 수익률이나 예상 손익을 금액 대신
+사용하지 않는다.
+
+**`db_to_dc_transfer_amount`**: 최종 30일 평균임금과 `최종 연간임금총액 / 12` 중 큰 월
+기준을 선택해 검증된 근속연수를 곱한다. 두 기준이 같으면 `selected_basis_type=equal`로
+별도 보존하고 어느 한쪽이 더 크다고 표현하지 않는다. Rules는 전환 가능 여부를 판단하거나
+날짜에서 근속연수를 만들지 않는다.
+
+네 계산기는 `Decimal` 결정론적 산술을 사용하고 문서에 없는 반올림·절사를 적용하지
+않는다. 네 Calculation Tool도 각각 같은 의미의 Rules 하나만 호출하며 다른 급여나 세금
+계산으로 fallback하지 않는다. 현재 구현 산식은 Issue #118을 기준으로 검증했으며, 정확한
+원본 knowledge 문서 filename과 locator는 저장소에서 확인되지 않아 추측해 연결하지 않았다.
+
+**책임 경계**: Policy Agent는 DB/DC 제도 유형, 평균임금 제외기간, 계속근로·근속 인정과
+DB→DC 전환 가능 여부를 판단한다. Tax/Payout Agent는 요청 의미에 맞는 #118 Tool을 선택하고
+급여·최소 부담금·전환금액 결과를 소비한다. Tool은 값/source의 의미·단위·기간 대응을
+검증하고 Rules는 검증된 입력으로 산술만 수행한다. Main Supervisor는 제도 판단만 있으면
+Policy, 금액만 있으면 Tax/Payout, 둘 다 있으면 두 Domain으로 라우팅하며 기간·근속연수·
+급여·세금을 직접 계산하지 않는다. Presentation은 Python 결과를 재계산하지 않고 표현한다.
+
+**입력 provenance**: 최근 3개월 평균임금 대상 임금은 연간임금총액과 다르고,
+연간임금총액은 전환 기준 최종 연간임금총액과 다르다. 평균일급, 30일 평균임금과 일반
+월급을 서로 바꾸지 않는다. 평균임금 포함 일수는 근속기간이나 휴직기간이 아니다. DC 최소
+사용자 부담금은 실제 누적 부담금이 아니며, 실제 누적 부담금은 DC 계좌잔액이 아니다.
+운용손익 금액을 수익률로부터 추정하지 않고, #117 의료비 threshold용 임금을 #118 임금
+입력으로 재사용하지 않는다.
+
+계속근로·근속연수는 정확한 값만 사용하고 범위·근사·부정 표현은 거부한다. 같은 source는
+각 필드의 의미와 정확한 값이 모두 명시된 경우에만 재사용한다. 명시적 0은 정보 부재와
+구분하고, 음의 운용손익은 손실 표현과 부호 의미까지 검증한다.
+
+**급여와 세금 경계**: #118은 퇴직소득세 전체 계산을 포함하지 않는다. 급여 계산 결과는
+보존하되, 세금까지 요청받아도 현재 저장소에 최초 퇴직소득세를 산출할 정확한 계산 계약이
+없으면 세금 숫자를 생성하지 않는다. 의미가 비슷하다는 이유로 기존 인출 세금 Tool을
+연쇄 호출하지 않고 세금 부분은 추가 입력과 별도 계산이 필요한 조건부 상태로 유지한다.
+
 ## 실행 제한과 오류
 
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
@@ -350,7 +405,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 
 | 소비자 | 허용 계산기 |
 |---|---|
-| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown` |
+| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown`, `db_retirement_benefit`, `dc_minimum_employer_contribution`, `dc_retirement_benefit`, `db_to_dc_transfer_amount` |
 | Product Agent | `fund_standard_price`, `fund_var_risk` |
 | Policy Agent | `dc_medical_withdrawal_threshold` |
 | Main Supervisor | 직접 호출 금지 |

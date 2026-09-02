@@ -8,7 +8,11 @@ import pytest
 from langgraph.types import Command
 
 from pension_agent.agent.calculation import (
+    create_db_retirement_benefit_tool,
+    create_db_to_dc_transfer_amount_tool,
     create_dc_medical_withdrawal_threshold_tool,
+    create_dc_minimum_employer_contribution_tool,
+    create_dc_retirement_benefit_tool,
     create_deferred_retirement_withdrawal_tax_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
@@ -36,12 +40,28 @@ _MEDICAL_CARE_REQUEST_SOURCE = "의료·요양 총 인출 요청액 300만원"
 _ACTUAL_MEDICAL_SOURCE = "과세한도 산식 실제 의료비 50만원"
 _CARE_EXPENSE_SOURCE = "간병비 25만원"
 _OWN_LEAVE_SOURCE = "본인 휴직 0개월"
+_DB_WAGES_SOURCE = "최근 3개월 임금 합계는 9,000,000원"
+_DB_DAYS_SOURCE = "제외기간 반영 후 평균임금 산정일수 90일"
+_SERVICE_YEARS_SOURCE = "검증된 근속연수 3.5년"
+_DC_ANNUAL_WAGES_SOURCE = "연간임금총액은 48,000,000원"
+_DC_CONTRIBUTIONS_SOURCE = "DC 실제 누적 부담금 10,000,000원"
+_DC_GAIN_SOURCE = "누적 운용수익 1,000,000원"
+_FINAL_AVERAGE_WAGE_SOURCE = "DB→DC 전환 기준 최종 30일 평균임금 4,000,000원"
+_FINAL_ANNUAL_WAGES_SOURCE = "DB→DC 전환 기준 최종 연간임금총액 60,000,000원"
 
 
 def _medical_care_runtime(*sources: str, chunk: bool = False) -> SimpleNamespace:
     content = "; ".join(sources)
     return _runtime(
         question="의료·요양 인출을 계산해줘" if chunk else content,
+        chunk_content=content,
+    )
+
+
+def _retirement_runtime(*sources: str, chunk: bool = False) -> SimpleNamespace:
+    content = "; ".join(sources)
+    return _runtime(
+        question="DB·DC 퇴직급여를 계산해줘" if chunk else content,
         chunk_content=content,
     )
 
@@ -1498,6 +1518,309 @@ def _medical_limit_tool_inputs(**updates: object) -> dict[str, object]:
 
 def _source_values(inputs: dict[str, object]) -> list[str]:
     return [str(value) for key, value in inputs.items() if key.endswith("_source")]
+
+
+@pytest.mark.anyio
+async def test_db_retirement_benefit_tool_preserves_results_sources_and_evidence() -> None:
+    sources = (_DB_WAGES_SOURCE, _DB_DAYS_SOURCE, _SERVICE_YEARS_SOURCE)
+    result = await create_db_retirement_benefit_tool().coroutine(
+        wages_for_average_period_krw=Decimal(9_000_000),
+        included_days_for_average_wage=90,
+        verified_service_years=Decimal("3.5"),
+        wages_for_average_period_krw_source=sources[0],
+        included_days_for_average_wage_source=sources[1],
+        verified_service_years_source=sources[2],
+        runtime=_retirement_runtime(*sources, chunk=True),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "db_retirement_benefit"
+    assert calculation["outputs"] == {
+        "average_daily_wage": "100000",
+        "average_wage_30_days": "3000000",
+        "verified_service_years": "3.5",
+        "retirement_benefit": "10500000.0",
+    }
+    assert set(calculation["inputs"]) == set(calculation["input_sources"])
+    assert {source["origin"] for source in calculation["input_sources"].values()} == {"evidence"}
+
+
+@pytest.mark.anyio
+async def test_db_retirement_benefit_tool_allows_zero_and_shared_source() -> None:
+    shared = "최근 3개월 임금 합계는 0원, 평균임금 산정 포함 일수는 90일, 검증된 근속연수는 0년이다"
+    result = await create_db_retirement_benefit_tool().coroutine(
+        wages_for_average_period_krw=Decimal(0),
+        included_days_for_average_wage=90,
+        verified_service_years=Decimal(0),
+        wages_for_average_period_krw_source=shared,
+        included_days_for_average_wage_source=shared,
+        verified_service_years_source=shared,
+        runtime=_retirement_runtime(shared),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"]["wages_for_average_period_krw"] == "0"
+    assert calculation["inputs"]["verified_service_years"] == "0"
+    assert calculation["outputs"]["retirement_benefit"] == "0"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "source"),
+    [
+        ("wages_for_average_period_krw_source", "연간임금총액 9,000,000원"),
+        ("wages_for_average_period_krw_source", "최근 3개월 계좌입금액 9,000,000원"),
+        ("included_days_for_average_wage_source", "휴직 90일"),
+        ("included_days_for_average_wage_source", "최근 3개월은 약 90일"),
+        ("verified_service_years_source", "근속연수 3.5년 이상"),
+        ("verified_service_years_source", "근속연수 약 3.5년"),
+        ("verified_service_years_source", "근속연수 3.5년이 아니다"),
+        ("verified_service_years_source", "배우자 근속연수 3.5년"),
+    ],
+)
+async def test_db_retirement_benefit_tool_rejects_semantic_or_non_exact_sources(
+    field: str, source: str
+) -> None:
+    inputs: dict[str, object] = {
+        "wages_for_average_period_krw": Decimal(9_000_000),
+        "included_days_for_average_wage": 90,
+        "verified_service_years": Decimal("3.5"),
+        "wages_for_average_period_krw_source": _DB_WAGES_SOURCE,
+        "included_days_for_average_wage_source": _DB_DAYS_SOURCE,
+        "verified_service_years_source": _SERVICE_YEARS_SOURCE,
+    }
+    inputs[field] = source
+    result = await create_db_retirement_benefit_tool().coroutine(
+        **inputs,
+        runtime=_retirement_runtime(*_source_values(inputs)),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("wages", "source", "expected"),
+    [
+        (Decimal(48_000_000), _DC_ANNUAL_WAGES_SOURCE, "4000000"),
+        (Decimal(0), "연간임금총액은 0원", "0"),
+    ],
+)
+async def test_dc_minimum_contribution_tool_preserves_rules_result(
+    wages: Decimal, source: str, expected: str
+) -> None:
+    result = await create_dc_minimum_employer_contribution_tool().coroutine(
+        annual_total_wages_krw=wages,
+        annual_total_wages_krw_source=source,
+        runtime=_retirement_runtime(source, chunk=True),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["outputs"]["minimum_employer_contribution"] == expected
+    assert calculation["input_sources"]["annual_total_wages_krw"]["origin"] == "evidence"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "source",
+    [
+        "최근 3개월 임금 합계 48,000,000원",
+        "월급 48,000,000원",
+        "직전연도 연간임금총액 48,000,000원",
+        "DC 누적 부담금 48,000,000원",
+        "연간임금총액 약 48,000,000원",
+        "연간임금총액 48,000,000원 이상",
+        "연간임금총액 48,000,000원이 아니다",
+    ],
+)
+async def test_dc_minimum_contribution_tool_rejects_wrong_wage_meaning(source: str) -> None:
+    result = await create_dc_minimum_employer_contribution_tool().coroutine(
+        annual_total_wages_krw=Decimal(48_000_000),
+        annual_total_wages_krw_source=source,
+        runtime=_retirement_runtime(source),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("gain_loss", "gain_source", "expected"),
+    [
+        (Decimal(1_000_000), _DC_GAIN_SOURCE, "11000000"),
+        (Decimal(0), "누적 운용손익 0원", "10000000"),
+        (Decimal(-1_000_000), "누적 운용손실 1,000,000원", "9000000"),
+        (Decimal(-11_000_000), "누적 운용손익 -11,000,000원", "-1000000"),
+    ],
+)
+async def test_dc_retirement_benefit_tool_preserves_signed_rules_result(
+    gain_loss: Decimal, gain_source: str, expected: str
+) -> None:
+    sources = (_DC_CONTRIBUTIONS_SOURCE, gain_source)
+    result = await create_dc_retirement_benefit_tool().coroutine(
+        accumulated_contributions_krw=Decimal(10_000_000),
+        investment_gain_loss_krw=gain_loss,
+        accumulated_contributions_krw_source=sources[0],
+        investment_gain_loss_krw_source=sources[1],
+        runtime=_retirement_runtime(*sources, chunk=True),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["outputs"]["retirement_benefit"] == expected
+    assert set(calculation["inputs"]) == set(calculation["input_sources"])
+
+
+@pytest.mark.anyio
+async def test_dc_retirement_benefit_tool_allows_explicit_zero_and_shared_source() -> None:
+    shared = "DC 실제 누적 부담금 0원, 누적 운용손익 0원"
+    result = await create_dc_retirement_benefit_tool().coroutine(
+        accumulated_contributions_krw=Decimal(0),
+        investment_gain_loss_krw=Decimal(0),
+        accumulated_contributions_krw_source=shared,
+        investment_gain_loss_krw_source=shared,
+        runtime=_retirement_runtime(shared),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"]["accumulated_contributions_krw"] == "0"
+    assert calculation["inputs"]["investment_gain_loss_krw"] == "0"
+    assert calculation["outputs"]["retirement_benefit"] == "0"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "source"),
+    [
+        ("accumulated_contributions_krw_source", "DC 현재 계좌잔액 10,000,000원"),
+        ("accumulated_contributions_krw_source", "DC 최소 사용자 부담금 10,000,000원"),
+        ("investment_gain_loss_krw_source", "운용수익률 -5%"),
+        ("investment_gain_loss_krw_source", "예상 운용손실 1,000,000원"),
+        ("investment_gain_loss_krw_source", "운용손실이 없다"),
+        ("investment_gain_loss_krw_source", "금액 -1,000,000원"),
+    ],
+)
+async def test_dc_retirement_benefit_tool_rejects_wrong_meaning(field: str, source: str) -> None:
+    inputs: dict[str, object] = {
+        "accumulated_contributions_krw": Decimal(10_000_000),
+        "investment_gain_loss_krw": Decimal(-1_000_000),
+        "accumulated_contributions_krw_source": _DC_CONTRIBUTIONS_SOURCE,
+        "investment_gain_loss_krw_source": "누적 운용손실 1,000,000원",
+    }
+    inputs[field] = source
+    result = await create_dc_retirement_benefit_tool().coroutine(
+        **inputs,
+        runtime=_retirement_runtime(*_source_values(inputs)),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_dc_retirement_benefit_rejects_one_unqualified_shared_number() -> None:
+    shared = "DC 퇴직급여 관련 금액 10,000,000원"
+    result = await create_dc_retirement_benefit_tool().coroutine(
+        accumulated_contributions_krw=Decimal(10_000_000),
+        investment_gain_loss_krw=Decimal(10_000_000),
+        accumulated_contributions_krw_source=shared,
+        investment_gain_loss_krw_source=shared,
+        runtime=_retirement_runtime(shared),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("annual_wages", "expected_basis", "basis_type", "transfer"),
+    [
+        (Decimal(36_000_000), "4000000", "average_wage_30_days", "14000000.0"),
+        (Decimal(60_000_000), "5000000", "annual_wage_monthly_basis", "17500000.0"),
+        (Decimal(48_000_000), "4000000", "equal", "14000000.0"),
+    ],
+)
+async def test_db_to_dc_transfer_tool_preserves_basis_selection(
+    annual_wages: Decimal, expected_basis: str, basis_type: str, transfer: str
+) -> None:
+    annual_source = f"DB→DC 전환 기준 최종 연간임금총액 {annual_wages}원"
+    sources = (_FINAL_AVERAGE_WAGE_SOURCE, annual_source, _SERVICE_YEARS_SOURCE)
+    result = await create_db_to_dc_transfer_amount_tool().coroutine(
+        final_average_wage_30_days_krw=Decimal(4_000_000),
+        final_annual_total_wages_krw=annual_wages,
+        verified_service_years=Decimal("3.5"),
+        final_average_wage_30_days_krw_source=sources[0],
+        final_annual_total_wages_krw_source=sources[1],
+        verified_service_years_source=sources[2],
+        runtime=_retirement_runtime(*sources, chunk=True),
+    )
+
+    assert isinstance(result, Command)
+    outputs = result.update["calculations"][0]["outputs"]
+    assert outputs["selected_basis"] == expected_basis
+    assert outputs["selected_basis_type"] == basis_type
+    assert outputs["transfer_amount"] == transfer
+
+
+@pytest.mark.anyio
+async def test_db_to_dc_transfer_tool_allows_fully_qualified_shared_source() -> None:
+    shared = (
+        "DB→DC 전환 기준 최종 30일 평균임금 4,000,000원, "
+        "DB→DC 전환 기준 최종 연간임금총액 48,000,000원, 검증된 근속연수 3.5년"
+    )
+    result = await create_db_to_dc_transfer_amount_tool().coroutine(
+        final_average_wage_30_days_krw=Decimal(4_000_000),
+        final_annual_total_wages_krw=Decimal(48_000_000),
+        verified_service_years=Decimal("3.5"),
+        final_average_wage_30_days_krw_source=shared,
+        final_annual_total_wages_krw_source=shared,
+        verified_service_years_source=shared,
+        runtime=_retirement_runtime(shared),
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"]["selected_basis_type"] == "equal"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "source"),
+    [
+        ("final_average_wage_30_days_krw_source", "일반 월급 4,000,000원"),
+        ("final_average_wage_30_days_krw_source", "전환 기준 평균일급 4,000,000원"),
+        ("final_average_wage_30_days_krw_source", "과거 최종 30일 평균임금 4,000,000원"),
+        ("final_annual_total_wages_krw_source", "최근 3개월 임금 60,000,000원"),
+        ("final_annual_total_wages_krw_source", "최종 연간임금총액 60,000,000원"),
+        ("verified_service_years_source", "근속연수 3~4년"),
+        ("verified_service_years_source", "근속연수 3.5년 이상"),
+    ],
+)
+async def test_db_to_dc_transfer_tool_rejects_wrong_or_non_exact_sources(
+    field: str, source: str
+) -> None:
+    inputs: dict[str, object] = {
+        "final_average_wage_30_days_krw": Decimal(4_000_000),
+        "final_annual_total_wages_krw": Decimal(60_000_000),
+        "verified_service_years": Decimal("3.5"),
+        "final_average_wage_30_days_krw_source": _FINAL_AVERAGE_WAGE_SOURCE,
+        "final_annual_total_wages_krw_source": _FINAL_ANNUAL_WAGES_SOURCE,
+        "verified_service_years_source": _SERVICE_YEARS_SOURCE,
+    }
+    inputs[field] = source
+    result = await create_db_to_dc_transfer_amount_tool().coroutine(
+        **inputs,
+        runtime=_retirement_runtime(*_source_values(inputs)),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
 
 
 @pytest.mark.anyio
