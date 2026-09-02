@@ -458,6 +458,7 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                     "calculate_dc_minimum_employer_contribution",
                     "calculate_dc_retirement_benefit",
                     "calculate_db_to_dc_transfer_amount",
+                    "calculate_executive_retirement_income_limit",
                     "submit_domain_result",
                 }
                 if domain == "tax_payout"
@@ -5507,6 +5508,9 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "calculate_dc_minimum_employer_contribution" in tax_prompt
     assert "calculate_dc_retirement_benefit" in tax_prompt
     assert "calculate_db_to_dc_transfer_amount" in tax_prompt
+    assert "calculate_executive_retirement_income_limit" in tax_prompt
+    assert "임원 해당 여부 확인 필요" in tax_prompt
+    assert "소득 구분 금액일 뿐 세액이 아니다" in tax_prompt
     assert "DB 퇴직급여와 DC 퇴직급여의 금액 비교" in tax_prompt
     assert "자동 chaining하지 않는다" in tax_prompt
     assert "재원별 인출 순서·배분만 필요" in tax_prompt
@@ -6218,6 +6222,260 @@ async def test_tax_agent_runs_pure_medical_care_limit_as_determined() -> None:
     assert result["decision"]["status"] == "determined"
     assert result["calculations"][0]["calculator_id"] == "medical_care_withdrawal_tax_limit"
     assert "의료·요양 저율과세 한도" in result["decision"]["conclusion"]
+
+
+_EXEC_LIMIT_SALARY_2012_2019 = "2012년부터 2019년까지 총급여 연평균 환산액 100,000,000원"
+_EXEC_LIMIT_MONTHS_2012_2019 = "2012년부터 2019년까지 근무월수 96개월"
+_EXEC_LIMIT_SALARY_2020_ONWARD = "2020년 이후 총급여 연평균 환산액 120,000,000원"
+_EXEC_LIMIT_MONTHS_2020_ONWARD = "2020년 이후 근무월수 60개월"
+_EXEC_LIMIT_PAYMENT = "2012년 이후 한도 적용대상 지급액 400,000,000원"
+
+
+@pytest.mark.anyio
+async def test_tax_agent_records_executive_limit_with_both_periods_and_payment() -> None:
+    content = (
+        f"{_EXEC_LIMIT_SALARY_2012_2019}; {_EXEC_LIMIT_MONTHS_2012_2019}; "
+        f"{_EXEC_LIMIT_SALARY_2020_ONWARD}; {_EXEC_LIMIT_MONTHS_2020_ONWARD}; "
+        f"{_EXEC_LIMIT_PAYMENT}"
+    )
+    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "임원 퇴직소득 한도 계산 입력 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_executive_retirement_income_limit",
+                        "args": {
+                            "average_annualized_salary_2012_2019_krw": "100000000",
+                            "average_annualized_salary_2012_2019_source": (
+                                _EXEC_LIMIT_SALARY_2012_2019
+                            ),
+                            "service_months_2012_2019": 96,
+                            "service_months_2012_2019_source": _EXEC_LIMIT_MONTHS_2012_2019,
+                            "average_annualized_salary_2020_onward_krw": "120000000",
+                            "average_annualized_salary_2020_onward_source": (
+                                _EXEC_LIMIT_SALARY_2020_ONWARD
+                            ),
+                            "service_months_2020_onward": 60,
+                            "service_months_2020_onward_source": _EXEC_LIMIT_MONTHS_2020_ONWARD,
+                            "post_2011_limit_subject_payment_krw": "400000000",
+                            "post_2011_limit_subject_payment_source": _EXEC_LIMIT_PAYMENT,
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {
+            "question": (
+                "임원 퇴직금이 4억원인데 세법상 퇴직소득으로 인정되는 금액과 초과 근로소득은 "
+                f"얼마인가요? {content}"
+            ),
+            "objective": "임원 퇴직소득 한도와 초과 근로소득 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"][0]["calculator_id"] == "executive_retirement_income_limit"
+    assert result["calculations"][0]["outputs"] == {
+        "limit_2012_2019_krw": "240000000.0",
+        "limit_2020_onward_krw": "120000000.0",
+        "post_2011_total_limit_krw": "360000000.0",
+        "retirement_income_amount_krw": "360000000.0",
+        "wage_income_excess_krw": "40000000.0",
+    }
+    conclusion = result["decision"]["conclusion"]
+    assert "2012~2019년 한도 구성액: 240000000.0 KRW" in conclusion
+    assert "2020년 이후 한도 구성액: 120000000.0 KRW" in conclusion
+    assert "임원 퇴직소득 한도 합계: 360000000.0 KRW" in conclusion
+    assert "퇴직소득 인정액: 360000000.0 KRW" in conclusion
+    assert "한도 초과 근로소득 금액: 40000000.0 KRW" in conclusion
+    assert "임의 결론" not in conclusion
+
+
+@pytest.mark.anyio
+async def test_tax_agent_computes_executive_limit_only_without_payment() -> None:
+    content = f"{_EXEC_LIMIT_SALARY_2020_ONWARD}; {_EXEC_LIMIT_MONTHS_2020_ONWARD}"
+    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "임원 퇴직소득 한도 계산 입력 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_executive_retirement_income_limit",
+                        "args": {
+                            "average_annualized_salary_2020_onward_krw": "120000000",
+                            "average_annualized_salary_2020_onward_source": (
+                                _EXEC_LIMIT_SALARY_2020_ONWARD
+                            ),
+                            "service_months_2020_onward": 60,
+                            "service_months_2020_onward_source": _EXEC_LIMIT_MONTHS_2020_ONWARD,
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {
+            "question": f"임원 퇴직소득 한도가 얼마인가요? {content}",
+            "objective": "임원 퇴직소득 한도 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    outputs = result["calculations"][0]["outputs"]
+    assert outputs["limit_2012_2019_krw"] == "0"
+    assert outputs["limit_2020_onward_krw"] == "120000000.0"
+    assert "retirement_income_amount_krw" not in outputs
+    assert "wage_income_excess_krw" not in outputs
+    conclusion = result["decision"]["conclusion"]
+    assert "퇴직소득 인정액" not in conclusion
+    assert "한도 초과 근로소득" not in conclusion
+
+
+@pytest.mark.anyio
+async def test_tax_agent_keeps_executive_limit_conditional_without_payment_for_comparison() -> None:
+    content = f"{_EXEC_LIMIT_SALARY_2012_2019}; {_EXEC_LIMIT_MONTHS_2012_2019}"
+    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "임원 퇴직소득 한도 계산 입력 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_executive_retirement_income_limit",
+                        "args": {
+                            "average_annualized_salary_2012_2019_krw": "100000000",
+                            "average_annualized_salary_2012_2019_source": (
+                                _EXEC_LIMIT_SALARY_2012_2019
+                            ),
+                            "service_months_2012_2019": 96,
+                            "service_months_2012_2019_source": _EXEC_LIMIT_MONTHS_2012_2019,
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임의 결론",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {
+            "question": (
+                "임원 퇴직소득 중 세법상 퇴직소득으로 인정되는 금액과 초과 근로소득이 "
+                f"얼마인가요? {content}"
+            ),
+            "objective": "임원 퇴직소득 인정액과 초과 근로소득 확인",
+        }
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert (
+        "2012년 이후 한도 적용대상 퇴직급여 확인 필요" in result["decision"]["missing_conditions"]
+    )
+    assert result["calculations"][0]["calculator_id"] == "executive_retirement_income_limit"
+    assert result["calculations"][0]["outputs"]["post_2011_total_limit_krw"] == "240000000.0"
 
 
 def _retirement_calculation(

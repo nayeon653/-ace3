@@ -58,6 +58,7 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | `dc_retirement_benefit` | 실제 누적 부담금과 부호 있는 누적 운용손익을 합산한 DC 퇴직급여 계산 | Issue #118; 원본 knowledge locator 미매핑 |
 | `db_to_dc_transfer_amount` | 두 월 기준 중 큰 값과 검증된 근속연수로 DB→DC 전환금액 계산 | Issue #118; 원본 knowledge locator 미매핑 |
 | `isa_transfer_deadline` | ISA 만기일 다음 날을 제1일로 세는 60 calendar days 마감일과 선택적인 전환 완료 여부 판정 | `doc4.pdf` 1~2쪽; 만기일 기준·초일불산입·입금확인 완료일 기준 |
+| `executive_retirement_income_limit` | 2012~2019년·2020년 이후 구간별 (연평균 환산 급여 × 1/10 × 근무월수/12 × 배수) 합산, 배수는 각각 3·2 | `doc45.docx` `#/texts/24`, `#/texts/25`, `#/texts/26`, `#/texts/27`, `#/texts/28`; 한도초과 근로소득 설명·예시는 `#/texts/3`, `#/texts/6` |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 | `fund_reported_var_risk` | 공시된 연환산 97.5% VaR를 추가 변환 없이 6단계 상한표에 적용 | `R2_KR5131420025.pdf` 19~20쪽 |
@@ -506,6 +507,38 @@ ISA 만기일만 확인되고 완료일이 없으면 `transfer_deadline_date` �
 명시한다. 2쪽은 60일 경과 시 전환 불가와 신청일이 기한 안이어도 입금확인일이 60일을
 넘으면 오류라는 구분을 재확인한다.
 
+### 임원 퇴직소득 한도 계산 계약
+
+**`executive_retirement_income_limit`**: 소득세법상 임원 퇴직소득 한도와 한도초과
+근로소득을 계산한다. 이는 #118의 근로자퇴직급여보장법상 실제 DB·DC 퇴직급여 금액
+산정과 다른 법령의 계산이며, #118 출력을 이 계산기의 입력으로 그대로 옮기지 않는다.
+
+**필수 입력(선택 쌍)**: `average_annualized_salary_2012_2019_krw`와
+`service_months_2012_2019`(2012년~2019년 구간), `average_annualized_salary_2020_onward_krw`와
+`service_months_2020_onward`(2020년 이후 구간)는 각 쌍이 함께 있거나 함께 생략돼야
+하며, 두 쌍 중 최소 하나는 필요하다. 근무월수는 법정 산정이 끝난 확정 정수 월수만
+받으며 날짜에서 계산하지 않는다.
+
+**선택 입력**: `post_2011_limit_subject_payment_krw`는 전체 퇴직금이 아니라 2012년
+이후 한도 적용대상으로 확인된 지급액이다.
+
+**산식**: `limit_2012_2019_krw = 급여 × 1/10 × 근무월수/12 × 3`,
+`limit_2020_onward_krw = 급여 × 1/10 × 근무월수/12 × 2`,
+`post_2011_total_limit_krw = 두 구성액 합계`다. 생략한 구간의 구성액은 0으로 계산해
+합계에 포함하되, 그 구간의 급여·근무월수 입력이나 출처를 임의로 만들지 않는다.
+
+**지급액 비교**: `post_2011_limit_subject_payment_krw`가 있으면
+`retirement_income_amount_krw = min(지급액, 총 한도)`,
+`wage_income_excess_krw = max(지급액 - 총 한도, 0)`을 추가로 반환한다. 지급액이 없으면
+두 출력 키를 생략하며 `null`로 채우지 않는다. 지급액이 한도와 같으면 초과 근로소득은
+0이다.
+
+**반올림과 책임 경계**: 문서에 없는 반올림·절사를 적용하지 않는다. 임원 해당 여부,
+어느 법령이 적용되는지와 근무월수에 포함되는 기간 판단은 Agent 책임이며 Rules는
+검증된 수치만으로 결정론적 산술을 수행한다. `wage_income_excess_krw`는 소득 구분
+금액일 뿐 근로소득세 세액이 아니며, 이 계산기는 최종 근로소득세·퇴직소득세를
+계산하지 않는다.
+
 ## 실행 제한과 오류
 
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
@@ -536,7 +569,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 
 | 소비자 | 허용 계산기 |
 |---|---|
-| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown`, `db_retirement_benefit`, `dc_minimum_employer_contribution`, `dc_retirement_benefit`, `db_to_dc_transfer_amount` |
+| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown`, `db_retirement_benefit`, `dc_minimum_employer_contribution`, `dc_retirement_benefit`, `db_to_dc_transfer_amount`, `executive_retirement_income_limit` |
 | Product Agent | `fund_standard_price`, `fund_var_risk`, `fund_reported_var_risk`, `fund_frontend_sales_fee`, `fund_deferred_sales_fee`, `fund_redemption_fee` |
 | Policy Agent | `dc_medical_withdrawal_threshold`, `isa_transfer_deadline` |
 | Main Supervisor | 직접 호출 금지 |

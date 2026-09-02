@@ -48,6 +48,9 @@ CALCULATE_FUND_FRONTEND_SALES_FEE_TOOL_NAME = "calculate_fund_frontend_sales_fee
 CALCULATE_FUND_DEFERRED_SALES_FEE_TOOL_NAME = "calculate_fund_deferred_sales_fee"
 CALCULATE_FUND_REDEMPTION_FEE_TOOL_NAME = "calculate_fund_redemption_fee"
 CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME = "calculate_isa_transfer_deadline"
+CALCULATE_EXECUTIVE_RETIREMENT_INCOME_LIMIT_TOOL_NAME = (
+    "calculate_executive_retirement_income_limit"
+)
 
 
 def create_pension_withdrawal_limit_tool() -> BaseTool:
@@ -1037,6 +1040,155 @@ def create_pension_withdrawal_tax_breakdown_tool() -> BaseTool:
         )
 
     return calculate_pension_withdrawal_tax_breakdown
+
+
+def create_executive_retirement_income_limit_tool() -> BaseTool:
+    """Tax/Payout Agent용 임원 퇴직소득 한도 계산 Tool을 만든다."""
+
+    @tool(
+        CALCULATE_EXECUTIVE_RETIREMENT_INCOME_LIMIT_TOOL_NAME,
+        description=(
+            "법정 산정이 끝난 2012~2019년과 2020년 이후 근무기간별 평균 연환산 급여와 "
+            "근무월수로 임원 퇴직소득 한도를 계산하고, 2012년 이후 한도 적용대상 지급액이 "
+            "있으면 인정 퇴직소득과 한도초과 근로소득을 나눈다. 사용자 질문 또는 검증된 "
+            "검색 근거에 명시된 입력만 사용하며, 선택 입력은 값과 출처를 함께 전달하거나 "
+            "함께 생략한다."
+        ),
+    )
+    async def calculate_executive_retirement_income_limit(
+        runtime: ToolRuntime[ExecutionContext, Any],
+        average_annualized_salary_2012_2019_krw: Annotated[
+            Decimal | None,
+            Field(
+                ge=0,
+                description=(
+                    "2019년 12월 31일부터 소급 3년(또는 실제 근무기간) 총급여 연평균 환산액(원)"
+                ),
+            ),
+        ] = None,
+        average_annualized_salary_2012_2019_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description=(
+                    "2012~2019년 평균 연환산 급여 하나만 포함하며 질문 또는 검색 원문에 "
+                    "그대로 있는 구절"
+                ),
+            ),
+        ] = None,
+        service_months_2012_2019: Annotated[
+            int | None,
+            Field(
+                ge=0,
+                description="법정 산정이 끝난 2012년 1월 1일부터 2019년 12월 31일까지의 근무월수",
+            ),
+        ] = None,
+        service_months_2012_2019_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="2012~2019년 근무월수 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ] = None,
+        average_annualized_salary_2020_onward_krw: Annotated[
+            Decimal | None,
+            Field(
+                ge=0,
+                description="퇴직일부터 소급 3년(또는 실제 근무기간) 총급여 연평균 환산액(원)",
+            ),
+        ] = None,
+        average_annualized_salary_2020_onward_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description=(
+                    "2020년 이후 평균 연환산 급여 하나만 포함하며 질문 또는 검색 원문에 "
+                    "그대로 있는 구절"
+                ),
+            ),
+        ] = None,
+        service_months_2020_onward: Annotated[
+            int | None,
+            Field(ge=0, description="법정 산정이 끝난 2020년 1월 1일 이후 근무월수"),
+        ] = None,
+        service_months_2020_onward_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description="2020년 이후 근무월수 하나만 포함하며 질문 또는 검색 원문에 그대로 있는 구절",
+            ),
+        ] = None,
+        post_2011_limit_subject_payment_krw: Annotated[
+            Decimal | None,
+            Field(
+                ge=0,
+                description="전체 퇴직금이 아니라 2012년 이후 한도 적용대상으로 확인된 지급액(원)",
+            ),
+        ] = None,
+        post_2011_limit_subject_payment_source: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=120,
+                description=(
+                    "2012년 이후 한도 적용대상 지급액 하나만 포함하며 질문 또는 검색 원문에 "
+                    "그대로 있는 구절"
+                ),
+            ),
+        ] = None,
+    ) -> Command | str:
+        optional_entries: tuple[tuple[str, Any, str | None], ...] = (
+            (
+                "average_annualized_salary_2012_2019_krw",
+                average_annualized_salary_2012_2019_krw,
+                average_annualized_salary_2012_2019_source,
+            ),
+            (
+                "service_months_2012_2019",
+                service_months_2012_2019,
+                service_months_2012_2019_source,
+            ),
+            (
+                "average_annualized_salary_2020_onward_krw",
+                average_annualized_salary_2020_onward_krw,
+                average_annualized_salary_2020_onward_source,
+            ),
+            (
+                "service_months_2020_onward",
+                service_months_2020_onward,
+                service_months_2020_onward_source,
+            ),
+            (
+                "post_2011_limit_subject_payment_krw",
+                post_2011_limit_subject_payment_krw,
+                post_2011_limit_subject_payment_source,
+            ),
+        )
+        inputs: dict[str, Any] = {}
+        input_sources: dict[str, str] = {}
+        for field, value, source in optional_entries:
+            if (value is None) != (source is None):
+                return json.dumps(
+                    {"error": "선택 입력값과 출처는 함께 제공해야 합니다."},
+                    ensure_ascii=False,
+                )
+            if value is not None:
+                inputs[field] = value
+                input_sources[field] = cast(str, source)
+
+        return _execute_calculation(
+            calculator_id="executive_retirement_income_limit",
+            inputs=inputs,
+            input_sources=input_sources,
+            tool_name=CALCULATE_EXECUTIVE_RETIREMENT_INCOME_LIMIT_TOOL_NAME,
+            runtime=runtime,
+        )
+
+    return calculate_executive_retirement_income_limit
 
 
 def create_fund_standard_price_tool() -> BaseTool:

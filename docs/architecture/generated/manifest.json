@@ -17,8 +17,8 @@
       "mermaid_sha256": "c5fb9bf0fbef5436ca82cd7a9ecb329d4935d8e92f84595d9c01c65c53ef72f6"
     },
     "tax-payout.png": {
-      "image_sha256": "ad892cb671d6c117b7118c855ed5b0e9879f25d0fd0b2ea3bbd7ad944150ea36",
-      "mermaid_sha256": "c16dcf386e3862d5b2d427874a3ad158db68a4de82dd23a6688a704a45a1f68a"
+      "image_sha256": "89f1edb52f1e4c0f42f0eb034e714a4c5381370f0ae607593bd447c655ee4499",
+      "mermaid_sha256": "6cc258bc97096e7804b973e2307a1acc13e362d80638f910d33d5257f669674a"
     }
   },
   "renderer": "langchain-core MermaidDrawMethod.API",

@@ -3,6 +3,9 @@
 from pension_agent.rules.calculators.deferred_retirement_withdrawal_tax import (
     DEFERRED_RETIREMENT_WITHDRAWAL_TAX,
 )
+from pension_agent.rules.calculators.executive_retirement_income_limit import (
+    EXECUTIVE_RETIREMENT_INCOME_LIMIT,
+)
 from pension_agent.rules.calculators.fund_fees import (
     FUND_DEFERRED_SALES_FEE,
     FUND_FRONTEND_SALES_FEE,
@@ -52,6 +55,7 @@ CALCULATORS = {
     "dc_retirement_benefit": DC_RETIREMENT_BENEFIT,
     "deferred_retirement_withdrawal_tax": DEFERRED_RETIREMENT_WITHDRAWAL_TAX,
     "dc_medical_withdrawal_threshold": DC_MEDICAL_WITHDRAWAL_THRESHOLD,
+    "executive_retirement_income_limit": EXECUTIVE_RETIREMENT_INCOME_LIMIT,
     "fund_deferred_sales_fee": FUND_DEFERRED_SALES_FEE,
     "fund_frontend_sales_fee": FUND_FRONTEND_SALES_FEE,
     "fund_redemption_fee": FUND_REDEMPTION_FEE,
@@ -80,6 +84,7 @@ __all__ = [
     "DC_MINIMUM_EMPLOYER_CONTRIBUTION",
     "DC_RETIREMENT_BENEFIT",
     "DEFERRED_RETIREMENT_WITHDRAWAL_TAX",
+    "EXECUTIVE_RETIREMENT_INCOME_LIMIT",
     "FUND_DEFERRED_SALES_FEE",
     "FUND_FRONTEND_SALES_FEE",
     "FUND_REDEMPTION_FEE",

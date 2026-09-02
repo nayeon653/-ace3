@@ -30,6 +30,7 @@ from pension_agent.agent.calculation import (
     CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
     CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
     CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
+    CALCULATE_EXECUTIVE_RETIREMENT_INCOME_LIMIT_TOOL_NAME,
     CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
     CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
     CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
@@ -47,6 +48,7 @@ from pension_agent.agent.calculation import (
     create_dc_minimum_employer_contribution_tool,
     create_dc_retirement_benefit_tool,
     create_deferred_retirement_withdrawal_tax_tool,
+    create_executive_retirement_income_limit_tool,
     create_medical_care_withdrawal_tax_breakdown_tool,
     create_medical_care_withdrawal_tax_limit_tool,
     create_non_pension_withdrawal_tax_tool,
@@ -124,6 +126,9 @@ _TRANSFER_FINAL_AVERAGE_WAGE_MISSING_CONDITION = "전환 기준 최종 30일 평
 _TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION = "전환 기준 최종 연간임금총액 확인 필요"
 _RETIREMENT_INPUT_SOURCE_MISSING_CONDITION = "검증된 퇴직급여 계산 입력 출처 확인 필요"
 _RETIREMENT_AMOUNT_INTENT_PATTERN = re.compile(r"계산|얼마|금액|급여액|부담금")
+_EXECUTIVE_RETIREMENT_LIMIT_CALCULATOR_ID = "executive_retirement_income_limit"
+_EXECUTIVE_PAYMENT_MISSING_CONDITION = "2012년 이후 한도 적용대상 퇴직급여 확인 필요"
+_EXECUTIVE_PAYMENT_INTENT_PATTERN = re.compile(r"인정|초과")
 _COMPARISON_INTENT_PATTERN = re.compile(r"비교|차이|대비|각각")
 _NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
 _NUMERIC_CLAIM_REMOVED_WARNING = "근거 없이 제출된 확정 수치는 결과에서 제거했습니다."
@@ -238,6 +243,10 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
                 "DB→DC 전환금액은 각각 대응하는 calculate_db_retirement_benefit, "
                 "calculate_dc_minimum_employer_contribution, calculate_dc_retirement_benefit, "
                 "calculate_db_to_dc_transfer_amount Tool을 사용하고 필수 입력을 0으로 채우지 마세요. "
+                "임원 퇴직소득 한도나 한도초과 근로소득 계산이면 "
+                "calculate_executive_retirement_income_limit Tool을 사용하되, 이는 DB·DC "
+                "퇴직급여 금액 산정과 다른 소득세법상 한도 계산이므로 그 결과를 서로 대신 "
+                "사용하지 마세요. "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
         else:
@@ -343,6 +352,7 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
                 CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
                 CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
                 CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME,
+                CALCULATE_EXECUTIVE_RETIREMENT_INCOME_LIMIT_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
@@ -413,6 +423,7 @@ def create_tax_payout_react_agent(
     dc_minimum_contribution_tool = create_dc_minimum_employer_contribution_tool()
     dc_retirement_benefit_tool = create_dc_retirement_benefit_tool()
     db_to_dc_transfer_tool = create_db_to_dc_transfer_amount_tool()
+    executive_retirement_limit_tool = create_executive_retirement_income_limit_tool()
     graph = create_agent(
         model=model,
         tools=(
@@ -433,6 +444,7 @@ def create_tax_payout_react_agent(
             dc_minimum_contribution_tool,
             dc_retirement_benefit_tool,
             db_to_dc_transfer_tool,
+            executive_retirement_limit_tool,
             _create_tax_payout_result_tool(),
         ),
         system_prompt=system_prompt,
@@ -526,6 +538,11 @@ def create_tax_payout_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=db_to_dc_transfer_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=executive_retirement_limit_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),
@@ -801,6 +818,11 @@ def _build_tax_payout_result(
                 status = "conditional"
             if _MEDICAL_CARE_EXCESS_MISSING_CONDITION not in normalized_missing:
                 normalized_missing.append(_MEDICAL_CARE_EXCESS_MISSING_CONDITION)
+        if _has_executive_limit_without_payment_for_comparison_question(calculations, question):
+            if status == "determined":
+                status = "conditional"
+            if _EXECUTIVE_PAYMENT_MISSING_CONDITION not in normalized_missing:
+                normalized_missing.append(_EXECUTIVE_PAYMENT_MISSING_CONDITION)
     elif status != "not_applicable":
         status, normalized_conclusion, normalized_missing, normalized_warnings = (
             _apply_numeric_claim_guard(
@@ -995,6 +1017,18 @@ def _has_unresolved_medical_care_excess(calculations: list[CalculationResult]) -
         ):
             return True
     return False
+
+
+def _has_executive_limit_without_payment_for_comparison_question(
+    calculations: list[CalculationResult], question: str
+) -> bool:
+    """인정액·초과액을 묻는 질문인데 한도만 계산되고 지급액 비교가 없는지 확인한다."""
+
+    return bool(_EXECUTIVE_PAYMENT_INTENT_PATTERN.search(question)) and any(
+        calculation["calculator_id"] == _EXECUTIVE_RETIREMENT_LIMIT_CALCULATOR_ID
+        and "retirement_income_amount_krw" not in calculation["outputs"]
+        for calculation in calculations
+    )
 
 
 def _apply_numeric_claim_guard(

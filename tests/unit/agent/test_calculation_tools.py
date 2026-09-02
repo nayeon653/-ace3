@@ -15,6 +15,7 @@ from pension_agent.agent.calculation import (
     create_dc_minimum_employer_contribution_tool,
     create_dc_retirement_benefit_tool,
     create_deferred_retirement_withdrawal_tax_tool,
+    create_executive_retirement_income_limit_tool,
     create_fund_deferred_sales_fee_tool,
     create_fund_frontend_sales_fee_tool,
     create_fund_redemption_fee_tool,
@@ -2168,6 +2169,162 @@ async def test_db_to_dc_transfer_tool_rejects_wrong_or_non_exact_sources(
     }
     inputs[field] = source
     result = await create_db_to_dc_transfer_amount_tool().coroutine(
+        **inputs,
+        runtime=_retirement_runtime(*_source_values(inputs)),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+_EXEC_SALARY_2012_2019_SOURCE = "2012년부터 2019년까지 총급여 연평균 환산액 100,000,000원"
+_EXEC_MONTHS_2012_2019_SOURCE = "2012년부터 2019년까지 근무월수 96개월"
+_EXEC_SALARY_2020_ONWARD_SOURCE = "2020년 이후 총급여 연평균 환산액 120,000,000원"
+_EXEC_MONTHS_2020_ONWARD_SOURCE = "2020년 이후 근무월수 60개월"
+_EXEC_PAYMENT_SOURCE = "2012년 이후 한도 적용대상 지급액 400,000,000원"
+
+
+@pytest.mark.anyio
+async def test_executive_retirement_income_limit_tool_sums_both_periods_and_splits_payment() -> (
+    None
+):
+    sources = (
+        _EXEC_SALARY_2012_2019_SOURCE,
+        _EXEC_MONTHS_2012_2019_SOURCE,
+        _EXEC_SALARY_2020_ONWARD_SOURCE,
+        _EXEC_MONTHS_2020_ONWARD_SOURCE,
+        _EXEC_PAYMENT_SOURCE,
+    )
+    result = await create_executive_retirement_income_limit_tool().coroutine(
+        average_annualized_salary_2012_2019_krw=Decimal(100_000_000),
+        average_annualized_salary_2012_2019_source=_EXEC_SALARY_2012_2019_SOURCE,
+        service_months_2012_2019=96,
+        service_months_2012_2019_source=_EXEC_MONTHS_2012_2019_SOURCE,
+        average_annualized_salary_2020_onward_krw=Decimal(120_000_000),
+        average_annualized_salary_2020_onward_source=_EXEC_SALARY_2020_ONWARD_SOURCE,
+        service_months_2020_onward=60,
+        service_months_2020_onward_source=_EXEC_MONTHS_2020_ONWARD_SOURCE,
+        post_2011_limit_subject_payment_krw=Decimal(400_000_000),
+        post_2011_limit_subject_payment_source=_EXEC_PAYMENT_SOURCE,
+        runtime=_retirement_runtime(*sources, chunk=True),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "executive_retirement_income_limit"
+    assert calculation["outputs"] == {
+        "limit_2012_2019_krw": "240000000.0",
+        "limit_2020_onward_krw": "120000000.0",
+        "post_2011_total_limit_krw": "360000000.0",
+        "retirement_income_amount_krw": "360000000.0",
+        "wage_income_excess_krw": "40000000.0",
+    }
+    assert calculation["input_sources"]["post_2011_limit_subject_payment_krw"] == {
+        "origin": "evidence",
+        "text": _EXEC_PAYMENT_SOURCE,
+        "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+    }
+
+
+@pytest.mark.anyio
+async def test_executive_retirement_income_limit_tool_allows_single_period() -> None:
+    result = await create_executive_retirement_income_limit_tool().coroutine(
+        average_annualized_salary_2020_onward_krw=Decimal(120_000_000),
+        average_annualized_salary_2020_onward_source=_EXEC_SALARY_2020_ONWARD_SOURCE,
+        service_months_2020_onward=60,
+        service_months_2020_onward_source=_EXEC_MONTHS_2020_ONWARD_SOURCE,
+        runtime=_retirement_runtime(
+            _EXEC_SALARY_2020_ONWARD_SOURCE, _EXEC_MONTHS_2020_ONWARD_SOURCE, chunk=True
+        ),
+    )
+
+    assert isinstance(result, Command)
+    outputs = result.update["calculations"][0]["outputs"]
+    assert outputs["limit_2012_2019_krw"] == "0"
+    assert outputs["limit_2020_onward_krw"] == "120000000.0"
+    assert "retirement_income_amount_krw" not in outputs
+    assert "wage_income_excess_krw" not in outputs
+
+
+@pytest.mark.anyio
+async def test_executive_retirement_income_limit_tool_requires_value_and_source_together() -> None:
+    result = await create_executive_retirement_income_limit_tool().coroutine(
+        average_annualized_salary_2012_2019_krw=Decimal(100_000_000),
+        average_annualized_salary_2012_2019_source=None,
+        service_months_2012_2019=96,
+        service_months_2012_2019_source=_EXEC_MONTHS_2012_2019_SOURCE,
+        runtime=_retirement_runtime(_EXEC_MONTHS_2012_2019_SOURCE),
+    )
+
+    assert isinstance(result, str)
+    assert "함께" in result
+
+
+@pytest.mark.anyio
+async def test_executive_retirement_income_limit_tool_surfaces_rules_period_pairing_error() -> None:
+    """급여만 있고 근무월수 전체가 생략되면 Rules의 기간 쌍 검증 오류가 그대로 전달된다."""
+
+    result = await create_executive_retirement_income_limit_tool().coroutine(
+        average_annualized_salary_2012_2019_krw=Decimal(100_000_000),
+        average_annualized_salary_2012_2019_source=_EXEC_SALARY_2012_2019_SOURCE,
+        runtime=_retirement_runtime(_EXEC_SALARY_2012_2019_SOURCE),
+    )
+
+    assert isinstance(result, str)
+    assert "error" in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "source"),
+    [
+        (
+            "average_annualized_salary_2012_2019_source",
+            "2020년 이후 총급여 연평균 환산액 100,000,000원",
+        ),
+        (
+            "average_annualized_salary_2012_2019_source",
+            "2012년부터 2019년까지 월급 100,000,000원",
+        ),
+        (
+            "average_annualized_salary_2012_2019_source",
+            "2012년부터 2019년까지 퇴직급여 연평균 환산액 100,000,000원",
+        ),
+        (
+            "service_months_2012_2019_source",
+            "2012년부터 2019년까지 근무기간 8년",
+        ),
+        (
+            "service_months_2012_2019_source",
+            "2012년부터 2019년까지 근무월수 약 96개월",
+        ),
+        (
+            "service_months_2012_2019_source",
+            "2020년 이후 근무월수 96개월",
+        ),
+        (
+            "post_2011_limit_subject_payment_source",
+            "퇴직금 400,000,000원",
+        ),
+        (
+            "post_2011_limit_subject_payment_source",
+            "2012년 이후 한도 적용대상 지급액 최대 400,000,000원",
+        ),
+    ],
+)
+async def test_executive_retirement_income_limit_tool_rejects_wrong_or_non_exact_sources(
+    field: str, source: str
+) -> None:
+    inputs: dict[str, object] = {
+        "average_annualized_salary_2012_2019_krw": Decimal(100_000_000),
+        "average_annualized_salary_2012_2019_source": _EXEC_SALARY_2012_2019_SOURCE,
+        "service_months_2012_2019": 96,
+        "service_months_2012_2019_source": _EXEC_MONTHS_2012_2019_SOURCE,
+        "post_2011_limit_subject_payment_krw": Decimal(400_000_000),
+        "post_2011_limit_subject_payment_source": _EXEC_PAYMENT_SOURCE,
+    }
+    inputs[field] = source
+    result = await create_executive_retirement_income_limit_tool().coroutine(
         **inputs,
         runtime=_retirement_runtime(*_source_values(inputs)),
     )
