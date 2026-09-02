@@ -126,6 +126,7 @@ graph TD;
 	PolicyModelCallLimit\2eafter_model("PolicyModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
 	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model("ToolCallLimitMiddleware[calculate_dc_medical_withdrawal_threshold].after_model")
+	ToolCallLimitMiddleware\5bcalculate_isa_transfer_deadline\5d\2eafter_model("ToolCallLimitMiddleware[calculate_isa_transfer_deadline].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	EnforcePolicyToolSequence\2eafter_model("EnforcePolicyToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
@@ -141,9 +142,11 @@ graph TD;
 	SinglePolicySubmitPerModelCall\2eafter_model --> RequirePolicyTool\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_isa_transfer_deadline\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_isa_transfer_deadline\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> PolicyModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_isa_transfer_deadline\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
 	__start__ --> CompletePolicyResult\2ebefore_model;
 	model --> EnforcePolicyToolSequence\2eafter_model;
