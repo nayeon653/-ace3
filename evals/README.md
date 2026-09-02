@@ -15,6 +15,15 @@
 실제 응답은 문항 ID·질문·답변·검색 근거(`retrieved_context`)가 포함된 결과 파일을 사용한다.
 평가 전에 ID와 질문을 대조하고, 누락·중복·실행 실패는 별도로 기록한다.
 
+## Tax/Payout 구조적 회귀 fixture
+
+`evals/fixtures/tax_payout_hardening.jsonl`은 위 Markdown gold-set과 별도로, Tax/Payout
+Agent의 retrieval 정책·calculator selection·evidence 취급을 실제 HCX/Qdrant eval 이전에
+구조적으로 점검하기 위한 JSONL fixture다. 각 줄은 `id`, `category`, `question`,
+`expected_domains`, `expected_calculator_id`, `expected_search`, `expected_status`,
+`forbidden_tools`, `evidence_expectation`, `notes` 필드를 가진 하나의 케이스다. 이 fixture는
+실제 HCX/Qdrant 연결 eval에서도 동일한 케이스 세트로 재사용할 수 있도록 설계됐다.
+
 ## 공통 채점 기준
 
 - 정답과 표현·문장 순서가 달라도 핵심 의미와 조건이 같으면 인정한다.
