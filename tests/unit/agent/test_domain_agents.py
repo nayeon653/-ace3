@@ -405,6 +405,9 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                 {
                     "search_documents",
                     "calculate_pension_withdrawal_limit",
+                    "calculate_pension_annual_limit_installment",
+                    "calculate_pension_period_installment",
+                    "calculate_pension_unit_installment",
                     "calculate_pension_tax_credit",
                     "calculate_pension_income_tax",
                     "calculate_non_pension_withdrawal_tax",
@@ -2003,7 +2006,10 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
     assert "1200000.0 KRW" in result["decision"]["conclusion"]
     assert "999" not in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
-    assert result["calculations"][0]["outputs"] == {"withdrawal_limit": "1200000.0"}
+    assert result["calculations"][0]["outputs"] == {
+        "withdrawal_limit": "1200000.0",
+        "limit_applies": True,
+    }
     assert result["calculations"][0]["input_sources"]["account_valuation_krw"] == {
         "origin": "evidence",
         "text": "평가액 1천만원",
@@ -2625,6 +2631,161 @@ def test_tax_agent_keeps_exact_pension_tax_comparison_pair_in_one_model_call() -
         "calculate_pension_income_tax",
         "calculate_non_pension_withdrawal_tax",
     ]
+
+
+def test_tax_agent_keeps_only_first_pension_installment_tool() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_pension_annual_limit_installment",
+            "calculate_pension_period_installment",
+            "calculate_pension_unit_installment",
+        ],
+    )
+
+    assert kept == ["calculate_pension_annual_limit_installment"]
+
+
+def test_tax_agent_allows_only_submit_after_pension_installment_calculation() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[{"calculator_id": "pension_annual_limit_installment"}],
+        tool_names=[
+            "calculate_pension_period_installment",
+            "calculate_pension_unit_installment",
+            "submit_domain_result",
+        ],
+    )
+
+    assert kept == ["submit_domain_result"]
+
+
+@pytest.mark.anyio
+async def test_tax_agent_runs_pension_annual_limit_installment_path() -> None:
+    content = "올해 남은 연금수령한도 120만원; 올해 잔여 지급횟수 12회"
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.PENSION_REFERENCE,
+                    title="당해연도 분할지급",
+                    content=content,
+                )
+            ],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "당해연도 분할지급 근거 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_annual_limit_installment",
+                        "args": {
+                            "remaining_annual_limit_krw": "1200000",
+                            "remaining_payments_in_year": 12,
+                            "remaining_annual_limit_source": ("올해 남은 연금수령한도 120만원"),
+                            "remaining_payments_in_year_source": ("올해 잔여 지급횟수 12회"),
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "당해연도 회당 지급액을 계산했습니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": "올해 회당 얼마씩 받아?", "objective": "회당 지급액 계산"})
+
+    assert result["decision"]["status"] == "determined"
+    assert "당해연도 잔여한도 기준 회당 지급액: 100000 KRW" in result["decision"]["conclusion"]
+    assert result["calculations"][0]["calculator_id"] == ("pension_annual_limit_installment")
+
+
+def test_pension_withdrawal_limit_presentation_distinguishes_not_applied() -> None:
+    applied = format_calculation_summary(
+        [
+            {
+                "calculator_id": "pension_withdrawal_limit",
+                "inputs": {"account_valuation_krw": "10000000", "pension_year": 10},
+                "input_sources": {},
+                "outputs": {"withdrawal_limit": "12000000", "limit_applies": True},
+                "units": {"withdrawal_limit": "KRW"},
+                "warnings": [],
+            }
+        ]
+    )
+    not_applied = format_calculation_summary(
+        [
+            {
+                "calculator_id": "pension_withdrawal_limit",
+                "inputs": {"pension_year": 11},
+                "input_sources": {},
+                "outputs": {"withdrawal_limit": None, "limit_applies": False},
+                "units": {"withdrawal_limit": "KRW"},
+                "warnings": [],
+            }
+        ]
+    )
+
+    assert "연금수령한도: 12000000 KRW" in applied
+    assert "11년차 이후로 연금수령한도가 적용되지 않습니다" in not_applied
+    assert "0원" not in not_applied
+    assert "None" not in not_applied
+
+
+@pytest.mark.parametrize(
+    ("calculator_id", "label"),
+    [
+        ("pension_annual_limit_installment", "당해연도 잔여한도 기준 회당 지급액"),
+        ("pension_period_installment", "현재 평가액·전체 잔여회차 기준 회당 지급액"),
+        ("pension_unit_installment", "잔고좌수·1,000좌당 기준가격 기준 회당 지급액"),
+    ],
+)
+def test_pension_installment_presentations(calculator_id: str, label: str) -> None:
+    summary = format_calculation_summary(
+        [
+            {
+                "calculator_id": calculator_id,
+                "inputs": {},
+                "input_sources": {},
+                "outputs": {"installment_krw": "0.3333333333333333333333333333"},
+                "units": {"installment_krw": "KRW"},
+                "warnings": [],
+            }
+        ]
+    )
+
+    assert f"{label}: 0.3333333333333333333333333333 KRW" in summary
 
 
 @pytest.mark.anyio
@@ -4331,6 +4492,13 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "{{PRODUCT_CATALOG_JSON}}" not in product_prompt
     tax_prompt = load_tax_payout_agent_prompt()
     assert "calculate_pension_withdrawal_limit" in tax_prompt
+    assert "calculate_pension_annual_limit_installment" in tax_prompt
+    assert "calculate_pension_period_installment" in tax_prompt
+    assert "calculate_pension_unit_installment" in tax_prompt
+    assert "올해 남은 연금수령한도" in tax_prompt
+    assert "전체 기간 잔여회차" in tax_prompt
+    assert "1,000좌당 기준가격" in tax_prompt
+    assert "11년차 이후에는 연금수령한도가 적용되지 않으며" in tax_prompt
     assert "calculate_pension_tax_credit" in tax_prompt
     assert "지원하지 않는 세금, 금액, 세율이나 한도를 직접 계산하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt

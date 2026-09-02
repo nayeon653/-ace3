@@ -26,14 +26,20 @@ from pydantic import Field, ValidationError
 from pension_agent.agent.calculation import (
     CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+    CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME,
     CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
+    CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
     CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
+    CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
     calculation_evidence_chunk_ids,
     create_deferred_retirement_withdrawal_tax_tool,
     create_non_pension_withdrawal_tax_tool,
+    create_pension_annual_limit_installment_tool,
     create_pension_income_tax_tool,
+    create_pension_period_installment_tool,
     create_pension_tax_credit_tool,
+    create_pension_unit_installment_tool,
     create_pension_withdrawal_limit_tool,
     format_calculation_summary,
 )
@@ -157,6 +163,11 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
         elif state.get("search_result") is not None:
             instruction = (
                 "연금수령한도 계산이면 calculate_pension_withdrawal_limit Tool을, "
+                "올해 남은 한도의 회당 지급액이면 "
+                "calculate_pension_annual_limit_installment Tool을, 현재 평가액의 전체 "
+                "잔여회차별 지급액이면 calculate_pension_period_installment Tool을, "
+                "잔고좌수와 기준가격의 회당 지급액이면 "
+                "calculate_pension_unit_installment Tool을, "
                 "연금계좌 세액공제 계산이면 calculate_pension_tax_credit Tool을 호출하고, "
                 "세액공제 원금·운용수익의 연금수령 세금이면 "
                 "calculate_pension_income_tax Tool을, 같은 재원의 연금외수령 세금이면 "
@@ -236,6 +247,9 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
         else:
             allowed_tools = (
                 CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+                CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME,
+                CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
+                CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
                 CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
                 CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
                 CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
@@ -291,6 +305,9 @@ def create_tax_payout_react_agent(
     """TaxPayout 패키지가 소유하는 ReAct graph를 만든다."""
 
     calculation_tool = create_pension_withdrawal_limit_tool()
+    annual_limit_installment_tool = create_pension_annual_limit_installment_tool()
+    period_installment_tool = create_pension_period_installment_tool()
+    unit_installment_tool = create_pension_unit_installment_tool()
     tax_credit_tool = create_pension_tax_credit_tool()
     pension_income_tax_tool = create_pension_income_tax_tool()
     non_pension_withdrawal_tax_tool = create_non_pension_withdrawal_tax_tool()
@@ -300,6 +317,9 @@ def create_tax_payout_react_agent(
         tools=(
             _create_tax_payout_search_tool(search_service),
             calculation_tool,
+            annual_limit_installment_tool,
+            period_installment_tool,
+            unit_installment_tool,
             tax_credit_tool,
             pension_income_tax_tool,
             non_pension_withdrawal_tax_tool,
@@ -322,6 +342,21 @@ def create_tax_payout_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=calculation_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=annual_limit_installment_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=period_installment_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=unit_installment_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),

@@ -27,7 +27,10 @@ def test_calculate_returns_normalized_result() -> None:
         "account_valuation_krw": Decimal(100000000),
         "pension_year": 1,
     }
-    assert result.outputs == {"withdrawal_limit": Decimal("12000000.0")}
+    assert result.outputs == {
+        "withdrawal_limit": Decimal("12000000.0"),
+        "limit_applies": True,
+    }
     assert result.units == {"withdrawal_limit": "KRW"}
 
 
