@@ -3,12 +3,14 @@
 from pension_agent.agent.calculation.input_sources import calculation_evidence_chunk_ids
 from pension_agent.agent.calculation.presentation import format_calculation_summary
 from pension_agent.agent.calculation.tools import (
+    CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME,
     CALCULATE_FUND_VAR_RISK_TOOL_NAME,
     CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
     CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+    create_deferred_retirement_withdrawal_tax_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
     create_non_pension_withdrawal_tax_tool,
@@ -18,6 +20,7 @@ from pension_agent.agent.calculation.tools import (
 )
 
 __all__ = [
+    "CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME",
     "CALCULATE_FUND_STANDARD_PRICE_TOOL_NAME",
     "CALCULATE_FUND_VAR_RISK_TOOL_NAME",
     "CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME",
@@ -25,6 +28,7 @@ __all__ = [
     "CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME",
     "CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME",
     "calculation_evidence_chunk_ids",
+    "create_deferred_retirement_withdrawal_tax_tool",
     "create_fund_standard_price_tool",
     "create_fund_var_risk_tool",
     "create_non_pension_withdrawal_tax_tool",

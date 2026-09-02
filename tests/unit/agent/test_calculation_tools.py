@@ -7,6 +7,7 @@ import pytest
 from langgraph.types import Command
 
 from pension_agent.agent.calculation import (
+    create_deferred_retirement_withdrawal_tax_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
     create_non_pension_withdrawal_tax_tool,
@@ -800,6 +801,242 @@ def test_pension_tax_credit_rejects_partially_matching_source(
     )
 
     assert result is None
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_calculates_pension_and_preserves_sources() -> None:
+    question = (
+        "이연퇴직소득을 연금으로 수령; 실제수령연차 10년차; "
+        "해당 인출분에 배분된 이연퇴직소득세 100만원"
+    )
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="이연퇴직소득을 연금으로 수령",
+        runtime=_runtime(question=question),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="실제수령연차 10년차",
+        allocated_deferred_retirement_tax_krw=Decimal(1_000_000),
+        allocated_deferred_retirement_tax_krw_source=(
+            "해당 인출분에 배분된 이연퇴직소득세 100만원"
+        ),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "deferred_retirement_withdrawal_tax"
+    assert calculation["outputs"] == {
+        "payable_ratio_percent": "70.00",
+        "reduction_ratio_percent": "30.00",
+        "tax_payable_krw": "700000.00",
+        "tax_reduction_krw": "300000.00",
+    }
+    assert calculation["input_sources"]["allocated_deferred_retirement_tax_krw"] == {
+        "origin": "question",
+        "text": "해당 인출분에 배분된 이연퇴직소득세 100만원",
+        "chunk_id": None,
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("receipt_year", "payable_ratio"),
+    [(11, "60.00"), (21, "50.00")],
+)
+async def test_deferred_retirement_tax_tool_uses_pension_year_ratio(
+    receipt_year: int, payable_ratio: str
+) -> None:
+    source = f"실제수령연차 {receipt_year}년차"
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(question=f"연금수령, {source}"),
+        actual_pension_receipt_year=receipt_year,
+        actual_pension_receipt_year_source=source,
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"]["payable_ratio_percent"] == payable_ratio
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_returns_ratios_without_allocated_tax() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(question="연금수령, 실제수령연차 10년차"),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="실제수령연차 10년차",
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"].keys() == {"receipt_type", "actual_pension_receipt_year"}
+    assert calculation["outputs"] == {
+        "payable_ratio_percent": "70.00",
+        "reduction_ratio_percent": "30.00",
+    }
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_preserves_explicit_zero_tax() -> None:
+    question = "연금수령, 실제수령연차 10년차, 해당 인출분에 배분된 이연퇴직소득세 0원"
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(question=question),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="실제수령연차 10년차",
+        allocated_deferred_retirement_tax_krw=Decimal(0),
+        allocated_deferred_retirement_tax_krw_source=("해당 인출분에 배분된 이연퇴직소득세 0원"),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["inputs"]["allocated_deferred_retirement_tax_krw"] == "0"
+    assert calculation["outputs"]["tax_payable_krw"] == "0.00"
+    assert calculation["outputs"]["tax_reduction_krw"] == "0.00"
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_calculates_non_pension_ratio() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="non_pension",
+        receipt_type_source="이연퇴직소득 연금외수령",
+        runtime=_runtime(question="이연퇴직소득 연금외수령"),
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["calculations"][0]["outputs"] == {
+        "payable_ratio_percent": "100",
+        "reduction_ratio_percent": "0",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("year", "year_source", "tax", "tax_source"),
+    [
+        (10, None, None, None),
+        (None, "실제수령연차 10년차", None, None),
+        (10, "실제수령연차 10년차", Decimal(1_000_000), None),
+        (10, "실제수령연차 10년차", None, "해당 인출분 퇴직소득세 100만원"),
+    ],
+)
+async def test_deferred_retirement_tax_tool_rejects_mismatched_optional_pairs(
+    year: int | None,
+    year_source: str | None,
+    tax: Decimal | None,
+    tax_source: str | None,
+) -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(
+            question=("연금수령, 실제수령연차 10년차, 해당 인출분 퇴직소득세 100만원")
+        ),
+        actual_pension_receipt_year=year,
+        actual_pension_receipt_year_source=year_source,
+        allocated_deferred_retirement_tax_krw=tax,
+        allocated_deferred_retirement_tax_krw_source=tax_source,
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_returns_rules_error_without_pension_year() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(question="연금수령"),
+    )
+
+    assert isinstance(result, str)
+    assert "계산 입력" in result
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_returns_rules_error_for_non_pension_year() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="non_pension",
+        receipt_type_source="연금외수령",
+        runtime=_runtime(question="연금외수령, 실제수령연차 10년차"),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="실제수령연차 10년차",
+    )
+
+    assert isinstance(result, str)
+    assert "계산 입력" in result
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_rejects_withdrawal_limit_year_source() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(question="연금수령, 연금수령연차 10년차"),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="연금수령연차 10년차",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_rejects_wrong_actual_year_value() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(question="연금수령, 실제수령연차 11년차"),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="실제수령연차 11년차",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_rejects_whole_account_tax_source() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금수령",
+        runtime=_runtime(question="연금수령, 실제수령연차 10년차, 계좌 전체 퇴직소득세 100만원"),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="실제수령연차 10년차",
+        allocated_deferred_retirement_tax_krw=Decimal(1_000_000),
+        allocated_deferred_retirement_tax_krw_source="계좌 전체 퇴직소득세 100만원",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+def test_deferred_retirement_tax_accepts_allocated_withdrawal_tax_provenance() -> None:
+    source = "해당 인출분에 배분된 이연퇴직소득세 100만원"
+    result = validated_input_sources(
+        inputs={"allocated_deferred_retirement_tax_krw": Decimal(1_000_000)},
+        input_sources={"allocated_deferred_retirement_tax_krw": source},
+        state={"question": source},
+    )
+
+    assert result is not None
+
+
+@pytest.mark.anyio
+async def test_deferred_retirement_tax_tool_rejects_receipt_type_source_mismatch() -> None:
+    result = await create_deferred_retirement_withdrawal_tax_tool().coroutine(
+        receipt_type="pension",
+        receipt_type_source="연금외수령",
+        runtime=_runtime(question="연금외수령, 실제수령연차 10년차"),
+        actual_pension_receipt_year=10,
+        actual_pension_receipt_year_source="실제수령연차 10년차",
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
 
 
 def test_calculation_summary_preserves_verified_values() -> None:

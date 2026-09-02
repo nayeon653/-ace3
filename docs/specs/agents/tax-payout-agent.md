@@ -110,6 +110,26 @@ warning이 `calculations`에 포함된다.
   모델 응답에 있으면 남은 계산만 실행하고 submit은 제거한다. 두 계산이 모두 state에
   기록된 다음 모델 턴에만 submit을 허용해 최종 결과와 결론에 두 계산을 함께 보존한다.
 
+### `calculate_deferred_retirement_withdrawal_tax`
+
+- 이연퇴직소득 재원의 연금수령·연금외수령 세금에만 사용하며 세액공제를 받은 원금·
+  운용수익용 계산기와 혼용하지 않는다.
+- 필수 입력은 `receipt_type`(`pension | non_pension`)과 원문 source다. `pension`은 실제로
+  연금을 수령한 연도의 누적 횟수인 `actual_pension_receipt_year`와 source가 필수이고,
+  `non_pension`에는 이 연차를 전달하지 않는다. 같은 해 여러 번 수령해도 1년이며 수령하지
+  않은 연도는 누적하지 않는다. 연금수령한도용 `pension_year`와는 다른 입력이다.
+- 연금수령의 실제수령 1~10년은 납부 70%·감면 30%, 11~20년은 60%·40%, 21년 이상은
+  50%·50%다. 연금외수령은 납부 100%·감면 0%다.
+- `allocated_deferred_retirement_tax_krw`는 선택 입력이며 계좌 전체 퇴직소득세가 아니라
+  해당 인출분에 이미 배분된 이연퇴직소득세다. 값과 source가 함께 있을 때만 납부세액과
+  감면세액을 반환하고 둘 다 생략되면 비율만 반환한다.
+- 사용자가 납부세액·감면세액을 요구했지만 배분세액이 없으면 Agent가 `conditional`과
+  `해당 인출분에 배분된 이연퇴직소득세 확인 필요` 조건을 제출한다. 단순 비율 질문은
+  `determined`일 수 있으며 Python은 omission만으로 상태를 바꾸지 않는다.
+- 이연퇴직소득세 원액 산출, 부분 인출분 안분, 인출 원금과 세후 인출액 계산은 범위 밖이다.
+- 호출은 한 번으로 제한하며 다른 계산기와 동시에 호출하지 않는다. #113의 정확한 두 Tool
+  비교 조합 예외에는 포함되지 않는다.
+
 ### `submit_domain_result`
 
 `status="not_applicable"`은 검색 없이 바로 제출할 수 있다 — Product·Policy 책임
@@ -182,6 +202,7 @@ DomainRequest
 | 연금 세액공제 Tool | 최대 1회 |
 | 연금수령 세금 Tool | 최대 1회 |
 | 연금외수령 세금 Tool | 최대 1회 |
+| 이연퇴직소득세 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |

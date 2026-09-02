@@ -39,6 +39,7 @@ _AGE_NON_EXACT_EXPRESSIONS = (
     "정도",
     "무렵",
 )
+_RECEIPT_YEAR_PATTERN = re.compile(r"([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))\s*년차")
 _SOURCE_REQUIREMENTS = {
     "account_valuation_krw": (("평가액",), ("원",)),
     "pension_year": (("수령연차", "연금수령연차", "년차"), ("년", "연차")),
@@ -110,6 +111,15 @@ def validated_input_sources(
         source = _normalize_text(input_sources[field])
         if field == "pension_treatment":
             if not _matches_pension_treatment_source(value, source):
+                return None
+        elif field == "receipt_type":
+            if not _matches_deferred_retirement_receipt_type_source(value, source):
+                return None
+        elif field == "actual_pension_receipt_year":
+            if not _matches_actual_pension_receipt_year_source(value, source):
+                return None
+        elif field == "allocated_deferred_retirement_tax_krw":
+            if not _matches_allocated_deferred_retirement_tax_source(source, value):
                 return None
         elif field == "recipient_age":
             if not _matches_recipient_age_source(value, source):
@@ -185,6 +195,39 @@ def _matches_pension_treatment_source(value: Any, source: str) -> bool:
         if value == "unavoidable" and "부득이" in phrase and not _is_negated_phrase(phrase):
             return True
     return False
+
+
+def _matches_deferred_retirement_receipt_type_source(value: Any, source: str) -> bool:
+    if value == "pension":
+        return any(label in source for label in ("연금수령", "연금으로 수령")) and not any(
+            label in source for label in ("연금외수령", "일시금", "중도해지", "한도초과")
+        )
+    if value == "non_pension":
+        return any(label in source for label in ("연금외수령", "일시금", "중도해지", "한도초과"))
+    return False
+
+
+def _matches_actual_pension_receipt_year_source(value: Any, source: str) -> bool:
+    if "실제" not in source or "횟수" in source or re.search(r"\d\s*회", source):
+        return False
+    if not any(
+        label in source
+        for label in ("실제수령연차", "실제 수령연차", "실제 연금수령연차", "실제 연금 수령 연차")
+    ):
+        return False
+    years = [
+        _decimal(match.group(1).replace(",", ""))
+        for match in _RECEIPT_YEAR_PATTERN.finditer(source)
+    ]
+    return len(years) == 1 and years[0] == _decimal(value)
+
+
+def _matches_allocated_deferred_retirement_tax_source(source: str, value: Any) -> bool:
+    groups = (
+        ("해당 인출분", "배분된"),
+        ("이연퇴직소득세", "퇴직소득세"),
+    )
+    return "계좌 전체" not in source and _matches_grouped_money_source(groups, source, value)
 
 
 def _matches_recipient_age_source(value: Any, source: str) -> bool:

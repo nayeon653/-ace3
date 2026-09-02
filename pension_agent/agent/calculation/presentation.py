@@ -21,6 +21,10 @@ def format_calculation_summary(calculations: list[CalculationResult]) -> str:
             lines.extend(_pension_income_tax_lines(calculation["inputs"], outputs, units))
         elif calculator_id == "non_pension_withdrawal_tax":
             lines.extend(_non_pension_withdrawal_tax_lines(outputs, units))
+        elif calculator_id == "deferred_retirement_withdrawal_tax":
+            lines.extend(
+                _deferred_retirement_withdrawal_tax_lines(calculation["inputs"], outputs, units)
+            )
         elif calculator_id == "fund_standard_price":
             lines.append(
                 "펀드 1,000좌당 기준가격: "
@@ -119,6 +123,32 @@ def _non_pension_withdrawal_tax_lines(
         lines.append(
             f"연금외수령 과세대상액 세액: {_value(outputs, units, 'tax_krw')}, "
             f"세후 금액: {_value(outputs, units, 'after_tax_krw')}"
+        )
+    return lines
+
+
+def _deferred_retirement_withdrawal_tax_lines(
+    inputs: dict[str, object],
+    outputs: dict[str, object],
+    units: dict[str, str],
+) -> list[str]:
+    receipt_label = "연금수령" if inputs["receipt_type"] == "pension" else "연금외수령"
+    lines = [
+        (
+            f"이연퇴직소득 {receipt_label} 납부 비율: "
+            f"{_value(outputs, units, 'payable_ratio_percent')}, "
+            f"감면 비율: {_value(outputs, units, 'reduction_ratio_percent')}"
+        )
+    ]
+    if "tax_payable_krw" in outputs:
+        lines.append(
+            "해당 인출분에 배분된 이연퇴직소득세 기준 납부세액: "
+            f"{_value(outputs, units, 'tax_payable_krw')}"
+        )
+    if "tax_reduction_krw" in outputs:
+        lines.append(
+            "해당 인출분에 배분된 이연퇴직소득세 기준 감면세액: "
+            f"{_value(outputs, units, 'tax_reduction_krw')}"
         )
     return lines
 
