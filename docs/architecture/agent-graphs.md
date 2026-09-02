@@ -286,6 +286,9 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_standard_price].after_model")
 	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_reported_var_risk].after_model")
 	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_var_risk].after_model")
+	ToolCallLimitMiddleware\5bcalculate_fund_frontend_sales_fee\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_frontend_sales_fee].after_model")
+	ToolCallLimitMiddleware\5bcalculate_fund_deferred_sales_fee\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_deferred_sales_fee].after_model")
+	ToolCallLimitMiddleware\5bcalculate_fund_redemption_fee\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_redemption_fee].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	EnforceProductToolSequence\2eafter_model("EnforceProductToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
@@ -299,6 +302,12 @@ graph TD;
 	RequireProductTool\2eafter_model -.-> __end__;
 	RequireProductTool\2eafter_model -.-> tools;
 	SingleProductSubmitPerModelCall\2eafter_model --> RequireProductTool\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_deferred_sales_fee\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_frontend_sales_fee\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_deferred_sales_fee\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_fund_frontend_sales_fee\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_frontend_sales_fee\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_fund_redemption_fee\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_deferred_sales_fee\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_redemption_fee\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model -.-> ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model;
@@ -309,7 +318,7 @@ graph TD;
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> ProductModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_redemption_fee\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
 	__start__ --> CompleteProductResult\2ebefore_model;
 	model --> EnforceProductToolSequence\2eafter_model;
