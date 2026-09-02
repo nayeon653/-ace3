@@ -165,6 +165,93 @@ def test_main_supervisor_prompt_has_data_aware_routing_boundaries() -> None:
     assert "`A펀드와 B펀드의 위험과 보수를 비교해 주세요.` → 상품·운용" in prompt
 
 
+def test_main_supervisor_prompt_has_medical_care_routing_boundaries() -> None:
+    prompt = (
+        resources.files("pension_agent.prompts")
+        .joinpath("orchestration", "main-supervisor.md")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "가능 여부, 자격, 적용 조건" in prompt
+    assert "한도, 세율, 세액, 과세 또는 세후액" in prompt
+    assert "업무·제도와 세제·수령 Tool을 각각 한 번 호출" in prompt
+    assert "`의료비`나 `요양`이라는 단어만" in prompt
+    assert "세액, 한도 또는 세후액을 직접 계산하지 않는다" in prompt
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("question", "tool_calls", "expected_domains"),
+    [
+        (
+            "DC 의료비 중도인출은 가능한가요?",
+            [_tool_call("analyze_policy", "policy-call", "의료비 중도인출 가능 여부 판단")],
+            {"policy"},
+        ),
+        (
+            "요양 인출 과세와 한도, 세후액을 계산해 주세요.",
+            [
+                _tool_call(
+                    "analyze_tax_payout",
+                    "tax-call",
+                    "요양 인출 과세·한도·세후액 판단",
+                )
+            ],
+            {"tax_payout"},
+        ),
+        (
+            "DC 의료비 중도인출이 가능한지와 세금까지 알려 주세요.",
+            [
+                _tool_call("analyze_policy", "policy-call", "의료비 중도인출 가능 여부 판단"),
+                _tool_call("analyze_tax_payout", "tax-call", "의료비 인출 세금 판단"),
+            ],
+            {"policy", "tax_payout"},
+        ),
+    ],
+)
+async def test_main_supervisor_routes_medical_care_intents_to_required_domains(
+    anyio_backend: str,
+    question: str,
+    tool_calls: list[dict[str, Any]],
+    expected_domains: set[str],
+) -> None:
+    del anyio_backend
+    requests: list[DomainRequest] = []
+    policy_tool = create_domain_agent_tool(
+        name="analyze_policy",
+        description="업무 판단",
+        domain="policy",
+        runner=_runner("policy", "제도상 가능 여부를 판단했습니다.", requests),
+    )
+    tax_tool = create_domain_agent_tool(
+        name="analyze_tax_payout",
+        description="세제 판단",
+        domain="tax_payout",
+        runner=_runner("tax_payout", "세제 결과를 계산했습니다.", requests),
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=tool_calls),
+            AIMessage(content="도메인 결과를 통합했습니다."),
+        ]
+    )
+    supervisor = create_main_supervisor(model=model, tools=[policy_tool, tax_tool])
+
+    result = await supervisor.ainvoke(
+        {
+            "messages": [{"role": "user", "content": question}],
+            "question_id": "Q-MEDICAL-ROUTING",
+            "question": question,
+            "domain_results": [],
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
+    )
+
+    assert {result["domain"] for result in result["domain_results"]} == expected_domains
+    assert len(requests) == len(expected_domains)
+    assert {request["question"] for request in requests} == {question}
+
+
 @pytest.mark.anyio
 async def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fourth(
     anyio_backend: str,

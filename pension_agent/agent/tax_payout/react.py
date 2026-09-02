@@ -7,6 +7,7 @@ import operator
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, NotRequired, Protocol, cast
 from uuid import UUID
 
@@ -25,6 +26,8 @@ from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
     CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
+    CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+    CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
     CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
     CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME,
     CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
@@ -36,6 +39,8 @@ from pension_agent.agent.calculation import (
     CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
     calculation_evidence_chunk_ids,
     create_deferred_retirement_withdrawal_tax_tool,
+    create_medical_care_withdrawal_tax_breakdown_tool,
+    create_medical_care_withdrawal_tax_limit_tool,
     create_non_pension_withdrawal_tax_tool,
     create_pension_annual_limit_installment_tool,
     create_pension_income_tax_tool,
@@ -81,6 +86,11 @@ _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION = "종합과세 또는 16.5% 분리
 _PENSION_INCOME_TAX_CALCULATOR_ID = "pension_income_tax"
 _NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID = "non_pension_withdrawal_tax"
 _PENSION_WITHDRAWAL_TAX_BREAKDOWN_CALCULATOR_ID = "pension_withdrawal_tax_breakdown"
+_MEDICAL_CARE_TAX_LIMIT_CALCULATOR_ID = "medical_care_withdrawal_tax_limit"
+_MEDICAL_CARE_TAX_BREAKDOWN_CALCULATOR_ID = "medical_care_withdrawal_tax_breakdown"
+_RECIPIENT_AGE_MISSING_CONDITION = "정확한 수령자 나이 확인 필요"
+_MEDICAL_CARE_EXCESS_MISSING_CONDITION = "초과액의 재원 및 연금수령·연금외수령 구분 확인 필요"
+_TAX_AMOUNT_INTENT_PATTERN = re.compile(r"세액|세후|세금|실수령|납부세액")
 _PENSION_TAX_COMPARISON_TOOL_NAMES = frozenset(
     {
         CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
@@ -181,6 +191,9 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
                 "호출하고 두 재원을 혼용하지 마세요. 재원별 인출 배분만 필요하거나 세금 "
                 "조건이 부족하면 calculate_pension_withdrawal_allocation Tool을, 재원별 세금과 "
                 "세후액 조건이 모두 확인되면 calculate_pension_withdrawal_tax_breakdown Tool을 "
+                "둘 중 하나만 호출하세요. 의료·요양 저율과세 한도만 필요하거나 정확한 나이가 "
+                "없으면 calculate_medical_care_withdrawal_tax_limit Tool을, 적용 사유와 원 입력 및 "
+                "정확한 나이가 모두 확인되면 calculate_medical_care_withdrawal_tax_breakdown Tool을 "
                 "둘 중 하나만 호출하세요. "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
@@ -264,6 +277,8 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
                 CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
                 CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
                 CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+                CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
+                CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
@@ -324,6 +339,8 @@ def create_tax_payout_react_agent(
     deferred_retirement_tax_tool = create_deferred_retirement_withdrawal_tax_tool()
     withdrawal_allocation_tool = create_pension_withdrawal_allocation_tool()
     withdrawal_tax_breakdown_tool = create_pension_withdrawal_tax_breakdown_tool()
+    medical_care_limit_tool = create_medical_care_withdrawal_tax_limit_tool()
+    medical_care_breakdown_tool = create_medical_care_withdrawal_tax_breakdown_tool()
     graph = create_agent(
         model=model,
         tools=(
@@ -338,6 +355,8 @@ def create_tax_payout_react_agent(
             deferred_retirement_tax_tool,
             withdrawal_allocation_tool,
             withdrawal_tax_breakdown_tool,
+            medical_care_limit_tool,
+            medical_care_breakdown_tool,
             _create_tax_payout_result_tool(),
         ),
         system_prompt=system_prompt,
@@ -401,6 +420,16 @@ def create_tax_payout_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=withdrawal_tax_breakdown_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=medical_care_limit_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=medical_care_breakdown_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),
@@ -552,6 +581,9 @@ def _create_tax_payout_result_tool() -> Any:
             result = _build_tax_payout_result(
                 search_result=search_result,
                 calculations=list(runtime.state.get("calculations", [])),
+                question=(
+                    f"{runtime.state.get('question', '')} {runtime.state.get('objective', '')}"
+                ),
                 status=status,
                 conclusion=conclusion,
                 missing_conditions=missing_conditions,
@@ -599,6 +631,7 @@ def _build_tax_payout_result(
     *,
     search_result: SearchResult,
     calculations: list[CalculationResult],
+    question: str = "",
     status: DecisionStatus,
     conclusion: str,
     missing_conditions: list[str],
@@ -662,6 +695,16 @@ def _build_tax_payout_result(
                     *normalized_missing,
                     _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
                 ]
+        if _has_medical_care_limit_without_age_for_tax_question(calculations, question):
+            if status == "determined":
+                status = "conditional"
+            if _RECIPIENT_AGE_MISSING_CONDITION not in normalized_missing:
+                normalized_missing.append(_RECIPIENT_AGE_MISSING_CONDITION)
+        if _has_unresolved_medical_care_excess(calculations):
+            if status == "determined":
+                status = "conditional"
+            if _MEDICAL_CARE_EXCESS_MISSING_CONDITION not in normalized_missing:
+                normalized_missing.append(_MEDICAL_CARE_EXCESS_MISSING_CONDITION)
     elif status != "not_applicable":
         status, normalized_conclusion, normalized_missing, normalized_warnings = (
             _apply_numeric_claim_guard(
@@ -756,6 +799,31 @@ def _has_withdrawal_breakdown_separate_tax_option(
         and "annual_private_pension_separate_tax_option_tax_krw" in calculation["outputs"]
         for calculation in calculations
     )
+
+
+def _has_medical_care_limit_without_age_for_tax_question(
+    calculations: list[CalculationResult], question: str
+) -> bool:
+    return bool(_TAX_AMOUNT_INTENT_PATTERN.search(question)) and any(
+        calculation["calculator_id"] == _MEDICAL_CARE_TAX_LIMIT_CALCULATOR_ID
+        for calculation in calculations
+    )
+
+
+def _has_unresolved_medical_care_excess(calculations: list[CalculationResult]) -> bool:
+    for calculation in calculations:
+        if calculation["calculator_id"] != _MEDICAL_CARE_TAX_BREAKDOWN_CALCULATOR_ID:
+            continue
+        try:
+            excess = Decimal(str(calculation["outputs"].get("excess_amount_krw")))
+        except InvalidOperation:
+            continue
+        if excess > 0 and (
+            calculation["outputs"].get("current_withdrawal_tax_krw") is None
+            or calculation["outputs"].get("current_withdrawal_after_tax_krw") is None
+        ):
+            return True
+    return False
 
 
 def _apply_numeric_claim_guard(

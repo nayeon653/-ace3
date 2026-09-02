@@ -1,24 +1,24 @@
 {
   "artifacts": {
     "agent-system.png": {
-      "image_sha256": "a2c4e4c476cdefbb6392eeca7f4b8c5a20d8cb23d434c1fe4a812db1c22a5581",
+      "image_sha256": "b7845432fb4cd74c776e7501d0c859ea9d27424b0b450116a5684afb8070ed87",
       "mermaid_sha256": "fcebcdf35a2fb98d05cd1589c049882f9d56af34c2646999214163341f47a50f"
     },
     "main-supervisor.png": {
-      "image_sha256": "9e6cc52a87635d0e38a9042a1101fbbe0ff15ac16b5095173faa9db7fc32991f",
+      "image_sha256": "4fb34710d86e4ea1706dbef03c18b7ce31e43b1278cfe186b600d52a41747bd5",
       "mermaid_sha256": "bfc8ee2d66e90ce8816070e5bfe8ab815c7c286c538c44a8922771bab5ebe4a2"
     },
     "policy.png": {
-      "image_sha256": "2547cc6c4f85ab5b69cac7aca9ef48911b6daf59ec1ae9cce550bb4fd47664ae",
-      "mermaid_sha256": "555080d589aa00b3bed7d60f00e6324cbffc7f176ebc12f05b2dfc5114751268"
+      "image_sha256": "7d801a4bf5c5c6b38bc441206879dcc80b8a7cf981ac8c5b0cb759afec06d81d",
+      "mermaid_sha256": "7378332172316c9b3c4f9037f94c3d2f0478fc229d249dc877d2ec583f731c49"
     },
     "product.png": {
-      "image_sha256": "8f98a2b4ab47ded78d5dc3dc13fbae3d20400965f3c5922c91e0fa54030c40fb",
+      "image_sha256": "7f8a052af2874fa031d4dafd76e1fe68064531cafe5267e935796c193d55d8c4",
       "mermaid_sha256": "ff2693ef23dfad19f7cae7e0ffa363a7ef6c3c45ab6227a4a01be3fbc0efab81"
     },
     "tax-payout.png": {
-      "image_sha256": "dfaa5eba38ae825e83a2c3cdb6d4cb97007b61e43a3535d222b86ca56821defa",
-      "mermaid_sha256": "78d1c7c7690c5d2195f3b70b144da05acd9ceb0a0f0cc3a59107699000231bfc"
+      "image_sha256": "ccb755f5e48bef993c2ad6cd6c351a8d7b2ba50a7e4451cd3569c8ee21075ab2",
+      "mermaid_sha256": "efce77751d7506fdf80d1e214d48430abb94d775d12b64804129e187eb4e1bd7"
     }
   },
   "renderer": "langchain-core MermaidDrawMethod.API",

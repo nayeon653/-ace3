@@ -288,3 +288,14 @@ DomainRequest
 
 - `tests/unit/agent/test_domain_agents.py`
 - `notebooks/agent/tax_payout_agent_playground.ipynb`
+
+## 의료·요양 저율과세 계산
+
+- Agent는 세법상 3개월 이상 요양과 산식 적용 사유를 판단하며 Policy의 DC 6개월 조건과 구분한다.
+- 한도 질문 또는 세액 질문에서 정확한 나이가 없으면 `calculate_medical_care_withdrawal_tax_limit`, 적용 조건·원 입력·정확한 나이가 모두 확인되면 `calculate_medical_care_withdrawal_tax_breakdown`을 사용한다.
+- breakdown은 Rules 내부 pure-function composite이며 limit 또는 기존 세금 Tool chaining이 아니다.
+- 한 실행에서 두 #117 Tool 중 하나만 성공할 수 있고 각 Tool은 최대 1회다. 같은 model call에서는 첫 번째 #117 Tool만 유지한다.
+- 성공한 #117 계산 뒤에는 submit만 허용한다. breakdown 오류로 calculation이 기록되지 않은 경우 limit fallback은 가능하다.
+- #114·#115·#116 계산과 chaining하지 않으며 #117 한도는 일반 연금수령한도 및 재원 배분과 별도 의미다.
+- 세액 질문에 나이가 없으면 한도를 보존하면서 `conditional`과 정확한 나이 누락 조건을 강제한다. 순수 한도 질문은 determined가 가능하다.
+- breakdown 초과액의 현재 전체 세액·세후액이 null이면 Python 경계가 `conditional`과 재원·수령구분 누락 조건을 강제한다. null은 숫자로 보완하지 않는다.

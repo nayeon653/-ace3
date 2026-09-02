@@ -26,6 +26,11 @@ from pension_agent.agent.contracts import (
 )
 from pension_agent.agent.domain_runner import GuardedDomainRunner
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
+from pension_agent.agent.policy.react import (
+    _DC_ELIGIBILITY_MISSING_CONDITION,
+    EnforcePolicyToolSequence,
+    _build_policy_result,
+)
 from pension_agent.agent.product import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
     AmbiguousProductQuery,
@@ -51,7 +56,9 @@ from pension_agent.agent.tax_payout import (
 from pension_agent.agent.tax_payout.react import (
     _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION,
     _INCOME_BASIS_MISSING_CONDITION,
+    _MEDICAL_CARE_EXCESS_MISSING_CONDITION,
     _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
+    _RECIPIENT_AGE_MISSING_CONDITION,
     EnforceTaxPayoutToolSequence,
     _build_tax_payout_result,
 )
@@ -414,10 +421,16 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                     "calculate_deferred_retirement_withdrawal_tax",
                     "calculate_pension_withdrawal_allocation",
                     "calculate_pension_withdrawal_tax_breakdown",
+                    "calculate_medical_care_withdrawal_tax_limit",
+                    "calculate_medical_care_withdrawal_tax_breakdown",
                     "submit_domain_result",
                 }
                 if domain == "tax_payout"
-                else {"search_documents", "submit_domain_result"}
+                else {
+                    "search_documents",
+                    "calculate_dc_medical_withdrawal_threshold",
+                    "submit_domain_result",
+                }
             )
         )
         for names, _kwargs in model.bindings
@@ -3698,7 +3711,10 @@ def _pension_income_calculation(
 
 
 def _build_result_with_calculations(
-    calculations: list[Any], *, missing_conditions: list[str] | None = None
+    calculations: list[Any],
+    *,
+    missing_conditions: list[str] | None = None,
+    question: str = "",
 ) -> DomainResult:
     chunk_id = "550e8400-e29b-41d4-a716-446655440000"
     return _build_tax_payout_result(
@@ -3707,6 +3723,7 @@ def _build_result_with_calculations(
             retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
         ),
         calculations=calculations,
+        question=question,
         status="determined",
         conclusion="임의 결론",
         missing_conditions=missing_conditions or [],
@@ -4771,7 +4788,8 @@ def _completed_result() -> DomainResult:
 
 
 def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> None:
-    assert "search_documents" in load_policy_agent_prompt()
+    policy_prompt = load_policy_agent_prompt()
+    assert "search_documents" in policy_prompt
     product_prompt = load_product_agent_prompt()
     assert "search_documents" in product_prompt
     assert "lookup_product_codes" in product_prompt
@@ -4807,3 +4825,374 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "Policy Agent 책임이므로" in tax_prompt
     assert "검색된 청크 전체가 아니라 결론에 실제 인용한 최소" in tax_prompt
     assert "근거 부족 판단을 계산 필요 판단으로 바꾸지 않는다" in tax_prompt
+    assert "calculate_dc_medical_withdrawal_threshold" in policy_prompt
+    assert "6개월 이상 요양" in policy_prompt
+    assert "IRP" in policy_prompt
+    assert "calculate_medical_care_withdrawal_tax_limit" in tax_prompt
+    assert "calculate_medical_care_withdrawal_tax_breakdown" in tax_prompt
+    assert "3개월 이상 요양" in tax_prompt
+    assert "그 전에 limit 또는 `calculate_pension_income_tax`를 호출하지 않는다" in tax_prompt
+
+
+def _policy_sequence_tool_names(calculations: list[Any], tool_names: list[str]) -> list[str]:
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": name, "args": {}, "id": f"call-{index}", "type": "tool_call"}
+            for index, name in enumerate(tool_names)
+        ],
+    )
+    update = EnforcePolicyToolSequence().after_model(
+        {
+            "messages": [message],
+            "search_result": SearchResult(execution_status="completed"),
+            "calculations": calculations,
+        },
+        None,
+    )
+    kept = message if update is None else update["messages"][0]
+    return [call["name"] for call in kept.tool_calls]
+
+
+def test_policy_separates_dc_threshold_submit_and_blocks_after_success() -> None:
+    assert _policy_sequence_tool_names(
+        [], ["calculate_dc_medical_withdrawal_threshold", "submit_domain_result"]
+    ) == ["calculate_dc_medical_withdrawal_threshold"]
+    assert _policy_sequence_tool_names(
+        [{"calculator_id": "dc_medical_withdrawal_threshold"}],
+        ["calculate_dc_medical_withdrawal_threshold", "submit_domain_result"],
+    ) == ["submit_domain_result"]
+
+
+def _dc_threshold_calculation() -> Any:
+    return {
+        "calculator_id": "dc_medical_withdrawal_threshold",
+        "inputs": {"employment_duration_category": "at_least_one_year"},
+        "input_sources": {},
+        "outputs": {
+            "applicable_wages_krw": "100000000",
+            "wage_basis": "previous_year_annual_wages",
+            "medical_expense_threshold_krw": "12500000.000",
+            "threshold_met": True,
+        },
+        "units": {
+            "applicable_wages_krw": "KRW",
+            "medical_expense_threshold_krw": "KRW",
+        },
+        "warnings": [],
+    }
+
+
+def test_policy_dc_threshold_requires_separate_eligibility_confirmation() -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    result = _build_policy_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
+        ),
+        calculations=[_dc_threshold_calculation()],
+        status="determined",
+        conclusion="임금 기준을 초과했습니다.",
+        missing_conditions=["기존 조건"],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [
+        "기존 조건",
+        _DC_ELIGIBILITY_MISSING_CONDITION,
+    ]
+    assert result["calculations"] == [_dc_threshold_calculation()]
+    assert "DC 의료비 기준 적용 임금" in result["decision"]["conclusion"]
+
+
+def _medical_care_calculation(
+    calculator_id: str, *, excess: str = "0", null_totals: bool = False
+) -> Any:
+    outputs: dict[str, Any] = {
+        "tax_limit_krw": "2750000",
+        "amount_within_limit_krw": "2750000",
+        "excess_amount_krw": excess,
+    }
+    if calculator_id == "medical_care_withdrawal_tax_breakdown":
+        outputs.update(
+            {
+                "within_limit_tax_rate_percent": "5.5",
+                "within_limit_tax_krw": "151250.000",
+                "within_limit_after_tax_krw": "2598750.000",
+                "current_withdrawal_tax_krw": None if null_totals else "151250.000",
+                "current_withdrawal_after_tax_krw": (None if null_totals else "2598750.000"),
+            }
+        )
+    return {
+        "calculator_id": calculator_id,
+        "inputs": {"requested_withdrawal_krw": "2750000"},
+        "input_sources": {},
+        "outputs": outputs,
+        "units": {key: "%" if key == "within_limit_tax_rate_percent" else "KRW" for key in outputs},
+        "warnings": ["초과액 세액을 확정할 수 없습니다."] if null_totals else [],
+    }
+
+
+def test_medical_care_limit_status_depends_on_question_intent() -> None:
+    calculation = _medical_care_calculation("medical_care_withdrawal_tax_limit")
+    pure_limit = _build_result_with_calculations(
+        [calculation], question="의료·요양 저율과세 한도가 얼마인가요?"
+    )
+    tax_question = _build_result_with_calculations(
+        [calculation],
+        missing_conditions=["기존 조건", _RECIPIENT_AGE_MISSING_CONDITION],
+        question="의료·요양 인출의 세액과 세후액은 얼마인가요?",
+    )
+
+    assert pure_limit["decision"]["status"] == "determined"
+    assert pure_limit["decision"]["missing_conditions"] == []
+    assert tax_question["decision"]["status"] == "conditional"
+    assert tax_question["decision"]["missing_conditions"] == [
+        "기존 조건",
+        _RECIPIENT_AGE_MISSING_CONDITION,
+    ]
+
+
+def test_medical_care_excess_forces_conditional_and_preserves_nulls() -> None:
+    result = _build_result_with_calculations(
+        [
+            _medical_care_calculation(
+                "medical_care_withdrawal_tax_breakdown", excess="250000", null_totals=True
+            )
+        ],
+        question="의료·요양 인출 세액은 얼마인가요?",
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [_MEDICAL_CARE_EXCESS_MISSING_CONDITION]
+    outputs = result["calculations"][0]["outputs"]
+    assert outputs["current_withdrawal_tax_krw"] is None
+    assert outputs["current_withdrawal_after_tax_krw"] is None
+    assert "확정할 수 없음" in result["decision"]["conclusion"]
+    assert "None원" not in result["decision"]["conclusion"]
+
+
+def test_tax_sequence_enforces_single_medical_care_tool_and_submit_after_success() -> None:
+    assert _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_medical_care_withdrawal_tax_breakdown",
+            "calculate_medical_care_withdrawal_tax_limit",
+        ],
+    ) == ["calculate_medical_care_withdrawal_tax_breakdown"]
+    assert _sequence_result_tool_names(
+        calculations=[], tool_names=["calculate_medical_care_withdrawal_tax_limit"]
+    ) == ["calculate_medical_care_withdrawal_tax_limit"]
+    assert _sequence_result_tool_names(
+        calculations=[{"calculator_id": "medical_care_withdrawal_tax_breakdown"}],
+        tool_names=[
+            "calculate_pension_income_tax",
+            "calculate_deferred_retirement_withdrawal_tax",
+            "calculate_pension_withdrawal_tax_breakdown",
+            "calculate_pension_withdrawal_limit",
+            "submit_domain_result",
+        ],
+    ) == ["submit_domain_result"]
+
+
+def test_medical_care_presentations_do_not_render_null_as_amount() -> None:
+    summary = format_calculation_summary(
+        [
+            _dc_threshold_calculation(),
+            _medical_care_calculation("medical_care_withdrawal_tax_limit"),
+            _medical_care_calculation(
+                "medical_care_withdrawal_tax_breakdown", excess="250000", null_totals=True
+            ),
+        ]
+    )
+
+    assert "임금 기준액의 12.5%" in summary
+    assert "의료·요양 저율과세 한도" in summary
+    assert "현재 전체 세액: 확정할 수 없음" in summary
+    assert "None원" not in summary
+
+
+@pytest.mark.anyio
+async def test_policy_agent_runs_dc_threshold_and_preserves_calculation_evidence() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    content = "재직 1년 이상; 근로자 부담 증빙 의료비 1,300만원; 직전연도 연간임금총액 1억원"
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "DC 의료비 중도인출 기준 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_dc_medical_withdrawal_threshold",
+                        "args": {
+                            "employment_duration_category": "at_least_one_year",
+                            "documented_medical_expenses_krw": "13000000",
+                            "employment_duration_category_source": "재직 1년 이상",
+                            "documented_medical_expenses_krw_source": (
+                                "근로자 부담 증빙 의료비 1,300만원"
+                            ),
+                            "previous_year_annual_wages_krw": "100000000",
+                            "previous_year_annual_wages_krw_source": (
+                                "직전연도 연간임금총액 1억원"
+                            ),
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "임금 기준을 초과합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                            "dc_medical_eligibility_conditions_confirmed": False,
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_policy_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": content, "objective": "DC 의료비 인출 가능 여부"})
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [_DC_ELIGIBILITY_MISSING_CONDITION]
+    assert result["calculations"][0]["calculator_id"] == "dc_medical_withdrawal_threshold"
+    assert result["calculations"][0]["input_sources"]
+    assert result["evidence"]
+
+
+@pytest.mark.anyio
+async def test_policy_agent_does_not_call_dc_threshold_for_irp_question() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "IRP 의료비 중도인출 조건 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "conditional",
+                            "conclusion": "IRP의 다른 중도인출 요건을 확인해야 합니다.",
+                            "missing_conditions": ["IRP 중도인출의 나머지 적용 요건"],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_policy_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {"question": "IRP 의료비 중도인출이 가능한가요?", "objective": "가능 여부"}
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["calculations"] == []
+    assert model.invocation_count == 2
+
+
+@pytest.mark.anyio
+async def test_tax_agent_runs_pure_medical_care_limit_as_determined() -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+    content = "의료·요양 총 인출 요청액 300만원; 실제 의료비 50만원; 간병비 25만원; 본인 휴직 0개월"
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "의료·요양 저율과세 한도 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_medical_care_withdrawal_tax_limit",
+                        "args": {
+                            "requested_withdrawal_krw": "3000000",
+                            "actual_medical_expenses_krw": "500000",
+                            "care_expenses_krw": "250000",
+                            "own_leave_months": 0,
+                            "requested_withdrawal_krw_source": ("의료·요양 총 인출 요청액 300만원"),
+                            "actual_medical_expenses_krw_source": "실제 의료비 50만원",
+                            "care_expenses_krw_source": "간병비 25만원",
+                            "own_leave_months_source": "본인 휴직 0개월",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "한도를 계산했습니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": content, "objective": "저율과세 한도 계산"})
+
+    assert result["decision"]["status"] == "determined"
+    assert result["calculations"][0]["calculator_id"] == "medical_care_withdrawal_tax_limit"
+    assert "의료·요양 저율과세 한도" in result["decision"]["conclusion"]

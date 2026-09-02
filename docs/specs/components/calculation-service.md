@@ -50,6 +50,9 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | `deferred_retirement_withdrawal_tax` | 이연퇴직소득의 연금수령 실제수령연차별 납부·감면 비율과 연금외수령 비율 | `doc39.docx` `#/texts/18`, `#/tables/0`; 실제수령연차 정의: `doc40.docx` `#/texts/13` |
 | `pension_withdrawal_allocation` | 요청 인출액을 비과세 재원, 이연퇴직소득, 세액공제 원금·운용수익 순서로 배분 | `doc39.docx` `#/texts/14`, `#/tables/0`; 상세 재원 인출 순서: `doc5.pdf` 1~2쪽 |
 | `pension_withdrawal_tax_breakdown` | 재원과 연금수령·연금외수령 경로별 인출액·세액·세후액 명세 | `doc39.docx` `#/texts/14`, `#/tables/0`; 비과세 재원의 연금수령한도 소진: `doc5.pdf` 1~2쪽 |
+| `dc_medical_withdrawal_threshold` | DC 의료비 중도인출의 재직기간별 적용 임금과 12.5% 금액 기준 | `doc46.pdf` 1쪽; DC 12.5% 기준, 재직기간별 임금 기준, 더 낮은 직전 12개월 임금 적용, IRP 예외 |
+| `medical_care_withdrawal_tax_limit` | 의료·요양 인출의 저율과세 한도와 요청액의 한도 내·초과 금액 분리 | `doc5.pdf` 1쪽; 200만원 + 실제 의료비 + 간병비 + 본인 휴직월수 × 150만원 |
+| `medical_care_withdrawal_tax_breakdown` | 의료·요양 인출의 한도 내 부득이한 사유 세액·세후액과 미확정 초과액 분리 | `doc20.docx` 1~2쪽; 세법상 3개월 이상 요양, 부득이한 사유 연령별 세율, 관련 연간 1,500만원 예외 |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 
@@ -271,6 +274,52 @@ Tool provenance는 요청 인출액, 각 재원 잔액과 의미, pension/non-pe
 해당 인출분 배분세액의 구분을 검증한다. 나이는 정확한 값과 범위 표현을 구분하고, 부정
 표현과 실제수령연차도 원문 같은 구절에서 확인한다.
 
+### 의료비·요양 인출 계산 계약
+
+**`dc_medical_withdrawal_threshold`**: DC 의료비 중도인출의 12.5% 금액 기준을 계산한다.
+재직기간은 1년 이상과 1년 미만의 범주형 입력으로 구분한다. 1년 이상은 직전연도
+연간임금총액을 기본으로 하되 증빙된 신청일 직전 12개월 임금이 더 낮으면 그 값을 적용하고,
+1년 미만은 재직 중 월평균 급여에 12를 곱한 연환산 임금을 적용한다. 증빙 의료비가 적용
+임금의 12.5%를 엄격히 초과할 때만 `threshold_met=true`이며 정확히 같으면 `false`다.
+
+IRP에는 이 DC 12.5% 기준을 적용하지 않는다. 다만 그 예외만으로 IRP 중도인출 가능 여부를
+확정하지 않는다. 최종 eligibility, DC의 6개월 요양 조건, 가족관계와 서류·증빙 적정성은
+Policy Agent가 판단한다.
+
+**`medical_care_withdrawal_tax_limit`**: 저율과세 한도는 200만원에 실제 의료비, 간병비,
+본인의 휴직월수당 150만원을 더한 금액이다. `requested_withdrawal_krw`는 이번 의료·요양
+사유의 총 요청 인출액이며, 요청액을 한도 내 금액과 초과액으로 분리한다. 요청액이 한도와
+같으면 전액 한도 내 금액이고 초과액은 0이다. 이 함수는 초과액의 세액을 계산하지 않는다.
+이 한도는 #116 일반 연금수령한도와 다른 제도이며, 재난피해처럼 별도 금액한도가 없는
+사유에 임의로 적용하지 않는다.
+
+**`medical_care_withdrawal_tax_breakdown`**: 위 limit Rules를 내부 호출하고 한도 내 금액에
+기존 `pension_income_tax`의 `unavoidable` 경로 순수 함수를 조합한다. Agent의 Tool
+chaining이 아니며 #114·#115·#116 계산기를 임의로 호출하지 않는다. 정확한 수령자 나이에
+따른 부득이한 사유 세율을 적용하며, 이 경로에는 일반 연금수령의 연간 사적연금소득
+1,500만원 기준을 적용하지 않는다.
+
+초과액이 0이면 현재 인출 전체의 세액과 세후액을 확정한다. 초과액이 0보다 크고 그 재원 및
+연금수령·연금외수령 구분이 확인되지 않으면 초과액 세액을 추정하지 않고 현재 전체 세액과
+세후액에 `null`을 전파하며 warning을 보존한다. 세법상 3개월 이상 요양에 따른 부득이한
+사유 과세와 DC eligibility의 6개월 요양 조건은 서로 다른 판단으로 유지한다.
+
+**책임 경계**: Policy Agent는 DC/IRP 구분, DC 중도인출 사유, 6개월 요양, 가족관계와
+서류·증빙 적정성을 판단한다. Tax/Payout Agent는 세법상 3개월 요양과 부득이한 사유,
+limit와 breakdown 선택 및 과세 의미를 판단한다. Main Supervisor는 가능 여부와 세금을
+함께 묻는 복합 질문을 Policy와 Tax/Payout으로 라우팅할 뿐 기간을 직접 판정하거나 세액을
+계산하지 않는다. Tool은 값/source의 의미·수량·동일 구절 대응을 검증하고, Rules는 검증된
+값으로 결정론적 `Decimal` 산술만 수행한다. Presentation은 Rules 결과를 재계산하지 않고
+표현한다.
+
+**입력 provenance**: Tool은 재직 1년 이상·미만의 의미, 직전연도 연간임금과 신청일 직전
+12개월 임금의 구분, 재직 중 월평균 급여, DC 증빙 의료비, 이번 사유 요청 인출액, 실제
+의료비, 간병비, 본인의 휴직월수와 정확한 수령자 나이를 검증한다. 부정 표현, 근사·범위
+표현과 다른 사람의 정보는 해당 입력 근거로 사용하지 않는다. 같은 source는 각 필드의
+의미와 값이 모두 확인될 때만 재사용하며 정보 부재를 명시적 0으로 바꾸지 않는다.
+
+세 계산기는 모든 금액을 `Decimal`로 계산하고 문서에 없는 반올림·절사를 적용하지 않는다.
+
 ## 실행 제한과 오류
 
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
@@ -301,9 +350,9 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 
 | 소비자 | 허용 계산기 |
 |---|---|
-| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown` |
+| Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown` |
 | Product Agent | `fund_standard_price`, `fund_var_risk` |
-| Policy Agent | 없음 |
+| Policy Agent | `dc_medical_withdrawal_threshold` |
 | Main Supervisor | 직접 호출 금지 |
 
 Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 Agent state에 직접 누적한다.
@@ -325,6 +374,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 - `tests/unit/rules/test_pension_income_tax.py`
 - `tests/unit/rules/test_deferred_retirement_withdrawal_tax.py`
 - `tests/unit/rules/test_pension_withdrawal_breakdown.py`
+- `tests/unit/rules/test_medical_care_withdrawal.py`
 - `tests/unit/agent/test_calculation_tools.py`
 - `tests/unit/agent/test_domain_agents.py`
 - `tests/test_agent_import_boundaries.py`

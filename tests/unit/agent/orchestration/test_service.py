@@ -294,6 +294,54 @@ async def test_answer_service_rebuilds_mixed_answer_from_verified_domain_results
     assert "999" not in result.answer.answer
 
 
+async def test_answer_service_preserves_both_medical_care_domain_results() -> None:
+    policy_result = _completed_result()
+    policy_result["decision"] = {
+        "status": "conditional",
+        "conclusion": "DC 의료비 중도인출 가능 여부는 요양기간에 따라 달라집니다.",
+        "missing_conditions": ["제도상 요양기간 확인"],
+    }
+    policy_result["evidence"] = [
+        {
+            "chunk_id": "550e8400-e29b-41d4-a716-446655440001",
+            "source_file_name": "policy.pdf",
+            "title": "의료비 중도인출 사유",
+            "locator": "2쪽",
+            "content": "제도상 의료비 중도인출 조건",
+        }
+    ]
+    policy_result["warnings"] = ["계좌 유형을 확인해야 합니다."]
+    tax_result = _calculation_result()
+    tax_result["decision"] = {
+        "status": "determined",
+        "conclusion": "의료 목적 인출의 세액과 세후액을 계산했습니다.",
+        "missing_conditions": [],
+    }
+    question = "DC 의료비 중도인출이 가능한지와 세금까지 알려 주세요."
+    supervisor_state = _state(
+        messages=[AIMessage(content="의료비 인출 결과입니다.")],
+        domain_results=[policy_result, tax_result],
+    )
+    supervisor_state["question"] = question
+    supervisor = FakeSupervisor(result=supervisor_state)
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001",
+        question=question,
+    )
+
+    assert result.state["domain_results"] == [policy_result, tax_result]
+    assert result.state["domain_results"][0]["evidence"] == policy_result["evidence"]
+    assert result.state["domain_results"][1]["evidence"] == tax_result["evidence"]
+    assert (
+        result.state["domain_results"][1]["calculations"][0]["input_sources"]
+        == tax_result["calculations"][0]["input_sources"]
+    )
+    assert "제도상 요양기간 확인" in result.answer.answer
+    assert "계좌 유형을 확인해야 합니다." in result.answer.answer
+    assert "연금수령한도: 1200000.0 KRW" in result.answer.answer
+
+
 async def test_answer_service_normalizes_supervisor_execution_failure() -> None:
     supervisor = FakeSupervisor(error=RuntimeError("provider 내부 오류와 민감정보"))
 
