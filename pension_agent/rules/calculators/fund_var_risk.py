@@ -42,6 +42,12 @@ def classify_var_risk_grade(annualized_var_percent: Decimal) -> int:
     return 6
 
 
+def var_risk_label(grade: int) -> str:
+    """검증된 VaR 위험등급의 표시명을 반환한다."""
+
+    return _RISK_LABELS[grade]
+
+
 def calculate_fund_var_risk(value: FundVarRiskInput) -> CalculationOutput:
     """손실률 절대값에 √250을 곱하고 같은 문서의 위험등급표를 적용한다."""
 
@@ -53,7 +59,7 @@ def calculate_fund_var_risk(value: FundVarRiskInput) -> CalculationOutput:
         outputs={
             "annualized_var_percent": annualized_var,
             "risk_grade": grade,
-            "risk_label": _RISK_LABELS[grade],
+            "risk_label": var_risk_label(grade),
         },
         units={"annualized_var_percent": "%"},
         warnings=("출처에는 연환산 VaR의 표시 자릿수·반올림 규칙이 명시되지 않았습니다.",),

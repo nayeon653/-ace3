@@ -47,7 +47,15 @@ from pension_agent.agent.product import (
     create_product_agent,
     load_product_agent_prompt,
 )
-from pension_agent.agent.product.react import _build_product_result
+from pension_agent.agent.product.react import (
+    _FUND_CLASS_MISSING_CONDITION,
+    _LATEST_DISCLOSURE_MISSING_CONDITION,
+    EnforceProductToolSequence,
+    _build_product_result,
+    _product_tool_call_is_allowed,
+    _product_var_missing_conditions,
+    _reported_var_call_missing_condition,
+)
 from pension_agent.agent.search import (
     SearchChunkPayload,
     SearchRequest,
@@ -336,6 +344,7 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
             "lookup_product_codes",
             "search_documents",
             "calculate_fund_standard_price",
+            "calculate_fund_reported_var_risk",
             "calculate_fund_var_risk",
             "submit_domain_result",
         }
@@ -415,6 +424,7 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                 "lookup_product_codes",
                 "search_documents",
                 "calculate_fund_standard_price",
+                "calculate_fund_reported_var_risk",
                 "calculate_fund_var_risk",
                 "submit_domain_result",
             }
@@ -4072,6 +4082,310 @@ async def test_product_agent_records_and_uses_verified_standard_price_calculatio
     assert result["calculations"][0]["outputs"] == {"standard_price_per_1000_units": "9000.00"}
 
 
+def _reported_var_state(
+    *,
+    question: str,
+    content: str,
+    source_file_name: str = "R2_KR510902511M.pdf",
+) -> dict[str, Any]:
+    return {
+        "question": question,
+        "product_candidate_codes": ["KR510902511M"],
+        "product_scoped_search_completed": True,
+        "product_scoped_source_file_name": "R2_KR510902511M.pdf",
+        "search_result": SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[
+                _chunk(
+                    DocumentType.FUND_PROSPECTUS,
+                    source_file_name=source_file_name,
+                    title="위험등급",
+                    content=content,
+                )
+            ],
+        ),
+        "calculations": [],
+        "messages": [],
+    }
+
+
+@pytest.mark.anyio
+async def test_product_agent_uses_reported_var_and_defers_simultaneous_submit() -> None:
+    source = "A 클래스 투자설명서 공시 연환산 97.5% VaR는 10%"
+    chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        source_file_name="R2_KR510902511M.pdf",
+        title="위험등급",
+        content=source,
+    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    premature_submit = {
+        "name": "submit_domain_result",
+        "args": {
+            "status": "determined",
+            "conclusion": "위험등급은 1등급입니다.",
+            "missing_conditions": [],
+            "warnings": [],
+            "evidence_chunk_ids": [chunk.chunk_id],
+        },
+        "id": "premature-submit",
+        "type": "tool_call",
+    }
+    calculation_call = {
+        "name": "calculate_fund_reported_var_risk",
+        "args": {
+            "annualized_var_percent": "10",
+            "annualized_var_source": source,
+        },
+        "id": "reported-var-call",
+        "type": "tool_call",
+    }
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "공시 연환산 VaR 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="", tool_calls=[premature_submit, calculation_call]),
+            AIMessage(content="", tool_calls=[premature_submit | {"id": "final-submit"}]),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {
+            "question": "미래에셋 장기성장 A 클래스의 위험등급은?",
+            "objective": "공시 연환산 VaR 위험등급 계산",
+        }
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert "공시 연환산 97.5% VaR: 10 %" in result["decision"]["conclusion"]
+    assert "위험등급: 5등급 (낮은 위험)" in result["decision"]["conclusion"]
+    assert result["calculations"][0]["calculator_id"] == "fund_reported_var_risk"
+    assert (
+        result["calculations"][0]["input_sources"]["annualized_var_percent"]["chunk_id"]
+        == chunk.chunk_id
+    )
+
+
+@pytest.mark.anyio
+async def test_product_agent_accepts_exact_reported_var_from_question() -> None:
+    question_source = "미래에셋 장기성장 공시 연환산 97.5% VaR는 10%"
+    chunk = _chunk(
+        DocumentType.FUND_PROSPECTUS,
+        source_file_name="R2_KR510902511M.pdf",
+        title="위험 공시",
+        content="이 상품은 투자설명서에서 위험을 공시합니다.",
+    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "lookup_product_codes",
+                        "args": {},
+                        "id": "lookup-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {
+                            "objective": "질문 대상 상품 확인",
+                            "product_code": "KR510902511M",
+                        },
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_fund_reported_var_risk",
+                        "args": {
+                            "annualized_var_percent": "10",
+                            "annualized_var_source": question_source,
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "질문의 공시값을 계산했습니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_matcher=_product_matcher(),
+    )
+
+    result = await agent(
+        {"question": question_source, "objective": "제공된 공시 VaR 위험등급 계산"}
+    )
+
+    source_record = result["calculations"][0]["input_sources"]["annualized_var_percent"]
+    assert source_record == {"origin": "question", "text": question_source, "chunk_id": None}
+    assert result["calculations"][0]["outputs"]["risk_grade"] == 5
+
+
+def test_reported_var_guard_rejects_product_and_class_mismatch() -> None:
+    source = "C 클래스 공시 연환산 97.5% VaR는 10%"
+    call = {
+        "name": "calculate_fund_reported_var_risk",
+        "args": {"annualized_var_percent": "10", "annualized_var_source": source},
+        "id": "call",
+        "type": "tool_call",
+    }
+    class_state = _reported_var_state(
+        question="미래에셋 장기성장 A 클래스 위험등급",
+        content=source,
+    )
+    product_state = _reported_var_state(
+        question="미래에셋 장기성장 C 클래스 위험등급",
+        content=source,
+        source_file_name="R2_KR9999999999.pdf",
+    )
+
+    assert _reported_var_call_missing_condition(call, class_state) == (
+        _FUND_CLASS_MISSING_CONDITION
+    )
+    assert _reported_var_call_missing_condition(call, product_state) == "대상 펀드 확인 필요"
+    assert _FUND_CLASS_MISSING_CONDITION in _product_var_missing_conditions(class_state)
+
+
+def test_latest_reported_var_requires_trusted_date_metadata() -> None:
+    source = "A 클래스 공시 연환산 97.5% VaR는 10%"
+    state = _reported_var_state(
+        question="미래에셋 장기성장 A 클래스의 최신 위험등급",
+        content=source,
+    )
+    call = {
+        "name": "calculate_fund_reported_var_risk",
+        "args": {"annualized_var_percent": "10", "annualized_var_source": source},
+        "id": "call",
+        "type": "tool_call",
+    }
+
+    assert _reported_var_call_missing_condition(call, state) == (
+        _LATEST_DISCLOSURE_MISSING_CONDITION
+    )
+    assert _product_var_missing_conditions(state) == (_LATEST_DISCLOSURE_MISSING_CONDITION,)
+
+
+def test_product_result_preserves_python_var_condition_as_conditional() -> None:
+    chunk = _chunk(DocumentType.FUND_PROSPECTUS)
+    result = _build_product_result(
+        search_result=SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[chunk],
+        ),
+        calculations=[],
+        status="determined",
+        conclusion="최신 위험등급입니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[chunk.chunk_id],
+        enforced_missing_conditions=(_LATEST_DISCLOSURE_MISSING_CONDITION,),
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [_LATEST_DISCLOSURE_MISSING_CONDITION]
+
+
+def test_reported_var_context_blocks_daily_tool_and_keeps_reported_tool() -> None:
+    source = "A 클래스 공시 연환산 97.5% VaR는 10%"
+    state = _reported_var_state(
+        question="미래에셋 장기성장 A 클래스 위험등급",
+        content=source,
+    )
+    daily_call = {
+        "name": "calculate_fund_var_risk",
+        "args": {
+            "daily_loss_percentile_percent": "10",
+            "daily_loss_percentile_source": source,
+        },
+        "id": "daily",
+        "type": "tool_call",
+    }
+    reported_call = {
+        "name": "calculate_fund_reported_var_risk",
+        "args": {"annualized_var_percent": "10", "annualized_var_source": source},
+        "id": "reported",
+        "type": "tool_call",
+    }
+    allowed = (
+        "calculate_fund_reported_var_risk",
+        "calculate_fund_var_risk",
+        "submit_domain_result",
+    )
+
+    assert not _product_tool_call_is_allowed(daily_call, state=state, allowed_tools=allowed)
+    assert _product_tool_call_is_allowed(reported_call, state=state, allowed_tools=allowed)
+
+    state["messages"] = [AIMessage(content="", tool_calls=[daily_call, reported_call])]
+    update = EnforceProductToolSequence(
+        lookup_tool_name="lookup_product_codes",
+        max_search_calls=2,
+        calculation_tool_names=(
+            "calculate_fund_reported_var_risk",
+            "calculate_fund_var_risk",
+        ),
+    ).after_model(state, None)
+    assert update is not None
+    assert update["messages"][0].tool_calls == [reported_call]
+
+
 @pytest.mark.parametrize(
     ("builder", "document_type", "calculation"),
     [
@@ -4819,6 +5133,7 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "누락된 판단 기준과 다른 문서 용어" in product_prompt
     assert "calculate_fund_standard_price" in product_prompt
     assert "calculate_fund_var_risk" in product_prompt
+    assert "calculate_fund_reported_var_risk" in product_prompt
     assert "2회" not in product_prompt
     assert "두 번" not in product_prompt
     assert '"product_code":"KR510902511M"' not in product_prompt
