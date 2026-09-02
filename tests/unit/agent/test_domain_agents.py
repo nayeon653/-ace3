@@ -412,6 +412,8 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
                     "calculate_pension_income_tax",
                     "calculate_non_pension_withdrawal_tax",
                     "calculate_deferred_retirement_withdrawal_tax",
+                    "calculate_pension_withdrawal_allocation",
+                    "calculate_pension_withdrawal_tax_breakdown",
                     "submit_domain_result",
                 }
                 if domain == "tax_payout"
@@ -2646,6 +2648,160 @@ def test_tax_agent_keeps_only_first_pension_installment_tool() -> None:
     assert kept == ["calculate_pension_annual_limit_installment"]
 
 
+def test_tax_agent_keeps_only_first_pension_withdrawal_tool() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[],
+        tool_names=[
+            "calculate_pension_withdrawal_tax_breakdown",
+            "calculate_pension_withdrawal_allocation",
+        ],
+    )
+
+    assert kept == ["calculate_pension_withdrawal_tax_breakdown"]
+
+
+def test_tax_agent_allows_only_submit_after_pension_withdrawal_calculation() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[{"calculator_id": "pension_withdrawal_allocation"}],
+        tool_names=[
+            "calculate_pension_income_tax",
+            "calculate_pension_withdrawal_tax_breakdown",
+            "submit_domain_result",
+        ],
+    )
+
+    assert kept == ["submit_domain_result"]
+
+
+def test_tax_agent_allows_allocation_after_failed_breakdown_without_calculation() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[],
+        tool_names=["calculate_pension_withdrawal_allocation"],
+    )
+
+    assert kept == ["calculate_pension_withdrawal_allocation"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("calculator_tool", "calculator_args", "expected_calculator"),
+    [
+        (
+            "calculate_pension_withdrawal_allocation",
+            {
+                "requested_withdrawal_krw": "500",
+                "tax_free_source_balance_krw": "1000",
+                "deferred_retirement_source_balance_krw": "0",
+                "credited_and_earnings_source_balance_krw": "0",
+                "requested_withdrawal_krw_source": "현재 인출 요청액 500원",
+                "tax_free_source_balance_krw_source": (
+                    "세액공제 미적용 원금 비과세 재원의 현재 잔액 1000원"
+                ),
+                "deferred_retirement_source_balance_krw_source": (
+                    "이연퇴직소득 퇴직금 재원의 현재 잔액 0원"
+                ),
+                "credited_and_earnings_source_balance_krw_source": (
+                    "세액공제 받은 원금·운용수익 재원의 현재 잔액 0원"
+                ),
+            },
+            "pension_withdrawal_allocation",
+        ),
+        (
+            "calculate_pension_withdrawal_tax_breakdown",
+            {
+                "requested_withdrawal_krw": "500",
+                "tax_free_source_balance_krw": "0",
+                "deferred_retirement_source_balance_krw": "0",
+                "credited_and_earnings_source_balance_krw": "1000",
+                "pension_treated_withdrawal_krw": "0",
+                "non_pension_treated_withdrawal_krw": "500",
+                "requested_withdrawal_krw_source": "현재 인출 요청액 500원",
+                "tax_free_source_balance_krw_source": (
+                    "세액공제 미적용 원금 비과세 재원의 현재 잔액 0원"
+                ),
+                "deferred_retirement_source_balance_krw_source": (
+                    "이연퇴직소득 퇴직금 재원의 현재 잔액 0원"
+                ),
+                "credited_and_earnings_source_balance_krw_source": (
+                    "세액공제 받은 원금·운용수익 재원의 현재 잔액 1000원"
+                ),
+                "pension_treated_withdrawal_krw_source": (
+                    "현재 요청 중 연금수령으로 처리되는 금액 0원"
+                ),
+                "non_pension_treated_withdrawal_krw_source": (
+                    "현재 요청 중 연금외수령으로 처리되는 금액 500원"
+                ),
+            },
+            "pension_withdrawal_tax_breakdown",
+        ),
+    ],
+)
+async def test_tax_agent_runs_pension_withdrawal_paths(
+    calculator_tool: str,
+    calculator_args: dict[str, Any],
+    expected_calculator: str,
+) -> None:
+    content = "; ".join(
+        str(value) for key, value in calculator_args.items() if key.endswith("source")
+    )
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, content=content)],
+        )
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "인출 계산"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": calculator_tool,
+                        "args": calculator_args,
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "계산 결과를 적용합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": content, "objective": "인출 계산"})
+
+    assert result["calculations"][0]["calculator_id"] == expected_calculator
+    assert result["calculations"][0]["input_sources"]
+    assert result["evidence"]
+
+
 def test_tax_agent_allows_only_submit_after_pension_installment_calculation() -> None:
     kept = _sequence_result_tool_names(
         calculations=[{"calculator_id": "pension_annual_limit_installment"}],
@@ -3610,6 +3766,146 @@ def test_non_pension_rate_only_does_not_force_missing_amount() -> None:
     assert result["decision"]["missing_conditions"] == []
 
 
+def _withdrawal_calculation(
+    calculator_id: str,
+    *,
+    outputs: dict[str, Any],
+    inputs: dict[str, Any] | None = None,
+) -> Any:
+    return {
+        "calculator_id": calculator_id,
+        "inputs": inputs or {},
+        "input_sources": {
+            "requested_withdrawal_krw": {
+                "origin": "question",
+                "text": "요청 인출액 10원",
+                "chunk_id": None,
+            }
+        },
+        "outputs": outputs,
+        "units": {key: "KRW" for key in outputs},
+        "warnings": ["비과세 재원도 연금수령한도를 소진합니다."],
+    }
+
+
+def test_withdrawal_allocation_does_not_force_conditional_status() -> None:
+    result = _build_result_with_calculations(
+        [
+            _withdrawal_calculation(
+                "pension_withdrawal_allocation",
+                inputs={"requested_withdrawal_krw": "10.25"},
+                outputs={
+                    "tax_free_withdrawal_krw": "10.25",
+                    "tax_free_remaining_balance_krw": "89.75",
+                    "deferred_retirement_withdrawal_krw": "0",
+                    "deferred_retirement_remaining_balance_krw": "50",
+                    "credited_and_earnings_withdrawal_krw": "0",
+                    "credited_and_earnings_remaining_balance_krw": "25",
+                },
+            )
+        ]
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert "10.25" in result["decision"]["conclusion"]
+    assert result["calculations"][0]["input_sources"]
+    assert result["evidence"]
+
+
+def test_withdrawal_breakdown_null_without_annual_total_forces_conditional() -> None:
+    result = _build_result_with_calculations(
+        [
+            _withdrawal_calculation(
+                "pension_withdrawal_tax_breakdown",
+                outputs={
+                    "credited_and_earnings_pension_withdrawal_krw": "10",
+                    "credited_and_earnings_pension_tax_krw": None,
+                    "credited_and_earnings_pension_after_tax_krw": None,
+                    "current_withdrawal_tax_krw": None,
+                    "current_withdrawal_after_tax_krw": None,
+                },
+            )
+        ],
+        missing_conditions=["기존 조건", _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [
+        "기존 조건",
+        _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION,
+    ]
+    assert "확정할 수 없음" in result["decision"]["conclusion"]
+    assert "None원" not in result["decision"]["conclusion"]
+    assert "0원" not in result["decision"]["conclusion"]
+
+
+def test_withdrawal_breakdown_separate_tax_option_forces_conditional() -> None:
+    result = _build_result_with_calculations(
+        [
+            _withdrawal_calculation(
+                "pension_withdrawal_tax_breakdown",
+                inputs={"annual_private_pension_taxable_income_krw": "20000000"},
+                outputs={
+                    "credited_and_earnings_pension_withdrawal_krw": "10",
+                    "credited_and_earnings_pension_tax_krw": None,
+                    "credited_and_earnings_pension_after_tax_krw": None,
+                    "current_withdrawal_tax_krw": None,
+                    "current_withdrawal_after_tax_krw": None,
+                    "annual_private_pension_separate_tax_option_tax_krw": "3300000.00",
+                },
+            )
+        ],
+        missing_conditions=["기존 조건", _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION],
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == [
+        "기존 조건",
+        _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
+    ]
+    conclusion = result["decision"]["conclusion"]
+    assert "연간 전체 과세대상 사적연금소득 기준 16.5% 분리과세 선택세액" in conclusion
+    assert "현재 인출 세액" not in conclusion
+    assert "초과분 세액" not in conclusion
+    assert "환급액" not in conclusion
+
+
+def test_withdrawal_presentations_show_allocation_and_only_positive_breakdown_paths() -> None:
+    allocation = _withdrawal_calculation(
+        "pension_withdrawal_allocation",
+        inputs={"requested_withdrawal_krw": "10.25"},
+        outputs={
+            "tax_free_withdrawal_krw": "10.25",
+            "tax_free_remaining_balance_krw": "89.75",
+            "deferred_retirement_withdrawal_krw": "0",
+            "deferred_retirement_remaining_balance_krw": "50",
+            "credited_and_earnings_withdrawal_krw": "0",
+            "credited_and_earnings_remaining_balance_krw": "25",
+        },
+    )
+    breakdown = _withdrawal_calculation(
+        "pension_withdrawal_tax_breakdown",
+        outputs={
+            "tax_free_pension_withdrawal_krw": "10.25",
+            "tax_free_pension_tax_krw": "0",
+            "tax_free_pension_after_tax_krw": "10.25",
+            "deferred_retirement_pension_withdrawal_krw": "0",
+            "deferred_retirement_pension_tax_krw": "0",
+            "deferred_retirement_pension_after_tax_krw": "0",
+            "current_withdrawal_tax_krw": "0",
+            "current_withdrawal_after_tax_krw": "10.25",
+        },
+    )
+
+    summary = format_calculation_summary([allocation, breakdown])
+
+    assert "요청 인출액: 10.25" in summary
+    assert "비과세 재원 인출액: 10.25 KRW, 남은 잔액: 89.75 KRW" in summary
+    assert "비과세 재원·연금 처리 인출액: 10.25 KRW" in summary
+    assert "이연퇴직소득·연금 처리 인출액" not in summary
+    assert "비과세 재원도 연금수령한도를 소진합니다." in breakdown["warnings"]
+
+
 def test_pension_income_presentations_do_not_misstate_tax_meaning() -> None:
     summary = format_calculation_summary(
         [
@@ -4500,6 +4796,11 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "1,000좌당 기준가격" in tax_prompt
     assert "11년차 이후에는 연금수령한도가 적용되지 않으며" in tax_prompt
     assert "calculate_pension_tax_credit" in tax_prompt
+    assert "calculate_pension_withdrawal_allocation" in tax_prompt
+    assert "calculate_pension_withdrawal_tax_breakdown" in tax_prompt
+    assert "재원별 인출 순서·배분만 필요" in tax_prompt
+    assert "그 전에 `calculate_pension_withdrawal_allocation`을 호출하지 않는다" in tax_prompt
+    assert "두 #115 Tool을 동시에 또는 연속 호출하지 않는다" in tax_prompt
     assert "지원하지 않는 세금, 금액, 세율이나 한도를 직접 계산하지 않는다" in tax_prompt
     assert "submit_domain_result" in tax_prompt
     assert "Product Agent 책임이므로" in tax_prompt

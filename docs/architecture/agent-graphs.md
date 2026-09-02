@@ -181,6 +181,8 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_pension_income_tax\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_income_tax].after_model")
 	ToolCallLimitMiddleware\5bcalculate_non_pension_withdrawal_tax\5d\2eafter_model("ToolCallLimitMiddleware[calculate_non_pension_withdrawal_tax].after_model")
 	ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model("ToolCallLimitMiddleware[calculate_deferred_retirement_withdrawal_tax].after_model")
+	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_allocation\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_withdrawal_allocation].after_model")
+	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model("ToolCallLimitMiddleware[calculate_pension_withdrawal_tax_breakdown].after_model")
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model("ToolCallLimitMiddleware[submit_domain_result].after_model")
 	EnforceTaxPayoutToolSequence\2eafter_model("EnforceTaxPayoutToolSequence.after_model")
 	__end__([<p>__end__</p>]):::last
@@ -208,11 +210,15 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_pension_tax_credit\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_pension_unit_installment\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_period_installment\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_pension_unit_installment\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_allocation\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_allocation\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_limit\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_allocation\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> TaxPayoutModelCallLimit\2eafter_model;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_deferred_retirement_withdrawal_tax\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_pension_withdrawal_tax_breakdown\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model -.-> __end__;
 	__start__ --> CompleteTaxPayoutResult\2ebefore_model;
 	model --> EnforceTaxPayoutToolSequence\2eafter_model;

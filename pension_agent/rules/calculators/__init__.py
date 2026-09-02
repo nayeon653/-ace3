@@ -19,6 +19,10 @@ from pension_agent.rules.calculators.pension_tax_credit import PENSION_TAX_CREDI
 from pension_agent.rules.calculators.pension_unit_installment import (
     PENSION_UNIT_INSTALLMENT,
 )
+from pension_agent.rules.calculators.pension_withdrawal_breakdown import (
+    PENSION_WITHDRAWAL_ALLOCATION,
+    PENSION_WITHDRAWAL_TAX_BREAKDOWN,
+)
 from pension_agent.rules.calculators.pension_withdrawal_limit import (
     PENSION_WITHDRAWAL_LIMIT,
 )
@@ -34,6 +38,8 @@ CALCULATORS = {
     "pension_tax_credit": PENSION_TAX_CREDIT,
     "pension_unit_installment": PENSION_UNIT_INSTALLMENT,
     "pension_withdrawal_limit": PENSION_WITHDRAWAL_LIMIT,
+    "pension_withdrawal_allocation": PENSION_WITHDRAWAL_ALLOCATION,
+    "pension_withdrawal_tax_breakdown": PENSION_WITHDRAWAL_TAX_BREAKDOWN,
 }
 
 __all__ = [
@@ -47,5 +53,7 @@ __all__ = [
     "PENSION_PERIOD_INSTALLMENT",
     "PENSION_TAX_CREDIT",
     "PENSION_UNIT_INSTALLMENT",
+    "PENSION_WITHDRAWAL_ALLOCATION",
     "PENSION_WITHDRAWAL_LIMIT",
+    "PENSION_WITHDRAWAL_TAX_BREAKDOWN",
 ]

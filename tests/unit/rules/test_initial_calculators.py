@@ -25,6 +25,8 @@ def test_calculator_map_contains_registered_set() -> None:
         "pension_tax_credit",
         "pension_unit_installment",
         "pension_withdrawal_limit",
+        "pension_withdrawal_allocation",
+        "pension_withdrawal_tax_breakdown",
     }
 
 
