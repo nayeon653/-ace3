@@ -5193,6 +5193,63 @@ async def test_tax_agent_not_applicable_accepted_without_search() -> None:
 
 
 @pytest.mark.anyio
+async def test_tax_agent_excludes_unused_retrieved_chunk_from_evidence() -> None:
+    cited_chunk = _chunk(
+        DocumentType.PENSION_REFERENCE,
+        chunk_id="550e8400-e29b-41d4-a716-446655440001",
+        content="세액공제는 연금저축과 퇴직연금 납입액에 적용됩니다.",
+    )
+    other_chunk = _chunk(
+        DocumentType.PENSION_REFERENCE,
+        chunk_id="550e8400-e29b-41d4-a716-446655440002",
+        content="이 문서는 결론과 무관한 다른 절차를 설명합니다.",
+    )
+    search = FakeSearchService(
+        SearchResult(execution_status="completed", retrieved_chunks=[cited_chunk, other_chunk])
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "세액공제 적용 대상 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "세액공제는 연금저축과 퇴직연금 납입액에 적용됩니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [cited_chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent(
+        {"question": "세액공제는 어디에 적용되나요?", "objective": "세액공제 적용 대상 판단"}
+    )
+
+    assert result["decision"]["status"] == "determined"
+    assert [item["chunk_id"] for item in result["evidence"]] == [cited_chunk.chunk_id]
+
+
+@pytest.mark.anyio
 async def test_tax_agent_determined_still_requires_search_before_submit() -> None:
     chunk = _chunk(DocumentType.PENSION_REFERENCE)
     search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
