@@ -5423,8 +5423,7 @@ async def test_tax_agent_runs_period_installment_calculation_without_search() ->
     result = await agent(
         {
             "question": (
-                "현재 계좌 평가액 5천만원을 전체 기간 잔여회차 10회로 나누면 "
-                "회당 얼마 받나요?"
+                "현재 계좌 평가액 5천만원을 전체 기간 잔여회차 10회로 나누면 회당 얼마 받나요?"
             ),
             "objective": "명시된 입력으로 기간분할 지급액 계산",
         }
@@ -7295,6 +7294,4 @@ async def test_tax_agent_blocks_executive_limit_after_db_benefit_calculation() -
     result = await agent({"question": "DB 퇴직급여를 계산해줘", "objective": "DB 급여 계산"})
 
     assert result["decision"]["status"] == "determined"
-    assert [item["calculator_id"] for item in result["calculations"]] == [
-        "db_retirement_benefit"
-    ]
+    assert [item["calculator_id"] for item in result["calculations"]] == ["db_retirement_benefit"]
