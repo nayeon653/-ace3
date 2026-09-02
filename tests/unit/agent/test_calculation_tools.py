@@ -498,6 +498,24 @@ async def test_isa_transfer_deadline_tool_requires_optional_value_and_source_tog
 
 @pytest.mark.anyio
 async def test_calculation_tool_requires_completed_search_evidence() -> None:
+    result = await create_fund_standard_price_tool().coroutine(
+        total_assets_krw=Decimal(1000000),
+        total_liabilities_krw=Decimal(100000),
+        total_units=Decimal(100000),
+        total_assets_source="자산총액 100만원",
+        total_liabilities_source="부채총액 10만원",
+        total_units_source="총좌수 10만좌",
+        runtime=_runtime(with_evidence=False),
+    )
+
+    assert isinstance(result, str)
+    assert "문서 근거" in result
+
+
+@pytest.mark.anyio
+async def test_calculation_tool_allows_question_sourced_calculation_without_search_evidence() -> (
+    None
+):
     result = await create_pension_withdrawal_limit_tool().coroutine(
         account_valuation_krw=Decimal(10000000),
         pension_year=1,
@@ -506,8 +524,9 @@ async def test_calculation_tool_requires_completed_search_evidence() -> None:
         runtime=_runtime(with_evidence=False),
     )
 
-    assert isinstance(result, str)
-    assert "문서 근거" in result
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "pension_withdrawal_limit"
 
 
 @pytest.mark.anyio
