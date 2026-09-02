@@ -1,5 +1,6 @@
 """Domain Agent용 Calculation Tool 어댑터를 검증한다."""
 
+from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -20,6 +21,7 @@ from pension_agent.agent.calculation import (
     create_fund_reported_var_risk_tool,
     create_fund_standard_price_tool,
     create_fund_var_risk_tool,
+    create_isa_transfer_deadline_tool,
     create_medical_care_withdrawal_tax_breakdown_tool,
     create_medical_care_withdrawal_tax_limit_tool,
     create_non_pension_withdrawal_tax_tool,
@@ -393,6 +395,104 @@ async def test_fund_redemption_fee_tool_rejects_fixed_with_ceiling_expression() 
 
     assert isinstance(result, str)
     assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_isa_transfer_deadline_tool_preserves_exact_date_provenance() -> None:
+    maturity_source = "ISA 만기일은 2026년 4월 15일"
+    completion_source = "입금확인 처리일은 2026-06-14"
+    result = await create_isa_transfer_deadline_tool().coroutine(
+        isa_maturity_date=date(2026, 4, 15),
+        transfer_completion_date=date(2026, 6, 14),
+        isa_maturity_date_source=maturity_source,
+        transfer_completion_date_source=completion_source,
+        runtime=_runtime(
+            question="ISA 전환 기한을 계산해줘",
+            chunk_content=f"{maturity_source}; {completion_source}",
+        ),
+    )
+
+    assert isinstance(result, Command)
+    calculation = result.update["calculations"][0]
+    assert calculation["calculator_id"] == "isa_transfer_deadline"
+    assert calculation["inputs"] == {
+        "isa_maturity_date": "2026-04-15",
+        "transfer_completion_date": "2026-06-14",
+    }
+    assert calculation["outputs"] == {
+        "transfer_deadline_date": "2026-06-14",
+        "within_deadline": True,
+    }
+    assert calculation["input_sources"]["isa_maturity_date"] == {
+        "origin": "evidence",
+        "text": maturity_source,
+        "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "source"),
+    [
+        ("maturity", "ISA 해지일은 2026-04-15"),
+        ("maturity", "ISA 계약일은 2026-04-15"),
+        ("maturity", "문서 작성일은 2026-04-15"),
+        ("maturity", "ISA 만기일은 2026-04-15가 아님"),
+        ("completion", "전환 신청일은 2026-06-14"),
+        ("completion", "연금계좌 입금일은 2026-06-14"),
+        ("completion", "입금확인 처리일은 약 2026-06-14"),
+        ("completion", "입금확인 처리일은 2026-06-13~2026-06-14"),
+        ("completion", "입금확인 처리일은 2026년 6월"),
+    ],
+)
+async def test_isa_transfer_deadline_tool_rejects_wrong_or_non_exact_date_meaning(
+    field: str,
+    source: str,
+) -> None:
+    maturity_source = source if field == "maturity" else "ISA 만기일은 2026-04-15"
+    completion_source = source if field == "completion" else "입금확인일은 2026-06-14"
+    result = await create_isa_transfer_deadline_tool().coroutine(
+        isa_maturity_date=date(2026, 4, 15),
+        transfer_completion_date=date(2026, 6, 14),
+        isa_maturity_date_source=maturity_source,
+        transfer_completion_date_source=completion_source,
+        runtime=_runtime(
+            question="ISA 전환 기한을 계산해줘",
+            chunk_content=f"{maturity_source}; {completion_source}",
+        ),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_isa_transfer_deadline_tool_rejects_same_source_for_two_date_meanings() -> None:
+    source = "ISA 만기일과 입금확인일은 2026-04-15"
+    result = await create_isa_transfer_deadline_tool().coroutine(
+        isa_maturity_date=date(2026, 4, 15),
+        transfer_completion_date=date(2026, 4, 15),
+        isa_maturity_date_source=source,
+        transfer_completion_date_source=source,
+        runtime=_runtime(question=source, chunk_content=source),
+    )
+
+    assert isinstance(result, str)
+    assert "출처" in result
+
+
+@pytest.mark.anyio
+async def test_isa_transfer_deadline_tool_requires_optional_value_and_source_together() -> None:
+    result = await create_isa_transfer_deadline_tool().coroutine(
+        isa_maturity_date=date(2026, 4, 15),
+        transfer_completion_date=date(2026, 6, 14),
+        isa_maturity_date_source="ISA 만기일은 2026-04-15",
+        transfer_completion_date_source=None,
+        runtime=_runtime(),
+    )
+
+    assert isinstance(result, str)
+    assert "함께" in result
 
 
 @pytest.mark.anyio

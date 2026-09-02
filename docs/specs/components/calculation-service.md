@@ -57,6 +57,7 @@ lifecycle, 다중 버전 선택, 적용 기간과 계산 permission은 구현하
 | `dc_minimum_employer_contribution` | 연간임금총액의 12분의 1인 DC 최소 사용자 부담금 계산 | Issue #118; 원본 knowledge locator 미매핑 |
 | `dc_retirement_benefit` | 실제 누적 부담금과 부호 있는 누적 운용손익을 합산한 DC 퇴직급여 계산 | Issue #118; 원본 knowledge locator 미매핑 |
 | `db_to_dc_transfer_amount` | 두 월 기준 중 큰 값과 검증된 근속연수로 DB→DC 전환금액 계산 | Issue #118; 원본 knowledge locator 미매핑 |
+| `isa_transfer_deadline` | ISA 만기일 다음 날을 제1일로 세는 60 calendar days 마감일과 선택적인 전환 완료 여부 판정 | `doc4.pdf` 1~2쪽; 만기일 기준·초일불산입·입금확인 완료일 기준 |
 | `fund_standard_price` | (자산총액 - 부채총액) ÷ 총좌수 × 1,000, 소수 셋째 자리 반올림 | `R2_KR510902511M.pdf` 24쪽 |
 | `fund_var_risk` | `abs(일간 2.5퍼센타일 손실률) × √250` 후 6단계 상한표 | `R2_KR5160420009.pdf` 20쪽 |
 | `fund_reported_var_risk` | 공시된 연환산 97.5% VaR를 추가 변환 없이 6단계 상한표에 적용 | `R2_KR5131420025.pdf` 19~20쪽 |
@@ -456,6 +457,55 @@ Product Agent가 검색 근거에서 확정하고, Rules는 구간표를 내장�
 비율(예: 30일 미만 이익금의 70%)로 각각 확인했으며, 두 rate_kind가 실제 문서에 모두
 존재한다.
 
+### ISA 만기자금 연금전환 마감일 계산 계약
+
+**`isa_transfer_deadline`**: 필수 입력 `isa_maturity_date`와 선택 입력
+`transfer_completion_date`는 Python `date`다. ISA 만기일 다음 날을 제1일로 세는
+초일불산입 방식에 따라 `transfer_deadline_date = isa_maturity_date + timedelta(days=60)`을
+계산한다. 60일은 calendar days이며 영업일 보정을 적용하지 않는다. 현재 시간, timezone과
+시스템 날짜도 읽지 않는다.
+
+완료일이 있으면 `transfer_completion_date <= transfer_deadline_date`일 때
+`within_deadline=true`이고 마감일과 같은 날도 기한 충족이다. 마감일 뒤면 `false`이며,
+완료일이 ISA 만기일보다 앞서면 입력 오류다. 완료일을 생략해도 계산 가능한 마감일은
+보존하고 완료 여부는 상위 Agent가 조건부로 처리한다.
+
+**날짜 의미와 provenance**: 기준일은 ISA 만기일이며 ISA 해지일, 가입일, 계약일,
+문서 작성일, 신청일 또는 연금계좌 입금일로 대체하지 않는다. 완료일은 입금확인 완료일,
+연금전환 완료 처리일 또는 문서·Issue 계약상 동등하게 확정된 완료일이어야 한다. 신청일,
+접수일, 단순 입금일, 예정일과 문서 작성일은 완료일로 사용하지 않는다. 전환 신청일과
+입금확인 완료일은 서로 다른 의미다.
+
+Tool은 각 semantic field의 exact date와 source가 같은 구절에서 대응하는지 검증한다.
+`9월 초`, `9월 중`, `9월경`, `9월 1~3일`, `9월 1일이 아닌` 같은 근사·범위·부정 표현은
+exact date 입력으로 승인하지 않는다. 같은 날짜가 여러 의미로 등장해도 필드별 의미를
+따로 검증한다. 값과 source는 함께 전달하거나 함께 생략하며 검증된 출처를 계산 결과에
+보존한다.
+
+**책임과 응답 경계**: Policy Agent는 어떤 날짜가 ISA 만기일인지, deadline-only 질문과
+완료 여부 질문을 구분하고, 완료일 의미와 전체 ISA 연금전환 eligibility 및 누락 조건을
+판단한다. Tool은 날짜 의미·정확한 값·provenance를 검증하고 Rules는 확정된 날짜에
+60 calendar days를 더해 선택적으로 완료일을 비교한다. Presentation은 Rules의 날짜와
+판정을 재계산하거나 반올림하지 않고 그대로 표시한다. Main Supervisor에는 #120 전용 계산
+또는 날짜 판정 책임을 추가하지 않는다.
+
+ISA 만기일만 확인되고 완료일이 없으면 `transfer_deadline_date` 계산을 제거하지 않고
+`status=conditional`, missing condition `입금확인·전환완료 처리일 확인 필요`로 제출한다.
+`within_deadline=true`는 60일 기한만 충족했다는 뜻이며 나머지 ISA 연금전환 요건까지
+충족했다는 최종 eligibility가 아니다.
+
+“오늘 기준 며칠 남았는지”처럼 기준일과의 차이를 묻지만 질문에 명시적 reference date가
+없고 저장소에 검증된 current-date injection 계약도 없으면 `date.today()`를 호출하거나
+남은 일수를 직접 계산하지 않는다. 마감일을 계산할 수 있으면 그대로 보존하고
+`status=conditional`, missing condition `남은 일수 기준일 확인 필요`로 제출한다.
+
+**원문 locator**: `data/raw/knowledge_docs/doc4.pdf`의 SHA-256은
+`5bf14f59b5842ec252ae01fe3b5e21f5becf476b9a82aa661ab8c490fff030ee`이고
+`data/indexes/knowledge_docs/source_manifest.jsonl`의 `source_id=doc4` 매핑과 일치한다.
+1쪽은 ISA 만기일로부터 60일, calendar 기준, 초일불산입과 입금확인일의 전환완료 처리를
+명시한다. 2쪽은 60일 경과 시 전환 불가와 신청일이 기한 안이어도 입금확인일이 60일을
+넘으면 오류라는 구분을 재확인한다.
+
 ## 실행 제한과 오류
 
 - 문자열 수식, DSL, `eval`과 동적 모듈 import를 실행하지 않는다.
@@ -488,7 +538,7 @@ Calculation Service에는 Agent permission 계층을 넣지 않는다. Agent 계
 |---|---|
 | Tax/Payout Agent | `pension_withdrawal_limit`, `pension_annual_limit_installment`, `pension_period_installment`, `pension_unit_installment`, `pension_tax_credit`, `pension_income_tax`, `non_pension_withdrawal_tax`, `deferred_retirement_withdrawal_tax`, `pension_withdrawal_allocation`, `pension_withdrawal_tax_breakdown`, `medical_care_withdrawal_tax_limit`, `medical_care_withdrawal_tax_breakdown`, `db_retirement_benefit`, `dc_minimum_employer_contribution`, `dc_retirement_benefit`, `db_to_dc_transfer_amount` |
 | Product Agent | `fund_standard_price`, `fund_var_risk`, `fund_reported_var_risk`, `fund_frontend_sales_fee`, `fund_deferred_sales_fee`, `fund_redemption_fee` |
-| Policy Agent | `dc_medical_withdrawal_threshold` |
+| Policy Agent | `dc_medical_withdrawal_threshold`, `isa_transfer_deadline` |
 | Main Supervisor | 직접 호출 금지 |
 
 Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 Agent state에 직접 누적한다.
@@ -512,6 +562,7 @@ Calculation Tool은 완료된 검색 근거가 있어야 실행되고 결과를 
 - `tests/unit/rules/test_deferred_retirement_withdrawal_tax.py`
 - `tests/unit/rules/test_pension_withdrawal_breakdown.py`
 - `tests/unit/rules/test_medical_care_withdrawal.py`
+- `tests/unit/rules/test_isa_transfer_deadline.py`
 - `tests/unit/agent/test_calculation_tools.py`
 - `tests/unit/agent/test_domain_agents.py`
 - `tests/test_agent_import_boundaries.py`

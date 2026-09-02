@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import operator
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, NotRequired, Protocol, cast
@@ -24,8 +25,10 @@ from pydantic import Field, ValidationError
 
 from pension_agent.agent.calculation import (
     CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME,
+    CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME,
     calculation_evidence_chunk_ids,
     create_dc_medical_withdrawal_threshold_tool,
+    create_isa_transfer_deadline_tool,
     format_calculation_summary,
 )
 from pension_agent.agent.contracts import (
@@ -52,6 +55,10 @@ _DC_ELIGIBILITY_MISSING_CONDITION = (
 _RETIREMENT_SCHEME_MISSING_CONDITION = "DB 또는 DC 제도 유형 확인 필요"
 _SERVICE_RECOGNITION_MISSING_CONDITION = "계속근로·근속 인정 여부 확인 필요"
 _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION = "DB→DC 전환 가능 조건 확인 필요"
+_ISA_MATURITY_DATE_MISSING_CONDITION = "ISA 만기일 확인 필요"
+_ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION = "입금확인·전환완료 처리일 확인 필요"
+_ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION = "남은 일수 기준일 확인 필요"
+_ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION = "ISA 연금전환의 나머지 적용 요건 확인 필요"
 
 
 class PolicyAgentState(AgentState):
@@ -124,8 +131,8 @@ class RequirePolicyTool(AgentMiddleware[Any, Any, Any]):
             instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
         elif state.get("search_result") is not None:
             instruction = (
-                "DC 의료비 중도인출의 임금 12.5% 기준 계산이면 "
-                "calculate_dc_medical_withdrawal_threshold Tool을 호출하고, "
+                "DC 의료비 중도인출의 임금 12.5% 기준 또는 ISA 연금전환 60일 기한 "
+                "계산이면 의미에 맞는 Calculation Tool을 호출하고, "
                 "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
             )
         else:
@@ -165,7 +172,7 @@ class SinglePolicySubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
 
 
 class EnforcePolicyToolSequence(AgentMiddleware[Any, Any, Any]):
-    """검색·DC 계산·결과 제출 순서에서 허용된 Tool 호출만 남긴다."""
+    """검색·Policy 계산·결과 제출 순서에서 허용된 Tool 호출만 남긴다."""
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
@@ -180,9 +187,14 @@ class EnforcePolicyToolSequence(AgentMiddleware[Any, Any, Any]):
         else:
             allowed = (
                 CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME,
+                CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
-        allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed]
+        allowed_calls = [
+            call
+            for call in last_message.tool_calls
+            if call["name"] in allowed and _policy_tool_call_is_allowed(call, state)
+        ]
         calculation_calls = [
             call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
         ]
@@ -226,11 +238,13 @@ def create_policy_react_agent(
     """Policy 패키지가 소유하는 ReAct graph를 만든다."""
 
     threshold_tool = create_dc_medical_withdrawal_threshold_tool()
+    isa_transfer_deadline_tool = create_isa_transfer_deadline_tool()
     graph = create_agent(
         model=model,
         tools=(
             _create_policy_search_tool(search_service),
             threshold_tool,
+            isa_transfer_deadline_tool,
             _create_policy_result_tool(),
         ),
         system_prompt=system_prompt,
@@ -249,6 +263,11 @@ def create_policy_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=threshold_tool.name,
+                run_limit=1,
+                exit_behavior="continue",
+            ),
+            ToolCallLimitMiddleware(
+                tool_name=isa_transfer_deadline_tool.name,
                 run_limit=1,
                 exit_behavior="continue",
             ),
@@ -451,6 +470,30 @@ def _build_policy_result(
                 status = "conditional"
             if _DC_ELIGIBILITY_MISSING_CONDITION not in normalized_missing:
                 normalized_missing.append(_DC_ELIGIBILITY_MISSING_CONDITION)
+    if _is_isa_transfer_question(question):
+        isa_calculations = [
+            calculation
+            for calculation in calculations
+            if calculation["calculator_id"] == "isa_transfer_deadline"
+        ]
+        if not isa_calculations:
+            status = _conditional_unless_stronger(status)
+            normalized_missing.append(_ISA_MATURITY_DATE_MISSING_CONDITION)
+        else:
+            isa_inputs = isa_calculations[0]["inputs"]
+            if (
+                _asks_isa_completion_status(question)
+                and "transfer_completion_date" not in isa_inputs
+            ):
+                status = _conditional_unless_stronger(status)
+                normalized_missing.append(_ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION)
+            if _asks_today_remaining_days(question):
+                status = _conditional_unless_stronger(status)
+                normalized_missing.append(_ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION)
+            if _asks_overall_isa_transfer_eligibility(question):
+                status = _conditional_unless_stronger(status)
+                normalized_missing.append(_ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION)
+        normalized_missing = list(dict.fromkeys(normalized_missing))
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
@@ -498,6 +541,61 @@ def _retirement_policy_missing_conditions(question: str) -> list[str]:
     if ("DB→DC" in question or "DB에서 DC" in question) and "가능" in question:
         conditions.append(_DB_TO_DC_ELIGIBILITY_MISSING_CONDITION)
     return conditions
+
+
+def _policy_tool_call_is_allowed(call: ToolCall, state: Mapping[str, Any]) -> bool:
+    question = state.get("question", "")
+    isa_question = isinstance(question, str) and _is_isa_transfer_question(question)
+    if call["name"] == CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME:
+        return isa_question
+    if call["name"] == CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME:
+        return not isa_question
+    return True
+
+
+def _is_isa_transfer_question(question: str) -> bool:
+    if re.search(r"ISA", question, re.IGNORECASE) is None:
+        return False
+    if any(label in question for label in ("마감", "기한", "60일")):
+        return True
+    return "만기" in question and any(
+        label in question for label in ("연금전환", "연금 전환", "연금계좌 전환")
+    )
+
+
+def _asks_isa_completion_status(question: str) -> bool:
+    has_action_date = any(
+        label in question
+        for label in (
+            "입금확인",
+            "전환완료",
+            "전환 완료",
+            "신청일",
+            "신청했",
+            "입금일",
+            "입금했",
+            "처리했",
+            "처리일",
+        )
+    )
+    asks_status = any(label in question for label in ("기한 안", "기한 내", "늦", "충족", "가능"))
+    return has_action_date and asks_status
+
+
+def _asks_today_remaining_days(question: str) -> bool:
+    return "오늘" in question and any(label in question for label in ("며칠", "남았", "남은"))
+
+
+def _asks_overall_isa_transfer_eligibility(question: str) -> bool:
+    return (
+        any(label in question for label in ("연금전환 가능", "연금 전환 가능", "전환 가능 여부"))
+        and "기한" not in question
+        and "60일" not in question
+    )
+
+
+def _conditional_unless_stronger(status: DecisionStatus) -> DecisionStatus:
+    return "conditional" if status == "determined" else status
 
 
 def _select_evidence(search_result: SearchResult, evidence_chunk_ids: list[str]) -> list[Any]:

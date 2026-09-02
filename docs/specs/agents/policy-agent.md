@@ -22,7 +22,8 @@ Policy Agent는 연금 가입, 이전, 해지, 수령 절차와 제도상 가능
 한다. 출력은 공통 `DomainResult`이며 `domain`은 항상 `policy`다.
 
 완료 결과는 판단 상태, 결론, 누락 조건, 실제 사용 근거와 경고를 포함한다.
-`calculations`는 항상 빈 목록이다.
+`calculations`는 Policy가 허용한 DC 의료비 threshold 또는 ISA 연금전환 기한 계산 결과와
+검증된 input source를 포함할 수 있다.
 
 ## Tool과 문서 접근
 
@@ -40,13 +41,22 @@ Policy Agent는 연금 가입, 이전, 해지, 수령 절차와 제도상 가능
 `missing_conditions`, `warnings`, `evidence_chunk_ids`를 제출한다. Python은 청크 ID가 검색
 결과의 중복 없는 부분집합인지 검증하고 원문 `EvidenceChunk`로 변환한다.
 
+### `calculate_isa_transfer_deadline`
+
+- ISA 만기자금의 연금계좌 전환 마감일과 선택적인 60일 기한 충족 여부에만 사용한다.
+- Policy는 질문이 deadline-only인지 완료 여부 판정인지 구분하고, ISA 만기일과
+  입금확인·전환완료 처리일의 의미를 확인한다.
+- 신청일·접수일·단순 입금일·의미가 불명확한 처리일을 완료일로 승격하지 않는다.
+- Tool은 실행당 최대 1회이며 성공 뒤에는 submit만 허용한다.
+
 ## 실행 흐름
 
 ```text
 DomainRequest
   -> search_documents 1회
   -> 검색 실패/timeout/빈 결과면 Python 안전 종료
-  -> 검색 근거가 있으면 submit_domain_result
+  -> 필요한 경우 허용된 Calculation Tool 1회
+  -> 검색 근거와 선택적인 계산 결과로 submit_domain_result
   -> 검증된 DomainResult
 ```
 
@@ -75,6 +85,8 @@ DomainRequest
 |---|---:|
 | 모델 호출 | 최대 5회 |
 | 검색 Tool | 최대 1회 |
+| DC 의료비 threshold Tool | 최대 1회 |
+| ISA 연금전환 기한 Tool | 최대 1회 |
 | 제출 Tool | 최대 2회 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |
@@ -85,7 +97,8 @@ DomainRequest
 ## 현재 제한
 
 - 제도 문서 사이의 상충 claim을 별도 Validator가 판정하지 않는다.
-- 수치 계산 Tool을 갖지 않는다.
+- ISA 연금전환 기한의 현재 기준 남은 일수는 검증된 reference date 입력 계약이 없어
+  계산하지 않는다.
 - 결과 품질은 검색된 `pension_reference` 청크 범위에 한정된다.
 
 ## 검증 위치
@@ -108,3 +121,18 @@ DomainRequest
 - 제도 유형, 근속 인정 또는 전환 가능 조건이 미확정이면 각각 `DB 또는 DC 제도 유형 확인 필요`, `계속근로·근속 인정 여부 확인 필요`, `DB→DC 전환 가능 조건 확인 필요`를 조건으로 보존한다.
 - 평균일급, 30일 평균임금, 퇴직급여, 최소 사용자 부담금, 전환금액과 퇴직소득세 계산은 Tax/Payout 책임이다.
 - Policy는 #118 Calculation Tool을 등록하지 않으며, 전환금액 결과를 전환 가능 여부로 해석하거나 검증되지 않은 기간·근속연수를 생성하지 않는다.
+
+## ISA 만기자금 연금전환 기한
+
+- Policy는 요청이 마감일 계산인지 실제 완료일의 기한 충족 판정인지 구분하고, 기준일이
+  ISA 만기일인지 확인한다. Calculation Service는 검증된 날짜의 60 calendar days 산술과
+  선택적인 완료일 비교만 담당한다.
+- 완료 판정에는 입금확인 완료일 또는 연금전환 완료 처리일만 사용한다. 신청일, 접수일,
+  단순 입금일, 해지일, 계약일과 문서 작성일은 각 날짜 의미를 대체하지 않는다.
+- 만기일만 확인된 완료 여부 질문은 계산 가능한 마감일을 보존하면서
+  `입금확인·전환완료 처리일 확인 필요`인 `conditional`로 제출한다. 만기일 자체가 없으면
+  `ISA 만기일 확인 필요`를 기록한다.
+- `within_deadline`은 60일 기한만 판정하며 전체 ISA 연금전환 eligibility를 확정하지 않는다.
+  전체 가능 여부 질문에는 나머지 적용 요건을 별도로 확인한다.
+- 현재 시간을 읽지 않는다. 오늘 기준 남은 일수 요청은 마감일만 계산하고 검증된 기준일을
+  누락 조건으로 남긴다.
