@@ -861,7 +861,7 @@ def _build_tax_payout_result(
     if (
         not selected_chunks
         and status != "not_applicable"
-        and (not calculations or required_evidence_ids)
+        and not (calculations and search_result is None)
     ):
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION

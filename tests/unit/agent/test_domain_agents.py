@@ -2464,6 +2464,78 @@ async def test_tax_agent_runs_pension_income_tax_paths(
 
 
 @pytest.mark.anyio
+async def test_tax_agent_forces_undetermined_when_search_done_but_no_evidence_cited() -> None:
+    chunk = _chunk(
+        DocumentType.PENSION_REFERENCE,
+        content="부득이한 사유 인출의 세율 관련 참고 문서입니다.",
+    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "부득이한 사유 인출 세율 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "calculate_pension_income_tax",
+                        "args": {
+                            "pension_treatment": "unavoidable",
+                            "recipient_age": 54,
+                            "pension_treatment_source": "부득이한 사유 연금수령",
+                            "recipient_age_source": "수령자 연령 54세",
+                        },
+                        "id": "calculation-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "계산 결과를 제출합니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "부득이한 사유 연금수령이고 수령자 연령 54세인데 세율이 어떻게 되나요?",
+            "objective": "부득이한 사유 인출 세율 판단",
+        }
+    )
+
+    assert result["decision"]["status"] == "undetermined"
+    assert result["calculations"] == []
+    assert result["evidence"] == []
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("question", "content", "tool_args", "expected_label", "expected_ratio"),
     [
@@ -5959,6 +6031,7 @@ def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> 
     assert "근거 부족 판단을 계산 필요 판단으로 바꾸지 않는다" in tax_prompt
     assert "search_documents` 없이 바로" in tax_prompt
     assert "origin=question" in tax_prompt
+    assert "질문 원문에 모두 있으면 위 규칙대로 검색 없이 호출한다" in tax_prompt
     assert "calculate_dc_medical_withdrawal_threshold" in policy_prompt
     assert "calculate_isa_transfer_deadline" in policy_prompt
     assert "6개월 이상 요양" in policy_prompt

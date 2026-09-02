@@ -33,8 +33,9 @@ warning이 `calculations`에 포함된다.
 
 ### `search_documents`
 
-- `not_applicable` 판단 외에는 `submit_domain_result` 전에 반드시 한 번 호출해야 하며
-  `pension_reference` 문서만 검색한다.
+- `not_applicable` 판단과, 질문 원문만으로 연금수령한도/#116 지급액 계산이 확정되는 direct
+  계산 경로 외에는 `submit_domain_result` 전에 반드시 한 번 호출해야 하며 `pension_reference`
+  문서만 검색한다.
 - 문서명과 청크 ID는 사용자 질문 원문에 실제 포함된 경우에만 힌트로 사용한다.
 - 검색 방식과 결과 수는 Search Service가 결정한다.
 
@@ -83,9 +84,10 @@ warning이 `calculations`에 포함된다.
 - 좌수와 원화 금액을 혼용하지 않으며 호출은 한 번으로 제한한다. 다른 #116 계산 Tool과
   동시에 또는 연속 실행하지 않는다.
 
-네 #116 Tool 모두 지급 방식 적용 여부와 검색 근거 확인은 Agent, 결정론적 산술은 Rules,
-값/source의 같은 구절 대응 검증은 Tool이 담당한다. Agent와 presentation은 Python 결과를
-재계산하지 않고 문서에 없는 좌수·원 단위 반올림·절사를 적용하지 않는다.
+네 Tool 모두 지급 방식 적용 여부 확인은 Agent가 담당하며, 질문 원문에 필요한 값이 모두 있으면
+검색 없이, 없으면 검색 근거로 확인한다. 결정론적 산술은 Rules, 값/source의 같은 구절 대응
+검증은 Tool이 담당한다. Agent와 presentation은 Python 결과를 재계산하지 않고 문서에 없는
+좌수·원 단위 반올림·절사를 적용하지 않는다.
 
 ### `calculate_pension_tax_credit`
 
@@ -208,8 +210,8 @@ warning이 `calculations`에 포함된다.
 
 `status="not_applicable"`은 검색 없이 바로 제출할 수 있다 — Product·Policy 책임
 질문을 즉시 위임하기 위함이며, 결론·누락 조건·경고·evidence는 항상 빈 상태로
-정규화된다. 그 외 상태(`determined`/`conditional`/`undetermined`)는 여전히
-`search_documents`를 먼저 호출해야 하며, 모델은 판단 상태, 결론, 누락 조건, 경고와
+정규화된다. 그 외 상태(`determined`/`conditional`/`undetermined`)는 질문 원문만으로 확정되는
+연금수령한도/#116 direct 계산 경로가 아닌 한 여전히 `search_documents`를 먼저 호출해야 하며, 모델은 판단 상태, 결론, 누락 조건, 경고와
 결론에 실제 사용한 최소 청크 ID만 제출한다. 검색된 청크 전체를 그대로 제출하지
 않는다. Python은 청크 ID의 UUID 형식, 중복과 SearchResult 부분집합 여부를
 검증한다.
