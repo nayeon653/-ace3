@@ -286,7 +286,10 @@ def create_policy_react_agent(
 def _create_policy_search_tool(search_service: SearchRunner) -> Any:
     @tool(
         SEARCH_DOCUMENTS_TOOL_NAME,
-        description="하나의 구체적인 판단 목표에 필요한 제공 문서 근거를 검색한다.",
+        description=(
+            "연금 참고자료에서 판단 목표의 근거를 검색한다. 문서 타입 필터는 시스템이 적용한다. "
+            "일반 질문은 objective만 전달하고 파일명·청크 ID는 생략한다."
+        ),
     )
     async def search_documents(
         objective: Annotated[
@@ -295,11 +298,22 @@ def _create_policy_search_tool(search_service: SearchRunner) -> Any:
         runtime: ToolRuntime[ExecutionContext, PolicyAgentState],
         source_file_name: Annotated[
             str | None,
-            Field(description="사용자가 명시했거나 이미 검증된 원본 파일명"),
+            Field(
+                description=(
+                    "기본 생략 또는 null. 사용자 질문에서 조회 대상으로 명시한 확장자 포함 "
+                    "원본 파일명만 그대로 전달한다. 주제·분류명·문서 타입·질문 전체는 금지한다. "
+                    "chunk_id와 동시에 지정하지 않는다."
+                )
+            ),
         ] = None,
         chunk_id: Annotated[
             str | None,
-            Field(description="이미 검증된 원문 청크 UUID"),
+            Field(
+                description=(
+                    "기본 생략 또는 null. 사용자 질문에서 조회 대상으로 명시한 유효한 UUID만 "
+                    "그대로 전달한다. source_file_name과 동시에 지정하지 않는다."
+                )
+            ),
         ] = None,
         expand_neighbors: Annotated[
             bool,
