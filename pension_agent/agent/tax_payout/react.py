@@ -562,8 +562,9 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
     @tool(
         SEARCH_DOCUMENTS_TOOL_NAME,
         description=(
-            "연금 참고자료에서 판단 목표의 근거를 검색한다. 문서 타입 필터는 시스템이 적용한다. "
-            "일반 질문은 objective만 전달하고 파일명·청크 ID는 생략한다."
+            "연금 참고자료에서 판단 목표의 근거를 검색한다. objective를 쓰고 "
+            "source_file_name과 chunk_id는 둘 다 null로 시작한다. "
+            "사용자가 조회 식별자를 명시한 경우에만 하나를 바꾼다. 문서 타입은 시스템이 제한한다."
         ),
     )
     async def search_documents(
@@ -575,9 +576,10 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
             str | None,
             Field(
                 description=(
-                    "기본 생략 또는 null. 사용자 질문에서 조회 대상으로 명시한 확장자 포함 "
-                    "원본 파일명만 그대로 전달한다. 주제·분류명·문서 타입·질문 전체는 금지한다. "
-                    "chunk_id와 동시에 지정하지 않는다."
+                    "기본값은 JSON null. 사용자 질문에 조회 대상으로 명시된 확장자 포함 "
+                    "원본 파일명이 있을 때만 그 식별자 그대로 바꾼다. "
+                    "[개인연금] 같은 범주 접두사·주제·문서 타입은 null을 유지한다. "
+                    "chunk_id가 있으면 이 필드는 null이다."
                 )
             ),
         ] = None,
@@ -585,8 +587,8 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
             str | None,
             Field(
                 description=(
-                    "기본 생략 또는 null. 사용자 질문에서 조회 대상으로 명시한 유효한 UUID만 "
-                    "그대로 전달한다. source_file_name과 동시에 지정하지 않는다."
+                    "기본값은 JSON null. 사용자 질문에 조회 대상으로 명시된 유효한 UUID가 "
+                    "있을 때만 그 UUID로 바꾼다. 이때 source_file_name은 null을 유지한다."
                 )
             ),
         ] = None,
