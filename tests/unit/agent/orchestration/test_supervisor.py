@@ -411,6 +411,46 @@ async def test_main_supervisor_allows_three_same_domain_judgments_and_blocks_fou
 
 
 @pytest.mark.anyio
+async def test_main_supervisor_requires_domain_tool_before_final_answer(
+    anyio_backend: str,
+) -> None:
+    del anyio_backend
+    requests: list[DomainRequest] = []
+    policy_tool = create_domain_agent_tool(
+        name="analyze_policy",
+        description="업무 판단",
+        domain="policy",
+        runner=_runner("policy", "ISA는 개인종합자산관리계좌입니다.", requests),
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(content="ISA는 개인종합자산관리계좌입니다."),
+            AIMessage(
+                content="",
+                tool_calls=[_tool_call("analyze_policy", "policy-call", "ISA 개념 판단")],
+            ),
+            AIMessage(content="ISA는 개인종합자산관리계좌이며 세제 혜택이 있습니다."),
+        ]
+    )
+    supervisor = create_main_supervisor(model=model, tools=[policy_tool])
+
+    result = await supervisor.ainvoke(
+        {
+            "messages": [{"role": "user", "content": "ISA가 무엇인가요?"}],
+            "question_id": "Q-ISA-DEFINITION",
+            "question": "ISA가 무엇인가요?",
+            "domain_results": [],
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
+    )
+
+    answer = build_agent_answer(result["messages"])
+    assert answer.answer == "ISA는 개인종합자산관리계좌이며 세제 혜택이 있습니다."
+    assert len(requests) == 1
+    assert {item["domain"] for item in result["domain_results"]} == {"policy"}
+
+
+@pytest.mark.anyio
 async def test_main_supervisor_model_limit_is_not_returned_as_a_user_answer(
     anyio_backend: str,
 ) -> None:

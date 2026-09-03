@@ -12,13 +12,41 @@ from langchain.agents.middleware import (
     hook_config,
 )
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from pension_agent.agent.contracts import AgentAnswer
 from pension_agent.agent.execution import ExecutionContext, ModelConcurrencyMiddleware
 from pension_agent.agent.orchestration.state import SupervisorState
+
+
+class RequireDomainToolCall(AgentMiddleware[Any, Any, Any]):
+    """도메인 Tool을 한 번도 호출하지 않고 바로 최종 답변하려 하면 재지시한다."""
+
+    @hook_config(can_jump_to=["model"])
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        if state.get("domain_results"):
+            return None
+        last_message = state.get("messages", [])[-1]
+        if not isinstance(last_message, AIMessage) or last_message.tool_calls:
+            return None
+        return {
+            "jump_to": "model",
+            "messages": [
+                HumanMessage(
+                    content=(
+                        "자유 형식 답변은 사용하지 않습니다. 연금·퇴직연금·ISA와 무관한 "
+                        "질문이 아니라면 최소 하나의 도메인 Tool을 먼저 호출하세요."
+                    )
+                )
+            ],
+        }
+
+    @hook_config(can_jump_to=["model"])
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.after_model(state, runtime)
 
 
 class SupervisorModelCallLimit(ModelCallLimitMiddleware):
@@ -71,6 +99,7 @@ def create_main_supervisor(
                 )
                 for tool in tools
             ),
+            RequireDomainToolCall(),
         ),
     )
     return create_agent(
