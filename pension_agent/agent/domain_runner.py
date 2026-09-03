@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -18,6 +19,7 @@ from pension_agent.agent.contracts import (
 from pension_agent.agent.execution import effective_deadline
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
 
+logger = logging.getLogger(__name__)
 _DOMAIN_RESULT_ADAPTER = TypeAdapter(DomainResult)
 
 
@@ -84,18 +86,33 @@ class GuardedDomainRunner:
                 "Domain Agent 실행 시간이 초과됐습니다.",
                 execution_status="timeout",
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
+            logger.exception(
+                "%s Domain Agent 실행 중 처리되지 않은 예외가 발생했습니다: objective=%r",
+                self.domain,
+                objective,
+            )
             return failed_domain_result(self.domain, "Domain Agent 실행에 실패했습니다.")
 
         try:
             result = _DOMAIN_RESULT_ADAPTER.validate_python(raw_result)
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError, ValidationError):
+            logger.exception(
+                "%s Domain Agent가 계약을 위반하는 결과를 반환했습니다: raw_result=%r",
+                self.domain,
+                raw_result,
+            )
             return failed_domain_result(
                 self.domain,
                 "Domain Agent가 최종 판단 결과를 제출하지 못했습니다.",
             )
         if result["domain"] != self.domain:
+            logger.error(
+                "%s Domain Agent 결과 도메인이 요청과 일치하지 않습니다: actual=%r",
+                self.domain,
+                result["domain"],
+            )
             return failed_domain_result(
                 self.domain,
                 "Domain Agent 결과 도메인이 일치하지 않습니다.",

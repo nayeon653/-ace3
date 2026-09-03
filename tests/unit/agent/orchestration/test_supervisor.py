@@ -206,6 +206,23 @@ def test_main_supervisor_prompt_has_executive_retirement_limit_routing_boundarie
     assert "임원 퇴직소득 한도가 얼마인가요?" in prompt
 
 
+def test_main_supervisor_prompt_has_account_service_routing_boundaries() -> None:
+    prompt = (
+        resources.files("pension_agent.prompts")
+        .joinpath("orchestration", "main-supervisor.md")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "특정 상품명이나 운용사 없이" in prompt
+    assert "계좌 서비스·거래 절차 안내 자료다" in prompt
+    assert "환급금이나 수령액이 기대보다 적은 이유를 묻는 질문" in prompt
+    assert (
+        "`연금저축계좌에서 ETF를 매 월 자동 매수 설정할 수 있나요?` → 업무·제도" in prompt
+    )
+    assert "`퇴직연금 DC/IRP계좌에서 채권거래가 가능한가요?` → 업무·제도" in prompt
+    assert "`IRP로 A펀드를 매수할 수 있나요?` → 상품·운용" in prompt
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("question", "tool_calls", "expected_domains"),
@@ -275,6 +292,75 @@ async def test_main_supervisor_routes_medical_care_intents_to_required_domains(
     )
 
     assert {result["domain"] for result in result["domain_results"]} == expected_domains
+    assert len(requests) == len(expected_domains)
+    assert {request["question"] for request in requests} == {question}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("question", "tool_calls", "expected_domains"),
+    [
+        (
+            "연금저축계좌에서 ETF를 매 월 정기적으로 자동 매수를 설정할 수 있나요?",
+            [_tool_call("analyze_policy", "policy-call", "ETF 자동매수 설정 가능 여부 판단")],
+            {"policy"},
+        ),
+        (
+            "퇴직연금DC/IRP계좌에서 채권거래가 가능한가요?",
+            [_tool_call("analyze_policy", "policy-call", "채권거래 가능 여부 판단")],
+            {"policy"},
+        ),
+        (
+            "보험사의 연금저축보험을 수관하려 하니, 해약환급금이 적은데 왜 그런거죠?",
+            [_tool_call("analyze_policy", "policy-call", "해약환급금이 적은 이유 판단")],
+            {"policy"},
+        ),
+        (
+            "IRP로 A펀드를 매수할 수 있나요?",
+            [_tool_call("analyze_product", "product-call", "A펀드 매수 가능 여부 판단")],
+            {"product"},
+        ),
+    ],
+)
+async def test_main_supervisor_routes_account_service_questions_to_policy_not_product(
+    anyio_backend: str,
+    question: str,
+    tool_calls: list[dict[str, Any]],
+    expected_domains: set[str],
+) -> None:
+    del anyio_backend
+    requests: list[DomainRequest] = []
+    policy_tool = create_domain_agent_tool(
+        name="analyze_policy",
+        description="업무 판단",
+        domain="policy",
+        runner=_runner("policy", "제도상 가능 여부를 판단했습니다.", requests),
+    )
+    product_tool = create_domain_agent_tool(
+        name="analyze_product",
+        description="상품 판단",
+        domain="product",
+        runner=_runner("product", "상품 판단 결과입니다.", requests),
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=tool_calls),
+            AIMessage(content="도메인 결과를 통합했습니다."),
+        ]
+    )
+    supervisor = create_main_supervisor(model=model, tools=[policy_tool, product_tool])
+
+    result = await supervisor.ainvoke(
+        {
+            "messages": [{"role": "user", "content": question}],
+            "question_id": "Q-ACCOUNT-SERVICE-ROUTING",
+            "question": question,
+            "domain_results": [],
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
+    )
+
+    assert {item["domain"] for item in result["domain_results"]} == expected_domains
     assert len(requests) == len(expected_domains)
     assert {request["question"] for request in requests} == {question}
 
