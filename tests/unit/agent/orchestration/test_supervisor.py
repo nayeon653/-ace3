@@ -206,6 +206,89 @@ def test_main_supervisor_prompt_has_executive_retirement_limit_routing_boundarie
     assert "임원 퇴직소득 한도가 얼마인가요?" in prompt
 
 
+def test_main_supervisor_prompt_has_tax_word_procedural_routing_boundaries() -> None:
+    prompt = (
+        resources.files("pension_agent.prompts")
+        .joinpath("orchestration", "main-supervisor.md")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "세율·공제액·과세 여부 자체를 판단하는" in prompt
+    assert "화면에 뜨는 오류·안내 메시지의 원인을 묻거나" in prompt
+    assert "제출 절차를 다루는 업무 안내 자료다" in prompt
+    assert (
+        "`'세금우대 약정정보가 없습니다'라는 메시지가 나옵니다.` → 업무·제도" in prompt
+    )
+    assert (
+        "`연금개시나 중도인출, 해지할 때 소득·세액공제확인서를 꼭 제출해야하나요?` "
+        "→ 업무·제도" in prompt
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("question", "expected_domains"),
+    [
+        ("'세금우대 약정정보가 없습니다'라는 메시지가 나옵니다.", {"policy"}),
+        (
+            "연금개시나 중도인출, 해지할 때 소득·세액공제확인서를 꼭 제출해야하나요?",
+            {"policy"},
+        ),
+        ("연금저축계좌를 해지하면 세금이 많이 나오나요?", {"tax_payout"}),
+    ],
+)
+async def test_main_supervisor_routes_tax_worded_procedural_questions_to_policy(
+    anyio_backend: str,
+    question: str,
+    expected_domains: set[str],
+) -> None:
+    del anyio_backend
+    requests: list[DomainRequest] = []
+    tools = [
+        create_domain_agent_tool(
+            name="analyze_policy",
+            description="업무 판단",
+            domain="policy",
+            runner=_runner("policy", "제도 판단 결과입니다.", requests),
+        ),
+        create_domain_agent_tool(
+            name="analyze_tax_payout",
+            description="세제 판단",
+            domain="tax_payout",
+            runner=_runner("tax_payout", "세제 판단 결과입니다.", requests),
+        ),
+    ]
+    tool_calls = [
+        _tool_call(
+            "analyze_policy" if domain == "policy" else "analyze_tax_payout",
+            f"{domain}-call",
+            "제도 판단" if domain == "policy" else "세제 판단",
+        )
+        for domain in sorted(expected_domains)
+    ]
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=tool_calls),
+            AIMessage(content="도메인 결과를 통합했습니다."),
+        ]
+    )
+    supervisor = create_main_supervisor(model=model, tools=tools)
+
+    result = await supervisor.ainvoke(
+        {
+            "messages": [{"role": "user", "content": question}],
+            "question_id": "Q-TAX-WORD-ROUTING",
+            "question": question,
+            "domain_results": [],
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
+    )
+
+    assert {result["domain"] for result in result["domain_results"]} == expected_domains
+    assert len(requests) == len(expected_domains)
+    assert {request["question"] for request in requests} == {question}
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("question", "tool_calls", "expected_domains"),
