@@ -517,12 +517,7 @@ async def test_policy_and_tax_search_preserve_domain_objective_when_focus_is_nar
     assert result["execution_status"] == "completed"
     assert search.calls == [
         (
-            SearchRequest(
-                objective=(
-                    f"{domain_objective}\n"
-                    "이전 가능 여부의 문서 근거 확인"
-                )
-            ),
+            SearchRequest(objective=(f"{domain_objective}\n이전 가능 여부의 문서 근거 확인")),
             permission,
         )
     ]
@@ -2124,9 +2119,10 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
 
     assert result["decision"]["status"] == "determined"
     assert "1200000.0 KRW" in result["decision"]["conclusion"]
-    assert "검색 근거의 평가액과 수령연차에 계산 결과를 적용했습니다." in result[
-        "decision"
-    ]["conclusion"]
+    assert (
+        "검색 근거의 평가액과 수령연차에 계산 결과를 적용했습니다."
+        in result["decision"]["conclusion"]
+    )
     assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
     assert result["calculations"][0]["outputs"] == {
         "withdrawal_limit": "1200000.0",
@@ -2229,9 +2225,10 @@ async def test_tax_agent_records_and_uses_verified_tax_credit_calculation() -> N
     )
 
     assert result["decision"]["status"] == "determined"
-    assert "검색 근거의 납입액과 소득 조건에 계산 결과를 적용했습니다." in result[
-        "decision"
-    ]["conclusion"]
+    assert (
+        "검색 근거의 납입액과 소득 조건에 계산 결과를 적용했습니다."
+        in result["decision"]["conclusion"]
+    )
     assert "연금계좌 세액공제 대상액" in result["decision"]["conclusion"]
     assert "이론상 세액" in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
@@ -2792,9 +2789,7 @@ async def test_tax_agent_enforces_per_calculator_run_budget() -> None:
         DocumentType.PENSION_REFERENCE,
         content="계좌 평가액 1천만원; 연금수령연차 1년차",
     )
-    search = FakeSearchService(
-        SearchResult(execution_status="completed", retrieved_chunks=[chunk])
-    )
+    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
     calculation_call = {
         "name": "calculate_pension_withdrawal_limit",
         "args": {
@@ -5715,7 +5710,6 @@ def _medical_care_calculation(
     }
 
 
-
 def test_medical_care_excess_forces_conditional_and_preserves_nulls() -> None:
     result = _build_result_with_calculations(
         [
@@ -5733,7 +5727,6 @@ def test_medical_care_excess_forces_conditional_and_preserves_nulls() -> None:
     assert outputs["current_withdrawal_after_tax_krw"] is None
     assert "확정할 수 없음" in result["decision"]["conclusion"]
     assert "None원" not in result["decision"]["conclusion"]
-
 
 
 def test_medical_care_presentations_do_not_render_null_as_amount() -> None:
@@ -6201,7 +6194,6 @@ def _retirement_calculation(
         "units": {"annual_total_wages": "KRW", "minimum_employer_contribution": "KRW"},
         "warnings": [],
     }
-
 
 
 def test_retirement_presentations_preserve_intermediate_negative_and_equal_values() -> None:

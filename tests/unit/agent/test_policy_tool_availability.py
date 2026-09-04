@@ -246,9 +246,7 @@ def test_policy_no_evidence_preserves_specific_missing_conditions() -> None:
         "conclusion": "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다.",
         "missing_conditions": ["계좌의 현재 상태 확인 필요"],
     }
-    assert result["warnings"] == [
-        "검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다."
-    ]
+    assert result["warnings"] == ["검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다."]
 
 
 def test_policy_prompt_requires_complete_objective_coverage() -> None:

@@ -389,9 +389,7 @@ def test_neighbor_expansion_always_uses_top_ranked_chunk_as_anchor() -> None:
         _chunk(75, source_file_name="guide.pdf"),
         title="PC 웹 가능 업무",
     )
-    neighbors = [
-        _chunk(index, source_file_name="other.pdf") for index in (3, 4, 5, 6)
-    ]
+    neighbors = [_chunk(index, source_file_name="other.pdf") for index in (3, 4, 5, 6)]
     retriever = FakeRetriever(
         hits=[
             SearchHit(chunk=false_positive, score=0.9),

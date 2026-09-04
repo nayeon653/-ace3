@@ -215,9 +215,7 @@ class PolicyToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]):
             for model_tool, name in zip(available_tools, available_tool_names, strict=True)
             if name in selected_name_set
         ]
-        selected_tool_names = [
-            name for name in available_tool_names if name in selected_name_set
-        ]
+        selected_tool_names = [name for name in available_tool_names if name in selected_name_set]
         if (
             any(name is None for name in available_tool_names)
             or any(selected_tool_names.count(name) != 1 for name in selected_name_set)
@@ -246,11 +244,7 @@ class EnforcePolicyToolSequence(AgentMiddleware[Any, Any, Any]):
                 CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
-        allowed_calls = [
-            call
-            for call in last_message.tool_calls
-            if call["name"] in allowed
-        ]
+        allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed]
         calculation_calls = [
             call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
         ]
@@ -566,9 +560,7 @@ def _build_policy_result(
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
-        normalized_missing = list(
-            dict.fromkeys(normalized_missing or ["제공 문서의 관련 근거"])
-        )
+        normalized_missing = list(dict.fromkeys(normalized_missing or ["제공 문서의 관련 근거"]))
         normalized_warnings = list(
             dict.fromkeys(
                 [
