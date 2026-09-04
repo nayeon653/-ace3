@@ -158,52 +158,47 @@ def test_main_supervisor_prompt_has_data_aware_routing_boundaries() -> None:
         .read_text(encoding="utf-8")
     )
 
-    assert "연금저축·IRP 전용 클래스 설명이 반복" in prompt
-    assert "판단에 필요한 근거 문서군을 기준으로 Tool을 선택" in prompt
-    assert "계좌·제도 이름에 `펀드`가 포함" in prompt
-    assert ("`연금저축펀드와 IRP는 무엇이 다른가요?` → 업무·제도 + 세제·수령") in prompt
-    assert "`A펀드와 B펀드의 위험과 보수를 비교해 주세요.` → 상품·운용" in prompt
+    assert "필요한 판단과 근거 문서군으로 Domain을 선택" in prompt
+    assert "계좌와 제도의 가입·납입·이전·해지" in prompt
+    assert "세법상 조건, 과세, 한도와 개인별 계산" in prompt
+    assert "식별된 개별 상품의 특성·비용·위험·유동성" in prompt
 
 
-def test_main_supervisor_prompt_has_medical_care_routing_boundaries() -> None:
+def test_main_supervisor_prompt_routes_by_ownership_without_keyword_guards() -> None:
     prompt = (
         resources.files("pension_agent.prompts")
         .joinpath("orchestration", "main-supervisor.md")
         .read_text(encoding="utf-8")
     )
 
-    assert "가능 여부, 자격, 적용 조건" in prompt
-    assert "한도, 세율, 세액, 과세 또는 세후액" in prompt
-    assert "업무·제도와 세제·수령 Tool을 각각 한 번 호출" in prompt
-    assert "`의료비`나 `요양`이라는 단어만" in prompt
-    assert "세액, 한도 또는 세후액을 직접 계산하지 않는다" in prompt
+    assert "하나의 구체적인 `objective`는 정확히 하나의 Domain이 소유" in prompt
+    assert "서로 독립된 판단이 함께 있는 복합 질문만" in prompt
+    assert "고정 예시가 아니라" in prompt
 
 
-def test_main_supervisor_prompt_has_retirement_benefit_routing_boundaries() -> None:
+def test_main_supervisor_prompt_has_grounded_calculation_fallback_contract() -> None:
     prompt = (
         resources.files("pension_agent.prompts")
         .joinpath("orchestration", "main-supervisor.md")
         .read_text(encoding="utf-8")
     )
 
-    assert "제도 유형이 불명확한 `퇴직급여가 얼마야?`" in prompt
-    assert "DB와 DC 퇴직급여 금액을 비교" in prompt
-    assert "DB→DC 전환 가능 여부와 전환금액" in prompt
-    assert "기존 인출 세금 Tool을 임의로 연쇄 호출하지 않는다" in prompt
-    assert "기간·근속연수·급여·전환금액·세금을 직접 계산" in prompt
+    assert "Python Calculation Tool이 구현·노출되어 있고" in prompt
+    assert "Tool 호출 자체를 수행하지 못한 경우에만 LLM 계산" in prompt
+    assert "`Calculation Tool 미사용 fallback`" in prompt
+    assert "공식 또는 필수 입력이 하나라도 부족하면 계산하지 않고" in prompt
+    assert "validation 실패나 계산 오류는 fallback 사유가 아니다" in prompt
 
 
-def test_main_supervisor_prompt_has_executive_retirement_limit_routing_boundaries() -> None:
+def test_main_supervisor_prompt_does_not_embed_question_specific_examples() -> None:
     prompt = (
         resources.files("pension_agent.prompts")
         .joinpath("orchestration", "main-supervisor.md")
         .read_text(encoding="utf-8")
     )
 
-    assert "임원 퇴직소득 한도, 임원 퇴직소득 인정액과 한도초과 근로소득은" in prompt
-    assert "DB/DC 제도 유형 판단과 무관하다" in prompt
-    assert "임원 해당 여부 자체를" in prompt
-    assert "임원 퇴직소득 한도가 얼마인가요?" in prompt
+    assert "# 라우팅 예시" not in prompt
+    assert "얼마인가요?` →" not in prompt
 
 
 @pytest.mark.anyio

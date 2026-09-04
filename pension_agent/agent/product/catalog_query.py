@@ -185,7 +185,10 @@ class HCXProductCatalogQueryPlanner:
         async def invoke() -> AIMessage:
             if self._model_concurrency is None:
                 return await self._model.ainvoke(messages)
-            return await self._model_concurrency.arun(lambda: self._model.ainvoke(messages))
+            return await self._model_concurrency.arun(
+                lambda: self._model.ainvoke(messages),
+                deadline=deadline,
+            )
 
         try:
             async with asyncio.timeout_at(deadline):

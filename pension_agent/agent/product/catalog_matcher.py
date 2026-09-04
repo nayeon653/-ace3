@@ -143,7 +143,7 @@ class HCXProductCatalogMatcher:
                 if self._model_concurrency is None:
                     response = await invoke()
                 else:
-                    response = await self._model_concurrency.arun(invoke)
+                    response = await self._model_concurrency.arun(invoke, deadline=deadline)
             calls = [
                 call
                 for call in response.tool_calls

@@ -1,6 +1,7 @@
 """결정론적 검색 Router, Service, Port와 입출력 계약."""
 
 from pension_agent.agent.search.evidence_filter import EvidenceFilter
+from pension_agent.agent.search.objective import combine_search_objective
 from pension_agent.agent.search.ports import (
     ChunkRetriever,
     LimitedChunkRetriever,
@@ -36,4 +37,5 @@ __all__ = [
     "SearchRunner",
     "SearchService",
     "SearchServiceError",
+    "combine_search_objective",
 ]

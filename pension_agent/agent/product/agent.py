@@ -45,7 +45,10 @@ from pension_agent.retrieval import (
 )
 
 PRODUCT_TOOL_NAME = "analyze_product"
-PRODUCT_TOOL_DESCRIPTION = "연금 상품의 특성, 비용, 위험과 유동성을 판단한다."
+PRODUCT_TOOL_DESCRIPTION = (
+    "상품 카탈로그 또는 식별된 개별 펀드·클래스의 투자전략, 위험, 보수·판매/환매수수료, "
+    "환매와 유동성을 판단한다. 계좌 서비스·메뉴·계좌 수준 수수료는 다루지 않는다."
+)
 LOOKUP_PRODUCT_CODES_TOOL_NAME = "lookup_product_codes"
 _PRODUCT_MAX_SEARCH_CALLS = 2
 

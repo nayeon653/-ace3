@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import operator
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -18,7 +17,7 @@ from langchain.agents.middleware import (
     ToolCallLimitMiddleware,
     hook_config,
 )
-from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from langchain.messages import AIMessage, HumanMessage, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langgraph.types import Command
@@ -73,82 +72,45 @@ from pension_agent.agent.contracts import (
 )
 from pension_agent.agent.domain_runner import failed_domain_result
 from pension_agent.agent.execution import ExecutionContext, ModelConcurrencyMiddleware
-from pension_agent.agent.search import SearchRequest, SearchResult, SearchRunner
+from pension_agent.agent.search import (
+    SearchRequest,
+    SearchResult,
+    SearchRunner,
+    combine_search_objective,
+)
 from pension_agent.config import DomainAgentConfig
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 SUBMIT_DOMAIN_RESULT_TOOL_NAME = "submit_domain_result"
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
-# 실제 확정 수치(숫자·%·퍼센트·금액 단위)만 매칭한다. "세율"·"한도"·"금액"·"공제액" 같은
-# 화제어만으로는 매칭하지 않는다 — 조건·정성적 비교 설명까지 계산 필요로 오인하지 않기 위함.
-_NUMERIC_CLAIM_PATTERN = re.compile(r"(?:\d|%|퍼센트|프로|만\s*원|억\s*원)")
-_CALCULATOR_REQUIRED_CONCLUSION = "확정 수치 판단에는 결정론적 계산 Tool 결과가 필요합니다."
-_CALCULATOR_REQUIRED_CONDITION = "결정론적 계산 Tool 결과"
-_NUMERIC_CLAIM_UNDETERMINED_CONCLUSION = (
-    "제공 근거만으로는 확정 수치를 포함한 결론을 판단할 수 없습니다."
-)
-_UNDETERMINED_MISSING_FALLBACK = "제공 문서의 관련 근거 또는 필수 조건"
-_CONDITIONAL_MISSING_FALLBACK = "판단에 필요한 사용자 조건"
 _INCOME_BASIS_MISSING_CONDITION = "총급여 또는 종합소득금액 확인 필요"
 _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION = "해당 연도 사적연금 과세대상 합계 확인 필요"
-_PENSION_TAX_FILING_CHOICE_MISSING_CONDITION = "종합과세 또는 16.5% 분리과세 선택 필요"
+_PENSION_TAX_FILING_CHOICE_MISSING_CONDITION = "과세 방식 선택 필요"
 _PENSION_INCOME_TAX_CALCULATOR_ID = "pension_income_tax"
-_NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID = "non_pension_withdrawal_tax"
 _PENSION_WITHDRAWAL_TAX_BREAKDOWN_CALCULATOR_ID = "pension_withdrawal_tax_breakdown"
-_MEDICAL_CARE_TAX_LIMIT_CALCULATOR_ID = "medical_care_withdrawal_tax_limit"
 _MEDICAL_CARE_TAX_BREAKDOWN_CALCULATOR_ID = "medical_care_withdrawal_tax_breakdown"
-_DB_RETIREMENT_BENEFIT_CALCULATOR_ID = "db_retirement_benefit"
-_DC_RETIREMENT_BENEFIT_CALCULATOR_ID = "dc_retirement_benefit"
-_RECIPIENT_AGE_MISSING_CONDITION = "정확한 수령자 나이 확인 필요"
 _MEDICAL_CARE_EXCESS_MISSING_CONDITION = "초과액의 재원 및 연금수령·연금외수령 구분 확인 필요"
-_TAX_AMOUNT_INTENT_PATTERN = re.compile(r"세액|세후|세금|실수령|납부세액")
-_PENSION_TAX_COMPARISON_TOOL_NAMES = frozenset(
-    {
-        CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
-        CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
-    }
-)
-_DB_DC_BENEFIT_COMPARISON_TOOL_NAMES = frozenset(
-    {
-        CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
-        CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
-    }
-)
-_DB_SERVICE_YEARS_MISSING_CONDITION = "검증된 계속근로연수 확인 필요"
-_DC_ANNUAL_WAGES_MISSING_CONDITION = "연간임금총액 확인 필요"
-_DC_CONTRIBUTIONS_MISSING_CONDITION = "누적 부담금 확인 필요"
-_DC_GAIN_LOSS_MISSING_CONDITION = "운용손익 확인 필요"
-_RETIREMENT_SCHEME_MISSING_CONDITION = "DB 또는 DC 제도 유형 확인 필요"
-_DB_WAGES_MISSING_CONDITION = "평균임금 산정 대상 최근 3개월 임금 합계 확인 필요"
-_DB_INCLUDED_DAYS_MISSING_CONDITION = "평균임금 산정 포함 일수 확인 필요"
-_TRANSFER_FINAL_AVERAGE_WAGE_MISSING_CONDITION = "전환 기준 최종 30일 평균임금 확인 필요"
-_TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION = "전환 기준 최종 연간임금총액 확인 필요"
-_RETIREMENT_INPUT_SOURCE_MISSING_CONDITION = "검증된 퇴직급여 계산 입력 출처 확인 필요"
-_RETIREMENT_AMOUNT_INTENT_PATTERN = re.compile(r"계산|얼마|금액|급여액|부담금")
-_EXECUTIVE_RETIREMENT_LIMIT_CALCULATOR_ID = "executive_retirement_income_limit"
-_EXECUTIVE_PAYMENT_MISSING_CONDITION = "2012년 이후 한도 적용대상 퇴직급여 확인 필요"
-_EXECUTIVE_PAYMENT_INTENT_PATTERN = re.compile(r"인정|초과")
-_COMPARISON_INTENT_PATTERN = re.compile(r"비교|차이|대비|각각")
-_NUMERIC_CLAIM_WARNING = "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다."
-_NUMERIC_CLAIM_REMOVED_WARNING = "근거 없이 제출된 확정 수치는 결과에서 제거했습니다."
-_NUMERIC_CLAIM_RESUBMIT_INSTRUCTION = (
-    "conclusion에 근거 없는 확정 수치가 있습니다. 조건·정성적 비교 질문이면 숫자 없이 다시 "
-    "제출하고, 정확한 계산이 필요한 질문이면 status를 conditional로 하고 missing_conditions에 "
-    "결정론적 계산 Tool 결과를 남겨 다시 제출하세요."
-)
 
-
-def _is_db_dc_benefit_comparison(state: Mapping[str, Any]) -> bool:
-    """질문이 DB와 DC 퇴직급여 금액의 명시적 비교인지 좁게 확인한다."""
-
-    text = f"{state.get('question', '')} {state.get('objective', '')}"
-    return (
-        "DB" in text
-        and "DC" in text
-        and "퇴직급여" in text
-        and bool(_COMPARISON_INTENT_PATTERN.search(text))
-    )
+_CALCULATION_TOOL_NAMES = (
+    CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
+    CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME,
+    CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
+    CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
+    CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
+    CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
+    CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
+    CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
+    CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
+    CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+    CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
+    CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
+    CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
+    CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
+    CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
+    CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME,
+    CALCULATE_EXECUTIVE_RETIREMENT_INCOME_LIMIT_TOOL_NAME,
+)
 
 
 class TaxPayoutAgentState(AgentState):
@@ -159,7 +121,6 @@ class TaxPayoutAgentState(AgentState):
     search_result: NotRequired[SearchResult]
     calculations: NotRequired[Annotated[list[CalculationResult], operator.add]]
     domain_result: NotRequired[DomainResult]
-    numeric_resubmit_used: NotRequired[bool]
 
 
 class TaxPayoutGraph(Protocol):
@@ -218,36 +179,10 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
         last_message = state.get("messages", [])[-1]
         if not isinstance(last_message, AIMessage) or last_message.tool_calls:
             return None
-        if state.get("calculations"):
-            instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
-        elif state.get("search_result") is not None:
+        if state.get("search_result") is not None:
             instruction = (
-                "연금수령한도 계산이면 calculate_pension_withdrawal_limit Tool을, "
-                "올해 남은 한도의 회당 지급액이면 "
-                "calculate_pension_annual_limit_installment Tool을, 현재 평가액의 전체 "
-                "잔여회차별 지급액이면 calculate_pension_period_installment Tool을, "
-                "잔고좌수와 기준가격의 회당 지급액이면 "
-                "calculate_pension_unit_installment Tool을, "
-                "연금계좌 세액공제 계산이면 calculate_pension_tax_credit Tool을 호출하고, "
-                "세액공제 원금·운용수익의 연금수령 세금이면 "
-                "calculate_pension_income_tax Tool을, 같은 재원의 연금외수령 세금이면 "
-                "calculate_non_pension_withdrawal_tax Tool을 호출하세요. 이연퇴직소득 재원의 "
-                "연금·연금외수령 세금이면 calculate_deferred_retirement_withdrawal_tax Tool을 "
-                "호출하고 두 재원을 혼용하지 마세요. 재원별 인출 배분만 필요하거나 세금 "
-                "조건이 부족하면 calculate_pension_withdrawal_allocation Tool을, 재원별 세금과 "
-                "세후액 조건이 모두 확인되면 calculate_pension_withdrawal_tax_breakdown Tool을 "
-                "둘 중 하나만 호출하세요. 의료·요양 저율과세 한도만 필요하거나 정확한 나이가 "
-                "없으면 calculate_medical_care_withdrawal_tax_limit Tool을, 적용 사유와 원 입력 및 "
-                "정확한 나이가 모두 확인되면 calculate_medical_care_withdrawal_tax_breakdown Tool을 "
-                "둘 중 하나만 호출하세요. DB 퇴직급여, DC 최소 사용자 부담금, DC 퇴직급여, "
-                "DB→DC 전환금액은 각각 대응하는 calculate_db_retirement_benefit, "
-                "calculate_dc_minimum_employer_contribution, calculate_dc_retirement_benefit, "
-                "calculate_db_to_dc_transfer_amount Tool을 사용하고 필수 입력을 0으로 채우지 마세요. "
-                "임원 퇴직소득 한도나 한도초과 근로소득 계산이면 "
-                "calculate_executive_retirement_income_limit Tool을 사용하되, 이는 DB·DC "
-                "퇴직급여 금액 산정과 다른 소득세법상 한도 계산이므로 그 결과를 서로 대신 "
-                "사용하지 마세요. "
-                "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+                "추가 산출이 필요하면 적합한 Calculation Tool 하나를 호출하고, "
+                "그렇지 않으면 근거 기반 판단을 submit_domain_result Tool로 제출하세요."
             )
         else:
             instruction = "search_documents Tool로 제공 문서 근거를 검색하세요."
@@ -263,112 +198,23 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
         return self.after_model(state, runtime)
 
 
-class SingleTaxPayoutSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
-    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        del runtime
-        last_message = state.get("messages", [])[-1]
-        if not isinstance(last_message, AIMessage):
-            return None
-        kept_submit = False
-        tool_calls: list[ToolCall] = []
-        for call in last_message.tool_calls:
-            if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME:
-                tool_calls.append(call)
-            elif not kept_submit:
-                tool_calls.append(call)
-                kept_submit = True
-        if tool_calls == last_message.tool_calls:
-            return None
-        return {"messages": [last_message.model_copy(update={"tool_calls": tool_calls})]}
-
-    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self.after_model(state, runtime)
-
-
 class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
-    """검색·계산·결과 제출 순서에서 현재 허용된 Tool 호출만 남긴다."""
+    """질문 문구를 해석하지 않고 검색·계산·제출 단계만 강제한다."""
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
         last_message = state.get("messages", [])[-1]
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
             return None
-        allowed_tools: tuple[str, ...]
         if state.get("search_result") is None:
-            # not_applicable 제출은 search_documents 없이도 허용해야 한다 — 도메인
-            # 외 질문에는 검색을 강제하지 않는다. status 검증(search_result 필수)은
-            # submit_domain_result 안에서 계속 수행한다.
             allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
-        elif state.get("calculations"):
-            completed_ids = {calculation["calculator_id"] for calculation in state["calculations"]}
-            completed_comparison_ids = completed_ids & {
-                _PENSION_INCOME_TAX_CALCULATOR_ID,
-                _NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID,
-            }
-            if completed_comparison_ids == {_PENSION_INCOME_TAX_CALCULATOR_ID}:
-                allowed_tools = (
-                    CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
-                    SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-                )
-            elif completed_comparison_ids == {_NON_PENSION_WITHDRAWAL_TAX_CALCULATOR_ID}:
-                allowed_tools = (
-                    CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
-                    SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-                )
-            elif _is_db_dc_benefit_comparison(state):
-                completed_benefit_ids = completed_ids & {
-                    _DB_RETIREMENT_BENEFIT_CALCULATOR_ID,
-                    _DC_RETIREMENT_BENEFIT_CALCULATOR_ID,
-                }
-                if completed_benefit_ids == {_DB_RETIREMENT_BENEFIT_CALCULATOR_ID}:
-                    allowed_tools = (
-                        CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
-                        SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-                    )
-                elif completed_benefit_ids == {_DC_RETIREMENT_BENEFIT_CALCULATOR_ID}:
-                    allowed_tools = (
-                        CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
-                        SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-                    )
-                else:
-                    allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
-            else:
-                allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
         else:
-            allowed_tools = (
-                CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
-                CALCULATE_PENSION_ANNUAL_LIMIT_INSTALLMENT_TOOL_NAME,
-                CALCULATE_PENSION_PERIOD_INSTALLMENT_TOOL_NAME,
-                CALCULATE_PENSION_UNIT_INSTALLMENT_TOOL_NAME,
-                CALCULATE_PENSION_TAX_CREDIT_TOOL_NAME,
-                CALCULATE_PENSION_INCOME_TAX_TOOL_NAME,
-                CALCULATE_NON_PENSION_WITHDRAWAL_TAX_TOOL_NAME,
-                CALCULATE_DEFERRED_RETIREMENT_WITHDRAWAL_TAX_TOOL_NAME,
-                CALCULATE_PENSION_WITHDRAWAL_ALLOCATION_TOOL_NAME,
-                CALCULATE_PENSION_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
-                CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_LIMIT_TOOL_NAME,
-                CALCULATE_MEDICAL_CARE_WITHDRAWAL_TAX_BREAKDOWN_TOOL_NAME,
-                CALCULATE_DB_RETIREMENT_BENEFIT_TOOL_NAME,
-                CALCULATE_DC_MINIMUM_EMPLOYER_CONTRIBUTION_TOOL_NAME,
-                CALCULATE_DC_RETIREMENT_BENEFIT_TOOL_NAME,
-                CALCULATE_DB_TO_DC_TRANSFER_AMOUNT_TOOL_NAME,
-                CALCULATE_EXECUTIVE_RETIREMENT_INCOME_LIMIT_TOOL_NAME,
-                SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-            )
+            allowed_tools = (*_CALCULATION_TOOL_NAMES, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
         calculation_calls = [
             call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
         ]
-        calculation_tool_names = {call["name"] for call in calculation_calls}
-        if calculation_tool_names == _PENSION_TAX_COMPARISON_TOOL_NAMES or (
-            calculation_tool_names == _DB_DC_BENEFIT_COMPARISON_TOOL_NAMES
-            and _is_db_dc_benefit_comparison(state)
-        ):
-            kept_calls = calculation_calls
-        elif calculation_calls:
-            kept_calls = calculation_calls[:1]
-        else:
-            kept_calls = allowed_calls[:1]
+        kept_calls = calculation_calls[:1] if calculation_calls else allowed_calls[:1]
         if kept_calls == last_message.tool_calls:
             return None
         return {"messages": [last_message.model_copy(update={"tool_calls": kept_calls})]}
@@ -454,7 +300,6 @@ def create_tax_payout_react_agent(
             *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteTaxPayoutResult(),
             RequireTaxPayoutTool(),
-            SingleTaxPayoutSubmitPerModelCall(),
             TaxPayoutModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(
                 tool_name=SEARCH_DOCUMENTS_TOOL_NAME,
@@ -562,14 +407,16 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
     @tool(
         SEARCH_DOCUMENTS_TOOL_NAME,
         description=(
-            "연금 참고자료에서 판단 목표의 근거를 검색한다. objective를 쓰고 "
+            "연금 참고자료에서 판단 목표의 근거를 검색한다. objective에는 원래 판단 목표에 "
+            "덧붙일 구체적인 검색 초점을 쓰고 "
             "source_file_name과 chunk_id는 둘 다 null로 시작한다. "
             "사용자가 조회 식별자를 명시한 경우에만 하나를 바꾼다. 문서 타입은 시스템이 제한한다."
         ),
     )
     async def search_documents(
         objective: Annotated[
-            str, Field(min_length=1, description="하나의 구체적인 근거 검색 목표")
+            str,
+            Field(min_length=1, description="원래 판단 목표에 덧붙일 구체적인 검색 초점"),
         ],
         runtime: ToolRuntime[ExecutionContext, TaxPayoutAgentState],
         source_file_name: Annotated[
@@ -607,7 +454,10 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
             ):
                 raise ValueError("검색 힌트 출처를 확인할 수 없습니다.")
             request = SearchRequest(
-                objective=objective,
+                objective=combine_search_objective(
+                    domain_objective=runtime.state.get("objective", ""),
+                    model_focus=objective,
+                ),
                 source_file_name=source_file_name,
                 chunk_id=chunk_id,
                 expand_neighbors=expand_neighbors,
@@ -643,7 +493,8 @@ def _create_tax_payout_result_tool() -> Any:
         SUBMIT_DOMAIN_RESULT_TOOL_NAME,
         description=(
             "최종 세제·수령 판단 결과 제출 Tool. 검증된 검색 근거에서 도출한 "
-            "판단, 누락 조건과 경고만 제출한다."
+            "판단, 누락 조건과 경고만 제출한다. 질문에 직접 답하고 실제 사용한 "
+            "근거 청크만 연결한다."
         ),
     )
     async def submit_domain_result(
@@ -651,10 +502,19 @@ def _create_tax_payout_result_tool() -> Any:
             DecisionStatus,
             Field(description="determined, conditional, undetermined, not_applicable 중 하나"),
         ],
-        conclusion: Annotated[str, Field(min_length=1, description="근거에서 도출한 결론")],
+        conclusion: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description=(
+                    "검색 근거와 계산 결과의 적용 대상·조건을 보존해 질문에 직접 답하는 "
+                    "스스로 완결된 결론"
+                ),
+            ),
+        ],
         missing_conditions: Annotated[
             list[str],
-            Field(description="조건부 또는 미확정 판단에 필요한 누락 조건"),
+            Field(description="objective 항목 중 근거·사용자 조건이 부족해 확정하지 못한 내용"),
         ],
         warnings: Annotated[list[str], Field(description="이용자가 알아야 할 제한과 주의사항")],
         evidence_chunk_ids: Annotated[
@@ -684,35 +544,12 @@ def _create_tax_payout_result_tool() -> Any:
                 {"error": "search_documents Tool을 먼저 호출해야 합니다."},
                 ensure_ascii=False,
             )
-        # calculations가 있으면 conclusion은 곧 검증된 Python 요약으로 교체되므로
-        # 재제출 요청은 계산 Tool 없이 숫자를 직접 제출한 경우에만 의미가 있다.
-        if (
-            not runtime.state.get("calculations")
-            and _NUMERIC_CLAIM_PATTERN.search(conclusion.strip())
-            and not runtime.state.get("numeric_resubmit_used", False)
-        ):
-            return Command(
-                update={
-                    "numeric_resubmit_used": True,
-                    "messages": [
-                        ToolMessage(
-                            content=json.dumps(
-                                {"error": _NUMERIC_CLAIM_RESUBMIT_INSTRUCTION},
-                                ensure_ascii=False,
-                            ),
-                            tool_call_id=runtime.tool_call_id,
-                            name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-                        )
-                    ],
-                }
-            )
         try:
             result = _build_tax_payout_result(
                 search_result=search_result,
                 calculations=list(runtime.state.get("calculations", [])),
-                question=(
-                    f"{runtime.state.get('question', '')} {runtime.state.get('objective', '')}"
-                ),
+                question=runtime.state.get("question", ""),
+                objective=runtime.state.get("objective", ""),
                 status=status,
                 conclusion=conclusion,
                 missing_conditions=missing_conditions,
@@ -761,12 +598,14 @@ def _build_tax_payout_result(
     search_result: SearchResult,
     calculations: list[CalculationResult],
     question: str = "",
+    objective: str = "",
     status: DecisionStatus,
     conclusion: str,
     missing_conditions: list[str],
     warnings: list[str],
     evidence_chunk_ids: list[str],
 ) -> DomainResult:
+    del question, objective
     if search_result.execution_status != "completed":
         return failed_domain_result(
             "tax_payout",
@@ -783,12 +622,12 @@ def _build_tax_payout_result(
     normalized_warnings.extend(search_result.limitations)
     normalized_conclusion = conclusion.strip()
     if calculations:
-        normalized_conclusion = "검증된 Python 계산 결과:\n" + format_calculation_summary(
-            calculations
+        normalized_conclusion = (
+            "검증된 Python 계산 결과:\n"
+            + format_calculation_summary(calculations)
+            + "\n근거 기반 설명:\n"
+            + normalized_conclusion
         )
-        normalized_warnings = [
-            value for value in normalized_warnings if not _NUMERIC_CLAIM_PATTERN.search(value)
-        ]
         normalized_warnings.extend(
             warning for calculation in calculations for warning in calculation["warnings"]
         )
@@ -824,34 +663,11 @@ def _build_tax_payout_result(
                     *normalized_missing,
                     _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
                 ]
-        if _has_medical_care_limit_without_age_for_tax_question(calculations, question):
-            if status == "determined":
-                status = "conditional"
-            if _RECIPIENT_AGE_MISSING_CONDITION not in normalized_missing:
-                normalized_missing.append(_RECIPIENT_AGE_MISSING_CONDITION)
         if _has_unresolved_medical_care_excess(calculations):
             if status == "determined":
                 status = "conditional"
             if _MEDICAL_CARE_EXCESS_MISSING_CONDITION not in normalized_missing:
                 normalized_missing.append(_MEDICAL_CARE_EXCESS_MISSING_CONDITION)
-        if _has_executive_limit_without_payment_for_comparison_question(calculations, question):
-            if status == "determined":
-                status = "conditional"
-            if _EXECUTIVE_PAYMENT_MISSING_CONDITION not in normalized_missing:
-                normalized_missing.append(_EXECUTIVE_PAYMENT_MISSING_CONDITION)
-    elif status != "not_applicable":
-        status, normalized_conclusion, normalized_missing, normalized_warnings = (
-            _apply_numeric_claim_guard(
-                status=status,
-                conclusion=normalized_conclusion,
-                missing_conditions=normalized_missing,
-                warnings=normalized_warnings,
-            )
-        )
-        retirement_missing = _retirement_calculation_missing_conditions(question, search_result)
-        if retirement_missing:
-            status = "conditional"
-            normalized_missing = list(dict.fromkeys([*normalized_missing, *retirement_missing]))
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
@@ -891,77 +707,6 @@ def _has_unconditioned_pension_tax_credit_rate_scenarios(
         and "other_income_rate_percent" in calculation["outputs"]
         for calculation in calculations
     )
-
-
-def _retirement_calculation_missing_conditions(
-    question: str, search_result: SearchResult
-) -> list[str]:
-    """명확한 #118 금액 요청이 계산 없이 제출될 때 확인할 입력을 반환한다."""
-
-    if not _RETIREMENT_AMOUNT_INTENT_PATTERN.search(question):
-        return []
-    source_text = " ".join([question, *(chunk.content for chunk in search_result.retrieved_chunks)])
-    if "DB→DC" in question or "DB에서 DC" in question:
-        missing = _missing_labeled_values(
-            source_text,
-            (
-                (
-                    ("최종 30일 평균임금", "최종 30일평균임금"),
-                    _TRANSFER_FINAL_AVERAGE_WAGE_MISSING_CONDITION,
-                ),
-                (
-                    ("최종 연간임금총액", "최종 연간 임금총액"),
-                    _TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION,
-                ),
-                (("계속근로연수", "근속연수"), _DB_SERVICE_YEARS_MISSING_CONDITION),
-            ),
-        )
-    elif "DC" in question and any(
-        label in question for label in ("최소 사용자 부담금", "최소 부담금")
-    ):
-        missing = _missing_labeled_values(
-            source_text,
-            ((("연간임금총액", "연간 임금총액"), _DC_ANNUAL_WAGES_MISSING_CONDITION),),
-        )
-    elif "DB" in question and "퇴직급여" in question:
-        missing = _missing_labeled_values(
-            source_text,
-            (
-                (
-                    ("최근 3개월 임금 합계", "3개월 임금총액", "3개월 임금 총액"),
-                    _DB_WAGES_MISSING_CONDITION,
-                ),
-                (("산정일수", "포함 일수"), _DB_INCLUDED_DAYS_MISSING_CONDITION),
-                (("계속근로연수", "근속연수"), _DB_SERVICE_YEARS_MISSING_CONDITION),
-            ),
-        )
-    elif "DC" in question and "퇴직급여" in question:
-        missing = _missing_labeled_values(
-            source_text,
-            (
-                (("누적 부담금",), _DC_CONTRIBUTIONS_MISSING_CONDITION),
-                (("운용손익", "운용수익", "운용손실"), _DC_GAIN_LOSS_MISSING_CONDITION),
-            ),
-        )
-    elif "퇴직급여" in question and "DB" not in question and "DC" not in question:
-        return [_RETIREMENT_SCHEME_MISSING_CONDITION]
-    else:
-        return []
-    return missing or [_RETIREMENT_INPUT_SOURCE_MISSING_CONDITION]
-
-
-def _missing_labeled_values(
-    source_text: str,
-    requirements: tuple[tuple[tuple[str, ...], str], ...],
-) -> list[str]:
-    return [
-        condition
-        for labels, condition in requirements
-        if not any(
-            any(label in phrase for label in labels) and bool(re.search(r"\d", phrase))
-            for phrase in re.split(r"[;\n]+|,(?!\d)", source_text)
-        )
-    ]
 
 
 def _has_unknown_ordinary_pension_income_threshold(
@@ -1010,15 +755,6 @@ def _has_withdrawal_breakdown_separate_tax_option(
     )
 
 
-def _has_medical_care_limit_without_age_for_tax_question(
-    calculations: list[CalculationResult], question: str
-) -> bool:
-    return bool(_TAX_AMOUNT_INTENT_PATTERN.search(question)) and any(
-        calculation["calculator_id"] == _MEDICAL_CARE_TAX_LIMIT_CALCULATOR_ID
-        for calculation in calculations
-    )
-
-
 def _has_unresolved_medical_care_excess(calculations: list[CalculationResult]) -> bool:
     for calculation in calculations:
         if calculation["calculator_id"] != _MEDICAL_CARE_TAX_BREAKDOWN_CALCULATOR_ID:
@@ -1033,68 +769,6 @@ def _has_unresolved_medical_care_excess(calculations: list[CalculationResult]) -
         ):
             return True
     return False
-
-
-def _has_executive_limit_without_payment_for_comparison_question(
-    calculations: list[CalculationResult], question: str
-) -> bool:
-    """인정액·초과액을 묻는 질문인데 한도만 계산되고 지급액 비교가 없는지 확인한다."""
-
-    return bool(_EXECUTIVE_PAYMENT_INTENT_PATTERN.search(question)) and any(
-        calculation["calculator_id"] == _EXECUTIVE_RETIREMENT_LIMIT_CALCULATOR_ID
-        and "retirement_income_amount_krw" not in calculation["outputs"]
-        for calculation in calculations
-    )
-
-
-def _apply_numeric_claim_guard(
-    *,
-    status: DecisionStatus,
-    conclusion: str,
-    missing_conditions: list[str],
-    warnings: list[str],
-) -> tuple[DecisionStatus, str, list[str], list[str]]:
-    """근거 없는 확정 수치를 필드별로 검사해 제거한다.
-
-    conclusion·missing_conditions·warnings를 각각 검사하고, 숫자가 없는 필드는
-    그대로 보존한다 — warning이나 missing_conditions에만 숫자가 있다는 이유로
-    정상 conclusion과 status까지 바꾸지 않는다. `undetermined`(근거 부족)는
-    어떤 경우에도 `conditional`(계산 필요)로 승격하지 않는다 — "근거가
-    부족하다"와 "계산만 하면 된다"는 의미가 다르다.
-    """
-
-    conclusion_has_claim = bool(_NUMERIC_CLAIM_PATTERN.search(conclusion))
-    kept_missing = [
-        value for value in missing_conditions if not _NUMERIC_CLAIM_PATTERN.search(value)
-    ]
-    kept_warnings = [value for value in warnings if not _NUMERIC_CLAIM_PATTERN.search(value)]
-    if not (
-        conclusion_has_claim
-        or len(kept_missing) != len(missing_conditions)
-        or len(kept_warnings) != len(warnings)
-    ):
-        return status, conclusion, missing_conditions, warnings
-
-    if status == "undetermined":
-        return (
-            status,
-            _NUMERIC_CLAIM_UNDETERMINED_CONCLUSION if conclusion_has_claim else conclusion,
-            kept_missing or [_UNDETERMINED_MISSING_FALLBACK],
-            [*kept_warnings, _NUMERIC_CLAIM_REMOVED_WARNING],
-        )
-
-    if conclusion_has_claim:
-        return (
-            "conditional",
-            _CALCULATOR_REQUIRED_CONCLUSION,
-            [_CALCULATOR_REQUIRED_CONDITION],
-            [*kept_warnings, _NUMERIC_CLAIM_WARNING],
-        )
-
-    result_missing = kept_missing
-    if status == "conditional" and not result_missing:
-        result_missing = [_CONDITIONAL_MISSING_FALLBACK]
-    return status, conclusion, result_missing, [*kept_warnings, _NUMERIC_CLAIM_REMOVED_WARNING]
 
 
 def _select_evidence(search_result: SearchResult, evidence_chunk_ids: list[str]) -> list[Any]:

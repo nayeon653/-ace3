@@ -1,7 +1,7 @@
 """SearchService의 bounded 검색 실행과 안전한 실패 계약을 검증한다."""
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 from uuid import UUID
 
@@ -377,6 +377,90 @@ def test_neighbor_expansion_runs_at_most_once_and_preserves_anchor() -> None:
             _PENSION_TYPES,
         )
     ]
+
+
+def test_neighbor_expansion_always_uses_top_ranked_chunk_as_anchor() -> None:
+    false_positive = _chunk(5, source_file_name="other.pdf")
+    section_table = replace(
+        _chunk(74, source_file_name="guide.pdf"),
+        title="PC 웹 가능 업무",
+    )
+    section_explanation = replace(
+        _chunk(75, source_file_name="guide.pdf"),
+        title="PC 웹 가능 업무",
+    )
+    neighbors = [
+        _chunk(index, source_file_name="other.pdf") for index in (3, 4, 5, 6)
+    ]
+    retriever = FakeRetriever(
+        hits=[
+            SearchHit(chunk=false_positive, score=0.9),
+            SearchHit(chunk=section_explanation, score=0.8),
+            SearchHit(chunk=section_table, score=0.7),
+            SearchHit(chunk=_chunk(30, source_file_name="third.pdf"), score=0.6),
+        ],
+        neighbors=neighbors,
+    )
+    service, _embedder = _service(
+        retriever,
+        config=_config(
+            result_limit=5,
+            neighbor_before=2,
+            neighbor_after=1,
+        ),
+    )
+
+    result = asyncio.run(
+        service.search(
+            SearchRequest(objective="메뉴 경로", expand_neighbors=True),
+            permission=Permission.POLICY,
+        )
+    )
+
+    assert result.execution_status == "completed"
+    assert retriever.neighbor_requests == [
+        (
+            NeighborRequest(
+                source_file_name="other.pdf",
+                chunk_index=5,
+                before=2,
+                after=1,
+            ),
+            _PENSION_TYPES,
+        )
+    ]
+    assert [chunk.chunk_index for chunk in result.retrieved_chunks] == [3, 4, 5, 6, 75]
+
+
+def test_neighbor_expansion_keeps_top_anchor_without_adjacent_section_signal() -> None:
+    anchor = _chunk(5)
+    other_hit = _chunk(20, source_file_name="other.pdf")
+    retriever = FakeRetriever(
+        hits=[
+            SearchHit(chunk=anchor, score=0.9),
+            SearchHit(chunk=other_hit, score=0.8),
+        ],
+        neighbors=[_chunk(index) for index in (3, 4, 5, 6)],
+    )
+    service, _embedder = _service(
+        retriever,
+        config=_config(
+            result_limit=5,
+            neighbor_before=2,
+            neighbor_after=1,
+        ),
+    )
+
+    result = asyncio.run(
+        service.search(
+            SearchRequest(objective="신청 절차", expand_neighbors=True),
+            permission=Permission.POLICY,
+        )
+    )
+
+    assert result.execution_status == "completed"
+    assert retriever.neighbor_requests[0][0].chunk_index == anchor.chunk_index
+    assert [chunk.chunk_index for chunk in result.retrieved_chunks] == [3, 4, 5, 6, 20]
 
 
 def test_neighbor_expansion_fails_closed_when_retriever_leaves_requested_window() -> None:

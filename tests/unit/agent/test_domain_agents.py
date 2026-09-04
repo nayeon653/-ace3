@@ -27,18 +27,8 @@ from pension_agent.agent.contracts import (
 from pension_agent.agent.domain_runner import GuardedDomainRunner
 from pension_agent.agent.policy import create_policy_agent, load_policy_agent_prompt
 from pension_agent.agent.policy.react import (
-    _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION,
-    _DC_ELIGIBILITY_MISSING_CONDITION,
-    _ISA_MATURITY_DATE_MISSING_CONDITION,
-    _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
-    _ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION,
-    _ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION,
-    _SERVICE_RECOGNITION_MISSING_CONDITION,
     EnforcePolicyToolSequence,
     _build_policy_result,
-)
-from pension_agent.agent.policy.react import (
-    _RETIREMENT_SCHEME_MISSING_CONDITION as _POLICY_RETIREMENT_SCHEME_MISSING_CONDITION,
 )
 from pension_agent.agent.product import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
@@ -72,16 +62,9 @@ from pension_agent.agent.tax_payout import (
 )
 from pension_agent.agent.tax_payout.react import (
     _ANNUAL_PRIVATE_PENSION_INCOME_MISSING_CONDITION,
-    _DB_SERVICE_YEARS_MISSING_CONDITION,
-    _DC_ANNUAL_WAGES_MISSING_CONDITION,
-    _DC_CONTRIBUTIONS_MISSING_CONDITION,
-    _DC_GAIN_LOSS_MISSING_CONDITION,
     _INCOME_BASIS_MISSING_CONDITION,
     _MEDICAL_CARE_EXCESS_MISSING_CONDITION,
     _PENSION_TAX_FILING_CHOICE_MISSING_CONDITION,
-    _RECIPIENT_AGE_MISSING_CONDITION,
-    _RETIREMENT_SCHEME_MISSING_CONDITION,
-    _TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION,
     EnforceTaxPayoutToolSequence,
     _build_tax_payout_result,
 )
@@ -411,8 +394,13 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         }
     ]
     assert result["calculations"] == []
+    expected_objective = (
+        "이전 가능 여부의 문서 근거 확인"
+        if domain == "product"
+        else "이전 가능 여부 판단\n이전 가능 여부의 문서 근거 확인"
+    )
     expected_request = SearchRequest(
-        objective="이전 가능 여부의 문서 근거 확인",
+        objective=expected_objective,
         source_file_name="R2_KR510902511M.pdf" if domain == "product" else None,
     )
     assert search.calls == [
@@ -424,7 +412,7 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
     assert {evidence["chunk_id"] for evidence in result["evidence"]} <= {
         chunk.chunk_id for chunk in search.result.retrieved_chunks
     }
-    assert all(
+    assert domain == "policy" or all(
         set(names)
         == (
             {
@@ -472,6 +460,19 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         )
         for names, _kwargs in model.bindings
     )
+    if domain == "policy":
+        assert [(names, kwargs.get("tool_choice")) for names, kwargs in model.bindings] == [
+            (["search_documents", "submit_domain_result"], None),
+            (
+                [
+                    "search_documents",
+                    "calculate_dc_medical_withdrawal_threshold",
+                    "calculate_isa_transfer_deadline",
+                    "submit_domain_result",
+                ],
+                None,
+            ),
+        ]
     if domain == "product":
         assert model.tool_argument_names["lookup_product_codes"] == set()
         assert model.tool_argument_names["search_documents"] == {
@@ -480,6 +481,51 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
             "expand_neighbors",
         }
         assert model.tool_required_argument_names["search_documents"] == {"objective"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("factory", "permission"),
+    [
+        (create_policy_agent, Permission.POLICY),
+        (create_tax_payout_agent, Permission.TAX_PAYOUT),
+    ],
+)
+async def test_policy_and_tax_search_preserve_domain_objective_when_focus_is_narrower(
+    factory: Callable[..., DomainRunner],
+    permission: Permission,
+) -> None:
+    search = FakeSearchService(
+        SearchResult(
+            execution_status="completed",
+            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
+        )
+    )
+    agent = factory(
+        model=_model(),
+        search_service=cast(SearchRunner, search),
+    )
+    domain_objective = "이전 가능 여부와 계좌 유형별 조건·제한 및 신청 절차 판단"
+
+    result = await agent(
+        {
+            "question": "연금계좌를 이전할 수 있나요?",
+            "objective": domain_objective,
+        }
+    )
+
+    assert result["execution_status"] == "completed"
+    assert search.calls == [
+        (
+            SearchRequest(
+                objective=(
+                    f"{domain_objective}\n"
+                    "이전 가능 여부의 문서 근거 확인"
+                )
+            ),
+            permission,
+        )
+    ]
 
 
 @pytest.mark.anyio
@@ -969,6 +1015,58 @@ async def test_product_agent_rejects_initial_conditional_submit_before_catalog_l
     assert planner.calls == [("미래에셋 상품 추천", "미래에셋 상품 추천")]
     assert search.calls == []
     assert model.invocation_count == 3
+
+
+@pytest.mark.anyio
+async def test_product_agent_accepts_initial_not_applicable_without_catalog_or_search() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "not_applicable",
+                            "conclusion": "계좌 메뉴는 Policy Agent의 책임입니다.",
+                            "missing_conditions": ["임의 조건"],
+                            "warnings": ["임의 경고"],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "not-applicable-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    planner = _catalog_browse_planner()
+    agent = create_product_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+        catalog_query_planner=planner,
+    )
+
+    result = await agent(
+        {
+            "question": "IRP 계좌에서 거래내역 메뉴는 어디인가요?",
+            "objective": "계좌 거래내역 메뉴 확인",
+        }
+    )
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"] == {
+        "status": "not_applicable",
+        "conclusion": "이 질문에는 해당 도메인 판단이 적용되지 않습니다.",
+        "missing_conditions": [],
+    }
+    assert result["evidence"] == []
+    assert result["calculations"] == []
+    assert result["warnings"] == []
+    assert planner.calls == []
+    assert search.calls == []
+    assert model.invocation_count == 1
 
 
 @pytest.mark.anyio
@@ -1858,7 +1956,7 @@ async def test_user_provided_source_hint_is_forwarded_to_search_service() -> Non
     assert search.calls == [
         (
             SearchRequest(
-                objective="guide.pdf 이전 절차",
+                objective=("이전 절차 판단\nguide.pdf 이전 절차"),
                 source_file_name="guide.pdf",
             ),
             Permission.POLICY,
@@ -1901,72 +1999,42 @@ async def test_model_generated_source_hint_is_rejected_before_search_service() -
 
 
 @pytest.mark.anyio
-async def test_tax_agent_replaces_numeric_claim_without_calculator() -> None:
-    chunk = _chunk(DocumentType.PENSION_REFERENCE)
+@pytest.mark.parametrize(
+    ("evidence", "conclusion"),
+    [
+        (
+            "ISA 만기자금은 만기일부터 60일 이내 연금계좌로 전환해야 합니다.",
+            "ISA 만기자금은 만기일부터 60일 이내 연금계좌로 전환해야 합니다.",
+        ),
+        (
+            "연간 사적연금소득이 1,500만 원을 초과하면 16.5퍼센트 분리과세를 선택할 수 있습니다.",
+            "연간 사적연금소득이 1500만원을 초과하면 16.5% 분리과세를 선택할 수 있습니다.",
+        ),
+        (
+            "추가 세액공제 대상금액은 최대 900만원입니다.",
+            "추가 세액공제 대상금액은 최대 900만원입니다.",
+        ),
+    ],
+)
+async def test_tax_agent_preserves_numeric_facts_copied_from_selected_evidence(
+    evidence: str,
+    conclusion: str,
+) -> None:
+    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=evidence)
     search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
-    model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "search_documents",
-                        "args": {"objective": "세율 판단 근거 확인"},
-                        "id": "search-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "determined",
-                            "conclusion": "세율은 10%입니다.",
-                            "missing_conditions": [],
-                            "warnings": [],
-                            "evidence_chunk_ids": [chunk.chunk_id],
-                        },
-                        "id": "first-submit",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "determined",
-                            "conclusion": "세율은 여전히 10%로 확정됩니다.",
-                            "missing_conditions": [],
-                            "warnings": [],
-                            "evidence_chunk_ids": [chunk.chunk_id],
-                        },
-                        "id": "second-submit",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-        ]
-    )
+    model = _model(conclusion=conclusion)
     agent = create_tax_payout_agent(
         model=model,
         search_service=cast(SearchRunner, search),
     )
-    result = await agent({"question": "세율은?", "objective": "세율 판단"})
 
-    assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["conclusion"] == (
-        "확정 수치 판단에는 결정론적 계산 Tool 결과가 필요합니다."
-    )
-    assert "10" not in result["decision"]["conclusion"]
+    result = await agent({"question": "법정 기준은?", "objective": "법정 기준 확인"})
+
+    assert result["decision"]["status"] == "determined"
+    assert result["decision"]["conclusion"] == conclusion
     assert result["calculations"] == []
-    assert len(search.calls) == 1
-    assert model.invocation_count == 3
+    assert result["warnings"] == []
+    assert model.invocation_count == 2
 
 
 @pytest.mark.anyio
@@ -2030,7 +2098,7 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
                         "name": "submit_domain_result",
                         "args": {
                             "status": "determined",
-                            "conclusion": "임의 계산값은 999원입니다.",
+                            "conclusion": "검색 근거의 평가액과 수령연차에 계산 결과를 적용했습니다.",
                             "missing_conditions": [],
                             "warnings": [],
                             "evidence_chunk_ids": [],
@@ -2056,7 +2124,9 @@ async def test_tax_agent_records_and_uses_verified_pension_calculation() -> None
 
     assert result["decision"]["status"] == "determined"
     assert "1200000.0 KRW" in result["decision"]["conclusion"]
-    assert "999" not in result["decision"]["conclusion"]
+    assert "검색 근거의 평가액과 수령연차에 계산 결과를 적용했습니다." in result[
+        "decision"
+    ]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
     assert result["calculations"][0]["outputs"] == {
         "withdrawal_limit": "1200000.0",
@@ -2134,7 +2204,7 @@ async def test_tax_agent_records_and_uses_verified_tax_credit_calculation() -> N
                         "name": "submit_domain_result",
                         "args": {
                             "status": "determined",
-                            "conclusion": "임의 세액은 999원입니다.",
+                            "conclusion": "검색 근거의 납입액과 소득 조건에 계산 결과를 적용했습니다.",
                             "missing_conditions": [],
                             "warnings": [],
                             "evidence_chunk_ids": [],
@@ -2159,7 +2229,9 @@ async def test_tax_agent_records_and_uses_verified_tax_credit_calculation() -> N
     )
 
     assert result["decision"]["status"] == "determined"
-    assert "999" not in result["decision"]["conclusion"]
+    assert "검색 근거의 납입액과 소득 조건에 계산 결과를 적용했습니다." in result[
+        "decision"
+    ]["conclusion"]
     assert "연금계좌 세액공제 대상액" in result["decision"]["conclusion"]
     assert "이론상 세액" in result["decision"]["conclusion"]
     assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
@@ -2656,7 +2728,6 @@ def _sequence_result_tool_names(
     *,
     calculations: list[dict[str, Any]],
     tool_names: list[str],
-    question: str = "",
 ) -> list[str]:
     message = AIMessage(
         content="",
@@ -2665,7 +2736,6 @@ def _sequence_result_tool_names(
     state = {
         "search_result": SearchResult(execution_status="completed"),
         "calculations": calculations,
-        "question": question,
         "messages": [message],
     }
     update = EnforceTaxPayoutToolSequence().after_model(state, None)
@@ -2673,7 +2743,7 @@ def _sequence_result_tool_names(
     return [call["name"] for call in kept_message.tool_calls]
 
 
-def test_tax_agent_keeps_exact_pension_tax_comparison_pair_in_one_model_call() -> None:
+def test_tax_sequence_keeps_one_calculation_per_model_response() -> None:
     kept = _sequence_result_tool_names(
         calculations=[],
         tool_names=[
@@ -2683,57 +2753,104 @@ def test_tax_agent_keeps_exact_pension_tax_comparison_pair_in_one_model_call() -
         ],
     )
 
-    assert kept == [
-        "calculate_pension_income_tax",
-        "calculate_non_pension_withdrawal_tax",
-    ]
+    assert kept == ["calculate_pension_income_tax"]
 
 
-def test_tax_agent_keeps_only_first_pension_installment_tool() -> None:
+def test_tax_sequence_allows_a_different_calculation_after_prior_result() -> None:
     kept = _sequence_result_tool_names(
-        calculations=[],
-        tool_names=[
-            "calculate_pension_annual_limit_installment",
-            "calculate_pension_period_installment",
-            "calculate_pension_unit_installment",
-        ],
-    )
-
-    assert kept == ["calculate_pension_annual_limit_installment"]
-
-
-def test_tax_agent_keeps_only_first_pension_withdrawal_tool() -> None:
-    kept = _sequence_result_tool_names(
-        calculations=[],
+        calculations=[{"calculator_id": "pension_withdrawal_allocation"}],
         tool_names=[
             "calculate_pension_withdrawal_tax_breakdown",
-            "calculate_pension_withdrawal_allocation",
+            "submit_domain_result",
         ],
     )
 
     assert kept == ["calculate_pension_withdrawal_tax_breakdown"]
 
 
-def test_tax_agent_allows_only_submit_after_pension_withdrawal_calculation() -> None:
-    kept = _sequence_result_tool_names(
-        calculations=[{"calculator_id": "pension_withdrawal_allocation"}],
-        tool_names=[
-            "calculate_pension_income_tax",
-            "calculate_pension_withdrawal_tax_breakdown",
-            "submit_domain_result",
-        ],
-    )
-
-    assert kept == ["submit_domain_result"]
-
-
-def test_tax_agent_allows_allocation_after_failed_breakdown_without_calculation() -> None:
+def test_tax_sequence_keeps_exposed_calculation_capability_after_search() -> None:
     kept = _sequence_result_tool_names(
         calculations=[],
         tool_names=["calculate_pension_withdrawal_allocation"],
     )
 
     assert kept == ["calculate_pension_withdrawal_allocation"]
+
+
+def test_tax_sequence_filters_unexposed_tool_capability() -> None:
+    kept = _sequence_result_tool_names(
+        calculations=[],
+        tool_names=["calculate_unexposed_value", "submit_domain_result"],
+    )
+
+    assert kept == ["submit_domain_result"]
+
+
+@pytest.mark.anyio
+async def test_tax_agent_enforces_per_calculator_run_budget() -> None:
+    chunk = _chunk(
+        DocumentType.PENSION_REFERENCE,
+        content="계좌 평가액 1천만원; 연금수령연차 1년차",
+    )
+    search = FakeSearchService(
+        SearchResult(execution_status="completed", retrieved_chunks=[chunk])
+    )
+    calculation_call = {
+        "name": "calculate_pension_withdrawal_limit",
+        "args": {
+            "account_valuation_krw": "10000000",
+            "pension_year": 1,
+            "account_valuation_source": "계좌 평가액 1천만원",
+            "pension_year_source": "연금수령연차 1년차",
+        },
+        "id": "calculation-call",
+        "type": "tool_call",
+    }
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_documents",
+                        "args": {"objective": "연금수령한도 입력과 산식 확인"},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="", tool_calls=[calculation_call]),
+            AIMessage(
+                content="",
+                tool_calls=[{**calculation_call, "id": "repeated-calculation-call"}],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "determined",
+                            "conclusion": "검색 근거의 평가액과 수령연차에 계산을 적용했습니다.",
+                            "missing_conditions": [],
+                            "warnings": [],
+                            "evidence_chunk_ids": [chunk.chunk_id],
+                        },
+                        "id": "submit-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
+    )
+    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
+
+    result = await agent({"question": "연금수령한도는?", "objective": "한도 계산"})
+
+    assert [item["calculator_id"] for item in result["calculations"]] == [
+        "pension_withdrawal_limit"
+    ]
+    assert model.invocation_count == 4
 
 
 @pytest.mark.anyio
@@ -2854,19 +2971,6 @@ async def test_tax_agent_runs_pension_withdrawal_paths(
     assert result["calculations"][0]["calculator_id"] == expected_calculator
     assert result["calculations"][0]["input_sources"]
     assert result["evidence"]
-
-
-def test_tax_agent_allows_only_submit_after_pension_installment_calculation() -> None:
-    kept = _sequence_result_tool_names(
-        calculations=[{"calculator_id": "pension_annual_limit_installment"}],
-        tool_names=[
-            "calculate_pension_period_installment",
-            "calculate_pension_unit_installment",
-            "submit_domain_result",
-        ],
-    )
-
-    assert kept == ["submit_domain_result"]
 
 
 @pytest.mark.anyio
@@ -3050,7 +3154,12 @@ async def test_tax_agent_preserves_both_pension_tax_comparison_results() -> None
                         },
                         "id": "pension-income-call",
                         "type": "tool_call",
-                    },
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
                     {
                         "name": "calculate_non_pension_withdrawal_tax",
                         "args": {
@@ -3199,29 +3308,16 @@ async def test_tax_agent_defers_submit_until_remaining_comparison_calculation_fi
     assert "연금외수령 적용 기본세율" in result["decision"]["conclusion"]
 
 
-def test_tax_agent_defers_submit_when_remaining_comparison_tool_is_requested() -> None:
+def test_tax_sequence_runs_calculation_before_simultaneous_submit() -> None:
     kept = _sequence_result_tool_names(
         calculations=[{"calculator_id": "pension_income_tax"}],
         tool_names=[
-            "calculate_pension_withdrawal_limit",
             "calculate_non_pension_withdrawal_tax",
             "submit_domain_result",
         ],
     )
 
     assert kept == ["calculate_non_pension_withdrawal_tax"]
-
-
-def test_tax_agent_allows_only_submit_after_both_comparison_calculations() -> None:
-    kept = _sequence_result_tool_names(
-        calculations=[
-            {"calculator_id": "pension_income_tax"},
-            {"calculator_id": "non_pension_withdrawal_tax"},
-        ],
-        tool_names=["calculate_pension_income_tax", "submit_domain_result"],
-    )
-
-    assert kept == ["submit_domain_result"]
 
 
 def test_tax_agent_keeps_only_first_when_deferred_and_other_calculators_are_requested() -> None:
@@ -3234,19 +3330,6 @@ def test_tax_agent_keeps_only_first_when_deferred_and_other_calculators_are_requ
     )
 
     assert kept == ["calculate_deferred_retirement_withdrawal_tax"]
-
-
-def test_tax_agent_allows_only_submit_after_deferred_retirement_calculation() -> None:
-    kept = _sequence_result_tool_names(
-        calculations=[{"calculator_id": "deferred_retirement_withdrawal_tax"}],
-        tool_names=[
-            "calculate_pension_income_tax",
-            "calculate_deferred_retirement_withdrawal_tax",
-            "submit_domain_result",
-        ],
-    )
-
-    assert kept == ["submit_domain_result"]
 
 
 def test_deferred_retirement_tax_presentation_omits_unavailable_amounts() -> None:
@@ -3401,99 +3484,6 @@ async def test_tax_agent_keeps_only_first_calculation_tool_when_two_are_requeste
 
     assert len(result["calculations"]) == 1
     assert result["calculations"][0]["calculator_id"] == "pension_withdrawal_limit"
-
-
-@pytest.mark.anyio
-async def test_tax_agent_allows_only_submit_after_a_calculation_is_recorded() -> None:
-    search = FakeSearchService(
-        SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[
-                _chunk(
-                    DocumentType.PENSION_REFERENCE,
-                    title="세액공제",
-                    content=(
-                        "연금저축 순납입액 600만원, 퇴직연금 순납입액 300만원 납입, "
-                        "연금저축 ISA 전환액 0원, 퇴직연금 ISA 전환액 0원에 대한 "
-                        "세액공제 규칙입니다."
-                    ),
-                )
-            ],
-        )
-    )
-    model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "search_documents",
-                        "args": {"objective": "세액공제 산식 확인"},
-                        "id": "search-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "calculate_pension_tax_credit",
-                        "args": {
-                            "pension_savings_net_contribution_krw": "6000000",
-                            "retirement_pension_net_contribution_krw": "3000000",
-                            "pension_savings_isa_transfer_krw": "0",
-                            "retirement_pension_isa_transfer_krw": "0",
-                            "pension_savings_net_contribution_source": "연금저축 순납입액 600만원",
-                            "retirement_pension_net_contribution_source": "퇴직연금 순납입액 300만원",
-                            "pension_savings_isa_transfer_source": "연금저축 ISA 전환액 0원",
-                            "retirement_pension_isa_transfer_source": "퇴직연금 ISA 전환액 0원",
-                        },
-                        "id": "tax-credit-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "calculate_pension_withdrawal_limit",
-                        "args": {
-                            "account_valuation_krw": "10000000",
-                            "pension_year": 1,
-                            "account_valuation_source": "평가액 1천만원",
-                            "pension_year_source": "1년차",
-                        },
-                        "id": "withdrawal-call",
-                        "type": "tool_call",
-                    },
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "determined",
-                            "conclusion": "결과를 제출합니다.",
-                            "missing_conditions": [],
-                            "warnings": [],
-                            "evidence_chunk_ids": [],
-                        },
-                        "id": "submit-call",
-                        "type": "tool_call",
-                    },
-                ],
-            ),
-        ]
-    )
-    agent = create_tax_payout_agent(
-        model=model,
-        search_service=cast(SearchRunner, search),
-    )
-
-    result = await agent({"question": "세액공제 대상액은?", "objective": "연금계좌 세액공제 계산"})
-
-    assert len(result["calculations"]) == 1
-    assert result["calculations"][0]["calculator_id"] == "pension_tax_credit"
-    assert result["decision"]["status"] == "conditional"
 
 
 def test_pension_tax_credit_summary_does_not_claim_usable_credit_is_refund() -> None:
@@ -4934,222 +4924,6 @@ def test_partial_calculation_preserves_missing_conditions(
 
 
 @pytest.mark.anyio
-async def test_tax_agent_keeps_conclusion_when_only_missing_or_warnings_have_numbers() -> None:
-    search = FakeSearchService(
-        SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
-            limitations=["한도는 900만원입니다.", "자료 범위가 제한적입니다."],
-        )
-    )
-    conclusion = (
-        "가입 유형에 따라 세액공제 조건이 달라지며, 자세한 조건은 근거 문서를 확인해야 합니다."
-    )
-    model = _model(
-        conclusion=conclusion,
-        missing_conditions=["연봉 5천만원 여부"],
-        warnings=["세율은 10%입니다.", "일반적인 주의가 필요합니다."],
-    )
-    agent = create_tax_payout_agent(
-        model=model,
-        search_service=cast(SearchRunner, search),
-    )
-    result = await agent({"question": "공제 조건은?", "objective": "공제 조건 판단"})
-
-    serialized = str(result)
-    assert result["decision"]["status"] == "determined"
-    assert result["decision"]["conclusion"] == conclusion
-    assert result["decision"]["missing_conditions"] == []
-    assert "10%" not in serialized
-    assert "900만원" not in serialized
-    assert "5천만원" not in serialized
-    assert "일반적인 주의가 필요합니다." in result["warnings"]
-    assert "자료 범위가 제한적입니다." in result["warnings"]
-    assert "근거 없이 제출된 확정 수치는 결과에서 제거했습니다." in result["warnings"]
-    assert model.invocation_count == 2
-
-
-@pytest.mark.anyio
-async def test_tax_agent_undetermined_uses_generic_missing_condition_when_all_are_numeric() -> None:
-    search = FakeSearchService(
-        SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
-        )
-    )
-    agent = create_tax_payout_agent(
-        model=_model(
-            decision_status="undetermined",
-            conclusion="정확한 초과분은 확인이 어렵습니다.",
-            missing_conditions=["초과분 900만원 여부"],
-        ),
-        search_service=cast(SearchRunner, search),
-    )
-    result = await agent(
-        {
-            "question": "연금수령한도를 초과하면 어떻게 과세되나요?",
-            "objective": "연금수령한도 초과 과세 판단",
-        }
-    )
-
-    assert result["decision"]["status"] == "undetermined"
-    assert result["decision"]["conclusion"] == "정확한 초과분은 확인이 어렵습니다."
-    assert result["decision"]["missing_conditions"] == ["제공 문서의 관련 근거 또는 필수 조건"]
-
-
-@pytest.mark.anyio
-async def test_tax_agent_conditional_missing_falls_back_to_user_condition() -> None:
-    search = FakeSearchService(
-        SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
-        )
-    )
-    conclusion = "가입 기간과 연령 조건을 충족하는지에 따라 과세 여부가 달라집니다."
-    agent = create_tax_payout_agent(
-        model=_model(
-            decision_status="conditional",
-            conclusion=conclusion,
-            missing_conditions=["55세 이상 여부"],
-        ),
-        search_service=cast(SearchRunner, search),
-    )
-    result = await agent(
-        {"question": "55세에 연금을 받으면 세율이 어떻게 되나요?", "objective": "연령별 세율 판단"}
-    )
-
-    assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["conclusion"] == conclusion
-    assert result["decision"]["missing_conditions"] == ["판단에 필요한 사용자 조건"]
-    assert "결정론적 계산 Tool 결과" not in result["decision"]["missing_conditions"]
-    assert "근거 없이 제출된 확정 수치는 결과에서 제거했습니다." in result["warnings"]
-    assert "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다." not in result["warnings"]
-
-
-@pytest.mark.anyio
-async def test_tax_agent_does_not_treat_topic_words_alone_as_numeric_claim() -> None:
-    search = FakeSearchService(
-        SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
-        )
-    )
-    conclusion = "적용 세율과 공제 한도는 가입 유형과 소득 구간에 따라 달라집니다."
-    agent = create_tax_payout_agent(
-        model=_model(conclusion=conclusion),
-        search_service=cast(SearchRunner, search),
-    )
-    result = await agent(
-        {"question": "세율과 한도는 어떻게 정해지나요?", "objective": "세율·한도 결정 조건 판단"}
-    )
-
-    assert result["decision"]["status"] == "determined"
-    assert result["decision"]["conclusion"] == conclusion
-
-
-@pytest.mark.anyio
-async def test_tax_agent_numeric_claim_does_not_upgrade_undetermined_to_conditional() -> None:
-    chunk = _chunk(DocumentType.PENSION_REFERENCE)
-    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
-    model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "search_documents",
-                        "args": {"objective": "중도해지 과세 근거 확인"},
-                        "id": "search-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "undetermined",
-                            "conclusion": (
-                                "중도해지 시 세금이 부과되나 정확한 금액은 10% 내외로 다양합니다."
-                            ),
-                            "missing_conditions": ["가입 기간"],
-                            "warnings": [],
-                            "evidence_chunk_ids": [chunk.chunk_id],
-                        },
-                        "id": "first-submit",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "undetermined",
-                            "conclusion": ("정확한 금액은 여전히 10% 내외로 확정하기 어렵습니다."),
-                            "missing_conditions": ["가입 기간"],
-                            "warnings": [],
-                            "evidence_chunk_ids": [chunk.chunk_id],
-                        },
-                        "id": "second-submit",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-        ]
-    )
-    agent = create_tax_payout_agent(
-        model=model,
-        search_service=cast(SearchRunner, search),
-    )
-    result = await agent(
-        {"question": "중도해지하면 세금이 얼마나 나오나요?", "objective": "중도해지 과세 판단"}
-    )
-
-    assert result["decision"]["status"] == "undetermined"
-    assert result["decision"]["conclusion"] == (
-        "제공 근거만으로는 확정 수치를 포함한 결론을 판단할 수 없습니다."
-    )
-    assert result["decision"]["missing_conditions"] == ["가입 기간"]
-    assert "10%" not in str(result)
-    assert "결정론적 계산 Tool 결과" not in result["decision"]["missing_conditions"]
-    assert "계산 Tool 없이 세금·금액·세율·한도를 확정하지 않았습니다." not in result["warnings"]
-    assert "근거 없이 제출된 확정 수치는 결과에서 제거했습니다." in result["warnings"]
-    assert model.invocation_count == 3
-
-
-@pytest.mark.anyio
-async def test_tax_agent_not_applicable_is_not_overridden_by_numeric_guard() -> None:
-    search = FakeSearchService(
-        SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE)],
-        )
-    )
-    agent = create_tax_payout_agent(
-        model=_model(
-            decision_status="not_applicable",
-            conclusion="이 펀드의 위험 등급은 3등급이며 보수는 연 1.5%입니다.",
-            warnings=["최근 수익률은 10%였습니다."],
-        ),
-        search_service=cast(SearchRunner, search),
-    )
-    result = await agent({"question": "이 펀드의 위험은?", "objective": "펀드 위험 판단"})
-
-    assert result["decision"] == {
-        "status": "not_applicable",
-        "conclusion": "이 질문에는 해당 도메인 판단이 적용되지 않습니다.",
-        "missing_conditions": [],
-    }
-    assert result["warnings"] == []
-    assert result["evidence"] == []
-
-
-@pytest.mark.anyio
 async def test_tax_agent_not_applicable_accepted_without_search() -> None:
     search = FakeSearchService(SearchResult(execution_status="completed"))
     model = ToolCallingFakeModel(
@@ -5187,6 +4961,55 @@ async def test_tax_agent_not_applicable_accepted_without_search() -> None:
         "missing_conditions": [],
     }
     assert result["evidence"] == []
+    assert result["warnings"] == []
+    assert search.calls == []
+    assert model.invocation_count == 1
+
+
+@pytest.mark.anyio
+async def test_policy_agent_not_applicable_accepted_without_search() -> None:
+    search = FakeSearchService(SearchResult(execution_status="completed"))
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "submit_domain_result",
+                        "args": {
+                            "status": "not_applicable",
+                            "conclusion": "펀드 위험은 Product Agent의 책임입니다.",
+                            "missing_conditions": ["임의 조건"],
+                            "warnings": ["임의 경고"],
+                            "evidence_chunk_ids": [],
+                        },
+                        "id": "not-applicable-submit",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
+    agent = create_policy_agent(
+        model=model,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent(
+        {
+            "question": "A펀드의 위험과 보수는 어떤가요?",
+            "objective": "개별 펀드 위험과 보수 판단",
+        }
+    )
+
+    assert result["execution_status"] == "completed"
+    assert result["decision"] == {
+        "status": "not_applicable",
+        "conclusion": "이 질문에는 해당 도메인 판단이 적용되지 않습니다.",
+        "missing_conditions": [],
+    }
+    assert result["evidence"] == []
+    assert result["calculations"] == []
     assert result["warnings"] == []
     assert search.calls == []
     assert model.invocation_count == 1
@@ -5254,74 +5077,6 @@ async def test_tax_agent_determined_still_requires_search_before_submit() -> Non
     result = await agent({"question": "세액공제 조건은?", "objective": "세액공제 조건 판단"})
 
     assert result["decision"]["status"] == "determined"
-    assert len(search.calls) == 1
-    assert model.invocation_count == 3
-
-
-@pytest.mark.anyio
-async def test_tax_agent_accepts_qualitative_resubmit_after_numeric_conclusion() -> None:
-    chunk = _chunk(DocumentType.PENSION_REFERENCE)
-    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
-    qualitative_conclusion = "소득 기준과 납입 한도를 충족해야 세액공제를 받을 수 있습니다."
-    model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "search_documents",
-                        "args": {"objective": "세액공제 조건 근거 확인"},
-                        "id": "search-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "determined",
-                            "conclusion": "세액공제율은 16.5%입니다.",
-                            "missing_conditions": [],
-                            "warnings": [],
-                            "evidence_chunk_ids": [chunk.chunk_id],
-                        },
-                        "id": "numeric-submit",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "determined",
-                            "conclusion": qualitative_conclusion,
-                            "missing_conditions": [],
-                            "warnings": [],
-                            "evidence_chunk_ids": [chunk.chunk_id],
-                        },
-                        "id": "qualitative-submit",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-        ]
-    )
-    agent = create_tax_payout_agent(
-        model=model,
-        search_service=cast(SearchRunner, search),
-    )
-
-    result = await agent({"question": "세액공제 조건은?", "objective": "세액공제 조건 판단"})
-
-    assert result["decision"]["status"] == "determined"
-    assert result["decision"]["conclusion"] == qualitative_conclusion
-    assert "16.5" not in str(result)
     assert len(search.calls) == 1
     assert model.invocation_count == 3
 
@@ -5582,77 +5337,45 @@ def _completed_result() -> DomainResult:
     }
 
 
-def test_domain_prompts_are_packaged_and_limit_numeric_generation_to_tools() -> None:
+def test_domain_prompts_are_packaged_with_tool_and_evidence_contracts() -> None:
     policy_prompt = load_policy_agent_prompt()
     assert "search_documents" in policy_prompt
     product_prompt = load_product_agent_prompt()
     assert "search_documents" in product_prompt
     assert "lookup_product_codes" in product_prompt
-    assert "`product_code` 없이 `search_documents`" in product_prompt
-    assert "전체 검색을 먼저 했다면 다음 단계에서 반드시 `lookup_product_codes`" in product_prompt
-    assert "특정 상품의 최종 근거로 바로 제출하지 않는다" in product_prompt
-    assert "문서 근거 검색에 적합한 구체적인 `objective`로 재작성한다" in product_prompt
-    assert "누락된 판단 기준과 다른 문서 용어" in product_prompt
-    assert "calculate_fund_standard_price" in product_prompt
-    assert "calculate_fund_var_risk" in product_prompt
-    assert "calculate_fund_reported_var_risk" in product_prompt
-    assert "calculate_fund_frontend_sales_fee" in product_prompt
-    assert "calculate_fund_deferred_sales_fee" in product_prompt
-    assert "calculate_fund_redemption_fee" in product_prompt
-    assert "총보수·운용보수·판매보수·신탁보수·기타비용·총비용비율(TER)" in product_prompt
-    assert "실제 부과금액처럼 말하지 않는다" in product_prompt
+    assert "후보가 하나일 때만 반환된 정확한 `product_code`" in product_prompt
+    assert "현재 `objective`가 상품·운용 범위 밖이면" in product_prompt
+    assert "Calculation Tool을 우선 사용" in product_prompt
+    assert "Calculation Tool 미사용 fallback" in product_prompt
+    assert "validation 실패나 계산 오류" in product_prompt
+    assert "submit_domain_result" in product_prompt
+    assert "evidence_chunk_ids" in product_prompt
+    assert "calculate_" not in product_prompt
     assert "2회" not in product_prompt
     assert "두 번" not in product_prompt
     assert '"product_code":"KR510902511M"' not in product_prompt
     assert "{{PRODUCT_CATALOG_JSON}}" not in product_prompt
     tax_prompt = load_tax_payout_agent_prompt()
-    assert "calculate_pension_withdrawal_limit" in tax_prompt
-    assert "calculate_pension_annual_limit_installment" in tax_prompt
-    assert "calculate_pension_period_installment" in tax_prompt
-    assert "calculate_pension_unit_installment" in tax_prompt
-    assert "올해 남은 연금수령한도" in tax_prompt
-    assert "전체 기간 잔여회차" in tax_prompt
-    assert "1,000좌당 기준가격" in tax_prompt
-    assert "11년차 이후에는 연금수령한도가 적용되지 않으며" in tax_prompt
-    assert "calculate_pension_tax_credit" in tax_prompt
-    assert "calculate_pension_withdrawal_allocation" in tax_prompt
-    assert "calculate_pension_withdrawal_tax_breakdown" in tax_prompt
-    assert "calculate_db_retirement_benefit" in tax_prompt
-    assert "calculate_dc_minimum_employer_contribution" in tax_prompt
-    assert "calculate_dc_retirement_benefit" in tax_prompt
-    assert "calculate_db_to_dc_transfer_amount" in tax_prompt
-    assert "calculate_executive_retirement_income_limit" in tax_prompt
-    assert "임원 해당 여부 확인 필요" in tax_prompt
-    assert "소득 구분 금액일 뿐 세액이 아니다" in tax_prompt
-    assert "DB 퇴직급여와 DC 퇴직급여의 금액 비교" in tax_prompt
-    assert "자동 chaining하지 않는다" in tax_prompt
-    assert "재원별 인출 순서·배분만 필요" in tax_prompt
-    assert "그 전에 `calculate_pension_withdrawal_allocation`을 호출하지 않는다" in tax_prompt
-    assert "두 #115 Tool을 동시에 또는 연속 호출하지 않는다" in tax_prompt
-    assert "지원하지 않는 세금, 금액, 세율이나 한도를 직접 계산하지 않는다" in tax_prompt
+    assert all(f"## {index}." in tax_prompt for index in range(1, 9))
+    assert "search_documents" in tax_prompt
+    assert "Calculation Tool을 우선" in tax_prompt
+    assert "Calculation Tool 미사용 fallback" in tax_prompt
+    assert "공식·입력·대입 과정·결과·단위" in tax_prompt
+    assert "validation이 실패" in tax_prompt
     assert "submit_domain_result" in tax_prompt
-    assert "Product Agent 책임이므로" in tax_prompt
-    assert "Policy Agent 책임이므로" in tax_prompt
-    assert "검색된 청크 전체가 아니라 결론에 실제 인용한 최소" in tax_prompt
-    assert "근거 부족 판단을 계산 필요 판단으로 바꾸지 않는다" in tax_prompt
-    assert "calculate_dc_medical_withdrawal_threshold" in policy_prompt
-    assert "calculate_isa_transfer_deadline" in policy_prompt
-    assert "6개월 이상 요양" in policy_prompt
-    assert "IRP" in policy_prompt
-    assert "DB·DC 퇴직급여 제도 판단" in policy_prompt
-    assert "평균임금 제외기간" in policy_prompt
-    assert "계속근로·근속 인정 여부" in policy_prompt
-    assert "DB→DC 전환 가능 여부" in policy_prompt
-    assert "#118 퇴직급여 Calculation Tool을 호출하지 않는다" in policy_prompt
-    assert "calculate_medical_care_withdrawal_tax_limit" in tax_prompt
-    assert "calculate_medical_care_withdrawal_tax_breakdown" in tax_prompt
-    assert "3개월 이상 요양" in tax_prompt
-    assert "그 전에 limit 또는 `calculate_pension_income_tax`를 호출하지 않는다" in tax_prompt
+    assert "evidence_chunk_ids" in tax_prompt
+    assert "not_applicable" in tax_prompt
+    assert "calculate_" not in tax_prompt
+    assert "#11" not in tax_prompt
+    assert "Calculation Tool을 우선 사용" in policy_prompt
+    assert "Calculation Tool 미사용 fallback" in policy_prompt
+    assert "validation 실패" in policy_prompt
+    assert "evidence_chunk_ids" in policy_prompt
+    assert "not_applicable" in policy_prompt
+    assert "source_file_name" in policy_prompt
 
 
-def _policy_sequence_tool_names(
-    calculations: list[Any], tool_names: list[str], *, question: str = ""
-) -> list[str]:
+def _policy_sequence_tool_names(calculations: list[Any], tool_names: list[str]) -> list[str]:
     message = AIMessage(
         content="",
         tool_calls=[
@@ -5665,7 +5388,6 @@ def _policy_sequence_tool_names(
             "messages": [message],
             "search_result": SearchResult(execution_status="completed"),
             "calculations": calculations,
-            "question": question,
         },
         None,
     )
@@ -5683,8 +5405,7 @@ def test_policy_separates_dc_threshold_submit_and_blocks_after_success() -> None
     ) == ["submit_domain_result"]
 
 
-def test_policy_selects_isa_deadline_tool_and_blocks_conflicting_calculation() -> None:
-    question = "ISA 만기자금 연금전환 60일 기한을 계산해줘"
+def test_policy_keeps_first_calculation_without_question_matching() -> None:
     assert _policy_sequence_tool_names(
         [],
         [
@@ -5692,13 +5413,15 @@ def test_policy_selects_isa_deadline_tool_and_blocks_conflicting_calculation() -
             "calculate_isa_transfer_deadline",
             "submit_domain_result",
         ],
-        question=question,
-    ) == ["calculate_isa_transfer_deadline"]
+    ) == ["calculate_dc_medical_withdrawal_threshold"]
     assert _policy_sequence_tool_names(
-        [{"calculator_id": "isa_transfer_deadline"}],
-        ["calculate_isa_transfer_deadline", "submit_domain_result"],
-        question=question,
-    ) == ["submit_domain_result"]
+        [],
+        [
+            "calculate_isa_transfer_deadline",
+            "calculate_dc_medical_withdrawal_threshold",
+            "submit_domain_result",
+        ],
+    ) == ["calculate_isa_transfer_deadline"]
 
 
 def _dc_threshold_calculation() -> Any:
@@ -5739,70 +5462,24 @@ def _isa_deadline_calculation(
     }
 
 
-@pytest.mark.parametrize(
-    ("question", "calculations", "expected_status", "expected_condition"),
-    [
-        (
-            "ISA 만기자금 연금전환 마감일이 언제야?",
-            [],
-            "conditional",
-            _ISA_MATURITY_DATE_MISSING_CONDITION,
-        ),
-        (
-            "ISA는 6월 30일 만기고 8월 20일 신청했어. 기한 안이야?",
-            [_isa_deadline_calculation()],
-            "conditional",
-            _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
-        ),
-        (
-            "ISA는 6월 30일 만기고 8월 20일에 입금했어. 기한 안이야?",
-            [_isa_deadline_calculation()],
-            "conditional",
-            _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
-        ),
-        (
-            "ISA는 6월 30일 만기고 8월 20일에 처리했어. 기한 안이야?",
-            [_isa_deadline_calculation()],
-            "conditional",
-            _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION,
-        ),
-        (
-            "ISA 만기자금 연금전환 마감일까지 오늘 기준 며칠 남았어?",
-            [_isa_deadline_calculation()],
-            "conditional",
-            _ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION,
-        ),
-        (
-            "ISA 만기자금 연금전환 가능 여부를 알려줘",
-            [_isa_deadline_calculation(completion_date="2026-08-29", within_deadline=True)],
-            "conditional",
-            _ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION,
-        ),
-    ],
-)
-def test_policy_enforces_isa_deadline_conditional_boundaries(
-    question: str,
-    calculations: list[Any],
-    expected_status: str,
-    expected_condition: str,
-) -> None:
+def test_policy_result_preserves_explicit_missing_conditions_after_calculation() -> None:
     chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    calculations = [_isa_deadline_calculation()]
     result = _build_policy_result(
         search_result=SearchResult(
             execution_status="completed",
             retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
         ),
         calculations=calculations,
-        question=question,
-        status="determined",
-        conclusion="기한을 확인했습니다.",
-        missing_conditions=[],
+        status="conditional",
+        conclusion="계산 가능한 마감일을 확인했습니다.",
+        missing_conditions=["실제 완료 처리일 확인 필요"],
         warnings=[],
         evidence_chunk_ids=[chunk_id],
     )
 
-    assert result["decision"]["status"] == expected_status
-    assert result["decision"]["missing_conditions"] == [expected_condition]
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"] == ["실제 완료 처리일 확인 필요"]
     assert result["calculations"] == calculations
 
 
@@ -5829,7 +5506,6 @@ def test_policy_presents_rules_isa_completion_result_without_recalculation(
                 completion_date=completion_date, within_deadline=within_deadline
             )
         ],
-        question="ISA 만기자금 연금전환 입금확인 완료가 기한 안이야?",
         status="determined",
         conclusion="60일 기한만 판정했습니다.",
         missing_conditions=[],
@@ -5919,7 +5595,9 @@ async def test_policy_agent_runs_isa_deadline_before_simultaneous_submit() -> No
 
 
 @pytest.mark.anyio
-async def test_policy_agent_preserves_deadline_when_only_application_date_exists() -> None:
+async def test_policy_agent_preserves_explicit_missing_condition_after_deadline_calculation() -> (
+    None
+):
     chunk = _chunk(DocumentType.PENSION_REFERENCE)
     maturity_source = "ISA 만기일은 2026-06-30"
     search = FakeSearchService(
@@ -5961,9 +5639,9 @@ async def test_policy_agent_preserves_deadline_when_only_application_date_exists
                     {
                         "name": "submit_domain_result",
                         "args": {
-                            "status": "determined",
-                            "conclusion": "신청일은 확인했습니다.",
-                            "missing_conditions": [],
+                            "status": "conditional",
+                            "conclusion": "계산 가능한 마감일을 확인했습니다.",
+                            "missing_conditions": ["실제 완료 처리일 확인 필요"],
                             "warnings": [],
                             "evidence_chunk_ids": [chunk.chunk_id],
                         },
@@ -5984,13 +5662,11 @@ async def test_policy_agent_preserves_deadline_when_only_application_date_exists
     )
 
     assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["missing_conditions"] == [
-        _ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION
-    ]
+    assert result["decision"]["missing_conditions"] == ["실제 완료 처리일 확인 필요"]
     assert result["calculations"][0]["outputs"] == {"transfer_deadline_date": "2026-08-29"}
 
 
-def test_policy_dc_threshold_requires_separate_eligibility_confirmation() -> None:
+def test_policy_result_keeps_explicit_conditions_with_calculation() -> None:
     chunk_id = "550e8400-e29b-41d4-a716-446655440000"
     result = _build_policy_result(
         search_result=SearchResult(
@@ -5998,52 +5674,17 @@ def test_policy_dc_threshold_requires_separate_eligibility_confirmation() -> Non
             retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
         ),
         calculations=[_dc_threshold_calculation()],
-        status="determined",
+        status="conditional",
         conclusion="임금 기준을 초과했습니다.",
-        missing_conditions=["기존 조건"],
+        missing_conditions=["제도상 자격 확인 필요"],
         warnings=[],
         evidence_chunk_ids=[chunk_id],
     )
 
     assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["missing_conditions"] == [
-        "기존 조건",
-        _DC_ELIGIBILITY_MISSING_CONDITION,
-    ]
+    assert result["decision"]["missing_conditions"] == ["제도상 자격 확인 필요"]
     assert result["calculations"] == [_dc_threshold_calculation()]
     assert "DC 의료비 기준 적용 임금" in result["decision"]["conclusion"]
-
-
-@pytest.mark.parametrize(
-    ("question", "condition"),
-    [
-        ("퇴직급여가 얼마인지 판단해줘", _POLICY_RETIREMENT_SCHEME_MISSING_CONDITION),
-        ("이 근속기간이 인정되는지 판단해줘", _SERVICE_RECOGNITION_MISSING_CONDITION),
-        ("DB에서 DC로 전환 가능한지 판단해줘", _DB_TO_DC_ELIGIBILITY_MISSING_CONDITION),
-    ],
-)
-def test_policy_standardizes_unresolved_retirement_conditions(
-    question: str, condition: str
-) -> None:
-    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
-    result = _build_policy_result(
-        search_result=SearchResult(
-            execution_status="completed",
-            retrieved_chunks=[_chunk(DocumentType.PENSION_REFERENCE, chunk_id=chunk_id)],
-        ),
-        calculations=[],
-        question=question,
-        status="conditional",
-        conclusion="추가 조건에 따라 달라집니다.",
-        missing_conditions=["기존 확인 조건"],
-        warnings=[],
-        evidence_chunk_ids=[chunk_id],
-    )
-
-    assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["missing_conditions"].count(condition) == 1
-    assert "기존 확인 조건" in result["decision"]["missing_conditions"]
-    assert result["calculations"] == []
 
 
 def _medical_care_calculation(
@@ -6074,25 +5715,6 @@ def _medical_care_calculation(
     }
 
 
-def test_medical_care_limit_status_depends_on_question_intent() -> None:
-    calculation = _medical_care_calculation("medical_care_withdrawal_tax_limit")
-    pure_limit = _build_result_with_calculations(
-        [calculation], question="의료·요양 저율과세 한도가 얼마인가요?"
-    )
-    tax_question = _build_result_with_calculations(
-        [calculation],
-        missing_conditions=["기존 조건", _RECIPIENT_AGE_MISSING_CONDITION],
-        question="의료·요양 인출의 세액과 세후액은 얼마인가요?",
-    )
-
-    assert pure_limit["decision"]["status"] == "determined"
-    assert pure_limit["decision"]["missing_conditions"] == []
-    assert tax_question["decision"]["status"] == "conditional"
-    assert tax_question["decision"]["missing_conditions"] == [
-        "기존 조건",
-        _RECIPIENT_AGE_MISSING_CONDITION,
-    ]
-
 
 def test_medical_care_excess_forces_conditional_and_preserves_nulls() -> None:
     result = _build_result_with_calculations(
@@ -6112,28 +5734,6 @@ def test_medical_care_excess_forces_conditional_and_preserves_nulls() -> None:
     assert "확정할 수 없음" in result["decision"]["conclusion"]
     assert "None원" not in result["decision"]["conclusion"]
 
-
-def test_tax_sequence_enforces_single_medical_care_tool_and_submit_after_success() -> None:
-    assert _sequence_result_tool_names(
-        calculations=[],
-        tool_names=[
-            "calculate_medical_care_withdrawal_tax_breakdown",
-            "calculate_medical_care_withdrawal_tax_limit",
-        ],
-    ) == ["calculate_medical_care_withdrawal_tax_breakdown"]
-    assert _sequence_result_tool_names(
-        calculations=[], tool_names=["calculate_medical_care_withdrawal_tax_limit"]
-    ) == ["calculate_medical_care_withdrawal_tax_limit"]
-    assert _sequence_result_tool_names(
-        calculations=[{"calculator_id": "medical_care_withdrawal_tax_breakdown"}],
-        tool_names=[
-            "calculate_pension_income_tax",
-            "calculate_deferred_retirement_withdrawal_tax",
-            "calculate_pension_withdrawal_tax_breakdown",
-            "calculate_pension_withdrawal_limit",
-            "submit_domain_result",
-        ],
-    ) == ["submit_domain_result"]
 
 
 def test_medical_care_presentations_do_not_render_null_as_amount() -> None:
@@ -6199,12 +5799,11 @@ async def test_policy_agent_runs_dc_threshold_and_preserves_calculation_evidence
                     {
                         "name": "submit_domain_result",
                         "args": {
-                            "status": "determined",
+                            "status": "conditional",
                             "conclusion": "임금 기준을 초과합니다.",
-                            "missing_conditions": [],
+                            "missing_conditions": ["제도상 자격 확인 필요"],
                             "warnings": [],
                             "evidence_chunk_ids": [chunk.chunk_id],
-                            "dc_medical_eligibility_conditions_confirmed": False,
                         },
                         "id": "submit-call",
                         "type": "tool_call",
@@ -6218,14 +5817,14 @@ async def test_policy_agent_runs_dc_threshold_and_preserves_calculation_evidence
     result = await agent({"question": content, "objective": "DC 의료비 인출 가능 여부"})
 
     assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["missing_conditions"] == [_DC_ELIGIBILITY_MISSING_CONDITION]
+    assert result["decision"]["missing_conditions"] == ["제도상 자격 확인 필요"]
     assert result["calculations"][0]["calculator_id"] == "dc_medical_withdrawal_threshold"
     assert result["calculations"][0]["input_sources"]
     assert result["evidence"]
 
 
 @pytest.mark.anyio
-async def test_policy_agent_does_not_call_dc_threshold_for_irp_question() -> None:
+async def test_policy_agent_can_submit_without_calling_a_calculator() -> None:
     chunk = _chunk(DocumentType.PENSION_REFERENCE)
     search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
     model = ToolCallingFakeModel(
@@ -6399,7 +5998,7 @@ async def test_tax_agent_records_executive_limit_with_both_periods_and_payment()
                         "name": "submit_domain_result",
                         "args": {
                             "status": "determined",
-                            "conclusion": "임의 결론",
+                            "conclusion": "근거에 나온 기간별 보수와 지급액에 계산 결과를 적용했습니다.",
                             "missing_conditions": [],
                             "warnings": [],
                             "evidence_chunk_ids": [chunk.chunk_id],
@@ -6438,7 +6037,7 @@ async def test_tax_agent_records_executive_limit_with_both_periods_and_payment()
     assert "임원 퇴직소득 한도 합계: 360000000.0 KRW" in conclusion
     assert "퇴직소득 인정액: 360000000.0 KRW" in conclusion
     assert "한도 초과 근로소득 금액: 40000000.0 KRW" in conclusion
-    assert "임의 결론" not in conclusion
+    assert "근거에 나온 기간별 보수와 지급액에 계산 결과를 적용했습니다." in conclusion
 
 
 @pytest.mark.anyio
@@ -6514,81 +6113,6 @@ async def test_tax_agent_computes_executive_limit_only_without_payment() -> None
     conclusion = result["decision"]["conclusion"]
     assert "퇴직소득 인정액" not in conclusion
     assert "한도 초과 근로소득" not in conclusion
-
-
-@pytest.mark.anyio
-async def test_tax_agent_keeps_executive_limit_conditional_without_payment_for_comparison() -> None:
-    content = f"{_EXEC_LIMIT_SALARY_2012_2019}; {_EXEC_LIMIT_MONTHS_2012_2019}"
-    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
-    search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
-    model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "search_documents",
-                        "args": {"objective": "임원 퇴직소득 한도 계산 입력 확인"},
-                        "id": "search-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "calculate_executive_retirement_income_limit",
-                        "args": {
-                            "average_annualized_salary_2012_2019_krw": "100000000",
-                            "average_annualized_salary_2012_2019_source": (
-                                _EXEC_LIMIT_SALARY_2012_2019
-                            ),
-                            "service_months_2012_2019": 96,
-                            "service_months_2012_2019_source": _EXEC_LIMIT_MONTHS_2012_2019,
-                        },
-                        "id": "calculation-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "submit_domain_result",
-                        "args": {
-                            "status": "determined",
-                            "conclusion": "임의 결론",
-                            "missing_conditions": [],
-                            "warnings": [],
-                            "evidence_chunk_ids": [chunk.chunk_id],
-                        },
-                        "id": "submit-call",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-        ]
-    )
-    agent = create_tax_payout_agent(model=model, search_service=cast(SearchRunner, search))
-
-    result = await agent(
-        {
-            "question": (
-                "임원 퇴직소득 중 세법상 퇴직소득으로 인정되는 금액과 초과 근로소득이 "
-                f"얼마인가요? {content}"
-            ),
-            "objective": "임원 퇴직소득 인정액과 초과 근로소득 확인",
-        }
-    )
-
-    assert result["decision"]["status"] == "conditional"
-    assert (
-        "2012년 이후 한도 적용대상 퇴직급여 확인 필요" in result["decision"]["missing_conditions"]
-    )
-    assert result["calculations"][0]["calculator_id"] == "executive_retirement_income_limit"
-    assert result["calculations"][0]["outputs"]["post_2011_total_limit_krw"] == "240000000.0"
 
 
 def _retirement_calculation(
@@ -6679,112 +6203,6 @@ def _retirement_calculation(
     }
 
 
-def test_tax_sequence_allows_only_explicit_db_dc_benefit_comparison() -> None:
-    comparison = "DB 퇴직급여와 DC 퇴직급여를 비교해줘"
-    assert _sequence_result_tool_names(
-        calculations=[],
-        tool_names=[
-            "calculate_db_retirement_benefit",
-            "calculate_dc_retirement_benefit",
-            "submit_domain_result",
-        ],
-        question=comparison,
-    ) == ["calculate_db_retirement_benefit", "calculate_dc_retirement_benefit"]
-    assert _sequence_result_tool_names(
-        calculations=[],
-        tool_names=[
-            "calculate_db_retirement_benefit",
-            "calculate_dc_retirement_benefit",
-        ],
-        question="DB 퇴직급여를 계산해줘",
-    ) == ["calculate_db_retirement_benefit"]
-    assert _sequence_result_tool_names(
-        calculations=[],
-        tool_names=[
-            "calculate_db_retirement_benefit",
-            "calculate_dc_minimum_employer_contribution",
-        ],
-        question="DB와 DC 부담금을 비교해줘",
-    ) == ["calculate_db_retirement_benefit"]
-
-
-def test_tax_sequence_finishes_db_dc_comparison_then_allows_only_submit() -> None:
-    comparison = "DB 퇴직급여와 DC 퇴직급여를 비교해줘"
-    assert _sequence_result_tool_names(
-        calculations=[{"calculator_id": "db_retirement_benefit"}],
-        tool_names=["calculate_dc_retirement_benefit", "submit_domain_result"],
-        question=comparison,
-    ) == ["calculate_dc_retirement_benefit"]
-    assert _sequence_result_tool_names(
-        calculations=[
-            {"calculator_id": "db_retirement_benefit"},
-            {"calculator_id": "dc_retirement_benefit"},
-        ],
-        tool_names=["calculate_db_retirement_benefit", "submit_domain_result"],
-        question=comparison,
-    ) == ["submit_domain_result"]
-    assert _sequence_result_tool_names(
-        calculations=[{"calculator_id": "db_retirement_benefit"}],
-        tool_names=["calculate_dc_retirement_benefit", "submit_domain_result"],
-        question="DB 퇴직급여를 계산해줘",
-    ) == ["submit_domain_result"]
-
-
-@pytest.mark.parametrize(
-    ("question", "content", "condition"),
-    [
-        (
-            "DB 퇴직급여를 계산해줘",
-            "최근 3개월 임금 합계 900만원; 평균임금 산정일수 90일",
-            _DB_SERVICE_YEARS_MISSING_CONDITION,
-        ),
-        (
-            "DC 최소 사용자 부담금을 계산해줘",
-            "DC 최소 사용자 부담금 안내",
-            _DC_ANNUAL_WAGES_MISSING_CONDITION,
-        ),
-        (
-            "DC 퇴직급여를 계산해줘",
-            "누적 운용손익 100만원",
-            _DC_CONTRIBUTIONS_MISSING_CONDITION,
-        ),
-        (
-            "DC 퇴직급여를 계산해줘",
-            "DC 누적 부담금 1,000만원",
-            _DC_GAIN_LOSS_MISSING_CONDITION,
-        ),
-        (
-            "DB→DC 전환금액을 계산해줘",
-            "최종 30일 평균임금 400만원; 계속근로연수 3.5년",
-            _TRANSFER_FINAL_ANNUAL_WAGES_MISSING_CONDITION,
-        ),
-        (
-            "퇴직급여 금액을 계산해줘",
-            "최근 3개월 임금 합계 900만원",
-            _RETIREMENT_SCHEME_MISSING_CONDITION,
-        ),
-    ],
-)
-def test_tax_result_forces_specific_retirement_missing_condition(
-    question: str, content: str, condition: str
-) -> None:
-    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=content)
-    result = _build_tax_payout_result(
-        search_result=SearchResult(execution_status="completed", retrieved_chunks=[chunk]),
-        calculations=[],
-        question=question,
-        status="determined",
-        conclusion="계산할 수 있습니다.",
-        missing_conditions=["기존 조건"],
-        warnings=[],
-        evidence_chunk_ids=[chunk.chunk_id],
-    )
-
-    assert result["decision"]["status"] == "conditional"
-    assert result["decision"]["missing_conditions"].count(condition) == 1
-    assert "기존 조건" in result["decision"]["missing_conditions"]
-    assert result["calculations"] == []
-
 
 def test_retirement_presentations_preserve_intermediate_negative_and_equal_values() -> None:
     summary = format_calculation_summary(
@@ -6820,7 +6238,7 @@ def test_retirement_negative_and_equal_results_remain_determined(calculation: An
 
 
 @pytest.mark.anyio
-async def test_tax_agent_runs_db_benefit_and_blocks_later_calculation() -> None:
+async def test_tax_agent_runs_db_benefit_with_evidence() -> None:
     content = (
         "최근 3개월 임금 합계는 9,000,000원; "
         "평균임금 산정 포함 일수는 90일; 검증된 근속연수는 3.5년"
@@ -6865,12 +6283,6 @@ async def test_tax_agent_runs_db_benefit_and_blocks_later_calculation() -> None:
             AIMessage(
                 content="",
                 tool_calls=[
-                    {
-                        "name": "calculate_dc_minimum_employer_contribution",
-                        "args": {},
-                        "id": "blocked-call",
-                        "type": "tool_call",
-                    },
                     {
                         "name": "submit_domain_result",
                         "args": {
