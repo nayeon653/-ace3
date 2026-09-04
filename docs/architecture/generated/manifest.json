@@ -1,8 +1,8 @@
 {
   "artifacts": {
     "agent-system.png": {
-      "image_sha256": "a2c4e4c476cdefbb6392eeca7f4b8c5a20d8cb23d434c1fe4a812db1c22a5581",
-      "mermaid_sha256": "fcebcdf35a2fb98d05cd1589c049882f9d56af34c2646999214163341f47a50f"
+      "image_sha256": "ae32868f392ec55f836a1cc72a0c5901540d0c40da8f2ec20313018e4fe8ea4b",
+      "mermaid_sha256": "dbb54cba0e252960447b8d150c3c0aa01efa0120f0211da5b32c2c6c3a8c1b22"
     },
     "main-supervisor.png": {
       "image_sha256": "66689de5b945aae5eec407f5fe16976fb8bcbf7638bd395bdbefbdb56ceb7e65",

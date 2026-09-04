@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-24
 type: architecture
 related:
@@ -7,7 +7,8 @@ related:
   - 20260820-80-router-search-service.md
 supersedes:
   - 20260813-hcx-005-model-factory.md
-superseded-by: []
+superseded-by:
+  - 20260905-all-generation-hcx-007.md
 ---
 
 # Main Supervisor와 Product ReAct에 HCX-007을 선택 적용

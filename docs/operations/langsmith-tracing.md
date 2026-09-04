@@ -74,7 +74,7 @@ curl --get http://127.0.0.1:8000/answer \
 trace tree에 기록한다.
 
 - Main Supervisor 입력 state와 시스템 프롬프트
-- 역할별 HCX-007·HCX-005 모델 입력·출력
+- 역할별 HCX-007 비추론 모델 입력·출력
 - 선택된 Domain Tool의 요청·응답
 - 최종 모델 호출과 답변
 - 실행 순서, 지연시간과 제공되는 token 사용량

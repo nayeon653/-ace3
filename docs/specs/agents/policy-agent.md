@@ -10,11 +10,16 @@ Policy Agent는 연금 가입, 이전, 해지, 수령 절차와 제도상 가능
 | 항목 | 값 |
 |---|---|
 | 구현 | 독립 `create_agent` 기반 ReAct graph |
-| 모델 | `HCX-005` |
+| 모델 | `HCX-007` |
+| Thinking | `none` |
 | temperature / 최대 토큰 | `0.1` / `1024` |
 | Provider timeout/retry | 호출당 30초, 최대 2회 retry |
 | 프롬프트 | `pension_agent/prompts/domain/policy-agent.md` |
 | 구현 | `pension_agent/agent/policy/` |
+
+Policy를 포함한 모든 생성 LLM 역할을 HCX-007 비추론 모드로 통일한 배경은
+[`HCX-007 생성 모델 통일 결정`](../../decisions/20260905-all-generation-hcx-007.md)에
+기록한다. 검색 임베딩 전용 `bge-m3`는 이 변경의 범위가 아니다.
 
 ## 입력과 출력
 

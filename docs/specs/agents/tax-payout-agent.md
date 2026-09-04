@@ -17,7 +17,8 @@ Policy 책임이며 이 Agent는 해당 질문을 `not_applicable`로 제출한�
 | 항목 | 값 |
 |---|---|
 | 구현 | 독립 `create_agent` 기반 ReAct graph |
-| 모델 | `HCX-005` |
+| 모델 | `HCX-007` |
+| Thinking | `none` |
 | temperature / 최대 토큰 | `0.1` / `1024` |
 | Provider timeout/retry | 호출당 30초, 최대 2회 retry |
 | 프롬프트 | `pension_agent/prompts/domain/tax-payout-agent.md` |

@@ -45,7 +45,7 @@ def test_factory_creates_configured_hcx_007_without_network_call() -> None:
     assert supervisor.name == "main_supervisor"
 
 
-def test_factory_omits_thinking_for_hcx_005_domain_model() -> None:
+def test_factory_applies_non_thinking_mode_to_domain_model() -> None:
     connection = ClovaStudioConnection(
         api_key=SecretStr("test-secret-key"),
         api_base_url="https://example.test/v1/openai",
@@ -56,9 +56,9 @@ def test_factory_omits_thinking_for_hcx_005_domain_model() -> None:
         connection=connection,
     )
 
-    assert model.model_name == "HCX-005"
-    assert model.reasoning_effort is None
-    assert model.thinking is None
+    assert model.model_name == "HCX-007"
+    assert model.reasoning_effort == "none"
+    assert model.thinking == {"effort": "none"}
 
 
 def test_factory_reports_missing_api_key_without_secret_or_network() -> None:
