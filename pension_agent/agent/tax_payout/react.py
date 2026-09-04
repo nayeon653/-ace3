@@ -206,6 +206,7 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
         last_message = state.get("messages", [])[-1]
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
             return None
+        allowed_tools: tuple[str, ...]
         if state.get("search_result") is None:
             allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
         else:
