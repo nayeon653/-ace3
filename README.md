@@ -47,7 +47,8 @@ GET /answer → api(FastAPI) → agent(라우터/도구 오케스트레이션)
                                 ├→ retrieval(검색)
                                 ├→ rules(결정론적 세제 계산)
                                 └→ prompts + HyperCLOVA X
-                                   (Main·Product ReAct: HCX-007, 나머지: HCX-005)
+                                   (Main·Policy 후보·Product ReAct: HCX-007,
+                                    Tax/Payout·Catalog Planner: HCX-005)
 ```
 
 원칙: **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도·세율 등 확정
@@ -154,9 +155,11 @@ Docling 오프라인 파싱 스크립트와 FastAPI 평가 실행 진입점이 �
 
 ### HyperCLOVA X 설정
 
-Main Supervisor와 Product Agent ReAct에는 HCX-007 비추론 모드를 사용하고, 다른
-Domain Agent와 Product Catalog Planner에는 HCX-005를 사용합니다. 모델명, Thinking,
-생성 토큰 수, temperature, timeout과 retry는 환경변수가 아니라
+Main Supervisor와 Product Agent ReAct에는 HCX-007 비추론 모드를 사용합니다. 현재 후보
+구성은 Policy Agent도 HCX-007 비추론 모드로 분리하고, Tax/Payout Agent와 Product Catalog
+Planner는 HCX-005를 유지합니다. Policy 후보의 배경과 채택 조건은
+[`Policy Agent에 HCX-007 비추론 모델을 분리 적용하는 후보`](docs/decisions/20260905-policy-agent-hcx-007-candidate.md)에
+기록합니다. 모델명, Thinking, 생성 토큰 수, temperature, timeout과 retry는 환경변수가 아니라
 [`pension_agent/config/hcx.py`](pension_agent/config/hcx.py)의 불변 config에서 버전
 관리합니다. HCX-007의 Function Calling 구간은 Thinking을 `none`으로 고정합니다.
 후속 검증 결과에 따라 HyperCLOVA X 범위 안에서 config와 결정 기록을 변경할 수 있습니다.
