@@ -12,6 +12,7 @@ from pension_agent.agent.search import LimitedChunkRetriever, LimitedQueryEmbedd
 from pension_agent.config import (
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
+    POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
     AgentRuntimeConfig,
 )
@@ -67,6 +68,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     closed: list[str] = []
     created: dict[str, Any] = {}
     supervisor_model = object()
+    policy_model = object()
     default_domain_model = object()
     product_react_model = object()
     embedder = object()
@@ -83,6 +85,8 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
         config = kwargs["config"]
         if config is MAIN_SUPERVISOR_HCX_CONFIG:
             return supervisor_model
+        if config is POLICY_AGENT_HCX_CONFIG:
+            return policy_model
         if config is DEFAULT_DOMAIN_AGENT_HCX_CONFIG:
             return default_domain_model
         if config is PRODUCT_REACT_HCX_CONFIG:
@@ -152,6 +156,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     assert created["http_limits"] == [2, 3]
     assert [call["config"] for call in created["model_factories"]] == [
         MAIN_SUPERVISOR_HCX_CONFIG,
+        POLICY_AGENT_HCX_CONFIG,
         DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
         PRODUCT_REACT_HCX_CONFIG,
     ]
@@ -179,7 +184,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     assert created["tax_payout"]["model_concurrency"] is shared_model_limit
     assert created["product"]["model_concurrency"] is shared_model_limit
     assert created["supervisor"]["model_concurrency"] is shared_model_limit
-    assert created["policy"]["model"] is default_domain_model
+    assert created["policy"]["model"] is policy_model
     assert created["tax_payout"]["model"] is default_domain_model
     assert created["product"]["model"] is product_react_model
     assert created["product"]["catalog_planner_model"] is default_domain_model

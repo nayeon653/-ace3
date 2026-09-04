@@ -40,6 +40,7 @@ from pension_agent.config import (
     DEFAULT_AGENT_RUNTIME_CONFIG,
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
+    POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
     AgentRuntimeConfig,
     ClovaStudioConnection,
@@ -175,6 +176,12 @@ async def build_runtime_answer_service(
             http_client=model_http.sync,
             http_async_client=model_http.async_,
         )
+        policy_model = create_chat_clovax(
+            config=POLICY_AGENT_HCX_CONFIG,
+            connection=clova_connection,
+            http_client=model_http.sync,
+            http_async_client=model_http.async_,
+        )
         default_domain_model = create_chat_clovax(
             config=DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
             connection=clova_connection,
@@ -225,7 +232,7 @@ async def build_runtime_answer_service(
 
         domain_agents: dict[DomainName, DomainRunner] = {
             "policy": create_policy_agent(
-                model=default_domain_model,
+                model=policy_model,
                 search_service=search_service,
                 model_concurrency=model_concurrency,
             ),

@@ -29,6 +29,7 @@ from pension_agent.config import (
     DEFAULT_AGENT_RUNTIME_CONFIG,
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
+    POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
 )
 
@@ -80,6 +81,14 @@ def _domain_node_id(spec: DomainAgentSpec) -> str:
     return f"domain_{spec.slug.replace('-', '_')}"
 
 
+def _domain_model_name(spec: DomainAgentSpec) -> str:
+    if spec.domain == "policy":
+        return POLICY_AGENT_HCX_CONFIG.model
+    if spec.domain == "product":
+        return PRODUCT_REACT_HCX_CONFIG.model
+    return DEFAULT_DOMAIN_AGENT_HCX_CONFIG.model
+
+
 def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
     """런타임 Domain 등록 정보에서 전체 호출 경계 Mermaid를 만든다."""
 
@@ -107,7 +116,7 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
     lines.extend(
         (
             f'        {_domain_node_id(spec)}["{spec.display_name} Agent<br/>'
-            f'{PRODUCT_REACT_HCX_CONFIG.model if spec.domain == "product" else DEFAULT_DOMAIN_AGENT_HCX_CONFIG.model}"]'
+            f'{_domain_model_name(spec)}"]'
         )
         for spec in specs
     )

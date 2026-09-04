@@ -59,9 +59,9 @@ def test_agent_graph_document_covers_runtime_boundaries() -> None:
     document = render_document(build_artifacts())
 
     assert "Main Supervisor · CompiledStateGraph" in document
-    assert "Policy Agent" in document
-    assert "Tax/Payout Agent" in document
-    assert "Product Agent" in document
+    assert 'domain_policy["Policy Agent<br/>HCX-007"]' in document
+    assert 'domain_tax_payout["Tax/Payout Agent<br/>HCX-005"]' in document
+    assert 'domain_product["Product Agent<br/>HCX-007"]' in document
     assert "SearchService" in document
     assert "analyze_policy" in document
     assert "analyze_tax_payout" in document

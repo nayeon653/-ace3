@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from pension_agent.config import (
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
+    POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
     ChatClovaXConfig,
     ClovaStudioConnection,
@@ -28,7 +29,9 @@ def test_main_supervisor_config_is_versioned_and_immutable() -> None:
         MAIN_SUPERVISOR_HCX_CONFIG.model = "HCX-DASH-002"  # type: ignore[misc]
 
 
-def test_role_configs_limit_hcx_007_to_supervisor_and_product_react() -> None:
+def test_role_configs_assign_models_by_runtime_responsibility() -> None:
+    assert POLICY_AGENT_HCX_CONFIG.model == "HCX-007"
+    assert POLICY_AGENT_HCX_CONFIG.thinking_effort == "none"
     assert PRODUCT_REACT_HCX_CONFIG.model == "HCX-007"
     assert PRODUCT_REACT_HCX_CONFIG.thinking_effort == "none"
     assert DEFAULT_DOMAIN_AGENT_HCX_CONFIG.model == "HCX-005"

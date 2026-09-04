@@ -24,7 +24,7 @@ flowchart TB
     domain_tools -->|analyze_product| domain_product
 
     subgraph domains["Domain Agents · 각각 CompiledStateGraph"]
-        domain_policy["Policy Agent<br/>HCX-005"]
+        domain_policy["Policy Agent<br/>HCX-007"]
         domain_tax_payout["Tax/Payout Agent<br/>HCX-005"]
         domain_product["Product Agent<br/>HCX-007"]
     end
