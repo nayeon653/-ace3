@@ -11,7 +11,10 @@ from pension_agent.agent.tax_payout.react import create_tax_payout_react_agent
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
 
 TAX_PAYOUT_TOOL_NAME = "analyze_tax_payout"
-TAX_PAYOUT_TOOL_DESCRIPTION = "연금 세액공제, 과세와 수령 조건을 판단한다."
+TAX_PAYOUT_TOOL_DESCRIPTION = (
+    "연금·ISA의 세액공제, 과세 재원·세율·법정 한도, 세제상 연금수령 조건과 검증된 "
+    "계산을 판단한다. 계좌 업무 절차와 개별 펀드 특성은 다루지 않는다."
+)
 
 
 def load_tax_payout_agent_prompt() -> str:

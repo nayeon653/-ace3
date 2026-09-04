@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import tempfile
+import zlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
 from langchain.messages import AIMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
-from langchain_core.runnables.graph import MermaidDrawMethod
-from langchain_core.runnables.graph_mermaid import draw_mermaid_png
 
 from pension_agent.agent.execution import AsyncConcurrencyLimiter, ModelConcurrencyMiddleware
 from pension_agent.agent.orchestration import create_domain_agent_tool, create_main_supervisor
@@ -36,6 +37,7 @@ DEFAULT_OUTPUT = REPOSITORY_ROOT / "docs" / "architecture" / "agent-graphs.md"
 DEFAULT_IMAGE_DIR = REPOSITORY_ROOT / "docs" / "architecture" / "generated"
 DEFAULT_MANIFEST = DEFAULT_IMAGE_DIR / "manifest.json"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_MERMAID_INK_IMAGE_ENDPOINT = "https://mermaid.ink/img"
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +311,7 @@ def _render_manifest(
 
     payload = {
         "version": 1,
-        "renderer": "langchain-core MermaidDrawMethod.API",
+        "renderer": "mermaid.ink pako API",
         "artifacts": {
             artifact.image_name: {
                 "image_sha256": image_hashes[artifact.image_name],
@@ -359,6 +361,27 @@ def _previous_image_names() -> set[str]:
         return set()
 
 
+def _render_mermaid_png(mermaid: str) -> bytes:
+    """긴 그래프도 URL 제한을 넘지 않도록 pako 형식으로 압축해 렌더링한다."""
+
+    payload = json.dumps(
+        {"code": mermaid, "mermaid": {"theme": "default"}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+    encoded = base64.urlsafe_b64encode(zlib.compress(payload, level=9)).rstrip(b"=").decode()
+    response = httpx.get(
+        f"{_MERMAID_INK_IMAGE_ENDPOINT}/pako:{encoded}",
+        params={"type": "png", "bgColor": "!white"},
+        timeout=30,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    if not response.content.startswith(PNG_SIGNATURE):
+        raise RuntimeError("Mermaid.ink가 올바른 PNG를 반환하지 않았습니다.")
+    return response.content
+
+
 def write_outputs(artifacts: tuple[GraphArtifact, ...]) -> None:
     """Mermaid.ink로 PNG를 모두 렌더링한 뒤 산출물을 교체한다."""
 
@@ -370,14 +393,7 @@ def write_outputs(artifacts: tuple[GraphArtifact, ...]) -> None:
         temporary_path = Path(temporary_directory)
         for artifact in artifacts:
             image_path = temporary_path / artifact.image_name
-            image = draw_mermaid_png(
-                mermaid_syntax=artifact.mermaid,
-                output_file_path=str(image_path),
-                draw_method=MermaidDrawMethod.API,
-                max_retries=3,
-            )
-            if not image.startswith(PNG_SIGNATURE):
-                raise RuntimeError(f"올바르지 않은 PNG 응답입니다: {artifact.image_name}")
+            image_path.write_bytes(_render_mermaid_png(artifact.mermaid))
 
         image_hashes = {
             artifact.image_name: _file_sha256(temporary_path / artifact.image_name)

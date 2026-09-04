@@ -11,7 +11,11 @@ from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
 
 POLICY_TOOL_NAME = "analyze_policy"
-POLICY_TOOL_DESCRIPTION = "연금 가입, 이전, 해지, 수령 절차와 제도상 가능 여부를 판단한다."
+POLICY_TOOL_DESCRIPTION = (
+    "연금·ISA 계좌와 제도의 가입·납입·이전·해지·수령 신청, 계좌 상태와 거래 가능 "
+    "범위, 업무 서비스·메뉴·증명서·오류 및 계좌 수준 수수료를 판단한다. 세금 계산과 "
+    "개별 펀드 특성은 다루지 않는다."
+)
 
 
 def load_policy_agent_prompt() -> str:

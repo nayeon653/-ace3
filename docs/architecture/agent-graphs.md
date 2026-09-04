@@ -121,7 +121,6 @@ graph TD;
 	tools("tools")
 	CompletePolicyResult\2ebefore_model("CompletePolicyResult.before_model")
 	RequirePolicyTool\2eafter_model("RequirePolicyTool.after_model")
-	SinglePolicySubmitPerModelCall\2eafter_model("SinglePolicySubmitPerModelCall.after_model")
 	PolicyModelCallLimit\2ebefore_model("PolicyModelCallLimit.before_model")
 	PolicyModelCallLimit\2eafter_model("PolicyModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
@@ -133,13 +132,12 @@ graph TD;
 	CompletePolicyResult\2ebefore_model -.-> PolicyModelCallLimit\2ebefore_model;
 	CompletePolicyResult\2ebefore_model -.-> __end__;
 	EnforcePolicyToolSequence\2eafter_model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
-	PolicyModelCallLimit\2eafter_model --> SinglePolicySubmitPerModelCall\2eafter_model;
+	PolicyModelCallLimit\2eafter_model --> RequirePolicyTool\2eafter_model;
 	PolicyModelCallLimit\2ebefore_model -.-> __end__;
 	PolicyModelCallLimit\2ebefore_model -.-> model;
 	RequirePolicyTool\2eafter_model -.-> CompletePolicyResult\2ebefore_model;
 	RequirePolicyTool\2eafter_model -.-> __end__;
 	RequirePolicyTool\2eafter_model -.-> tools;
-	SinglePolicySubmitPerModelCall\2eafter_model --> RequirePolicyTool\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_isa_transfer_deadline\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_dc_medical_withdrawal_threshold\5d\2eafter_model;
@@ -177,7 +175,6 @@ graph TD;
 	tools("tools")
 	CompleteTaxPayoutResult\2ebefore_model("CompleteTaxPayoutResult.before_model")
 	RequireTaxPayoutTool\2eafter_model("RequireTaxPayoutTool.after_model")
-	SingleTaxPayoutSubmitPerModelCall\2eafter_model("SingleTaxPayoutSubmitPerModelCall.after_model")
 	TaxPayoutModelCallLimit\2ebefore_model("TaxPayoutModelCallLimit.before_model")
 	TaxPayoutModelCallLimit\2eafter_model("TaxPayoutModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
@@ -207,8 +204,7 @@ graph TD;
 	RequireTaxPayoutTool\2eafter_model -.-> CompleteTaxPayoutResult\2ebefore_model;
 	RequireTaxPayoutTool\2eafter_model -.-> __end__;
 	RequireTaxPayoutTool\2eafter_model -.-> tools;
-	SingleTaxPayoutSubmitPerModelCall\2eafter_model --> RequireTaxPayoutTool\2eafter_model;
-	TaxPayoutModelCallLimit\2eafter_model --> SingleTaxPayoutSubmitPerModelCall\2eafter_model;
+	TaxPayoutModelCallLimit\2eafter_model --> RequireTaxPayoutTool\2eafter_model;
 	TaxPayoutModelCallLimit\2ebefore_model -.-> __end__;
 	TaxPayoutModelCallLimit\2ebefore_model -.-> model;
 	ToolCallLimitMiddleware\5bcalculate_db_retirement_benefit\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_medical_care_withdrawal_tax_breakdown\5d\2eafter_model;
@@ -278,7 +274,6 @@ graph TD;
 	tools("tools")
 	CompleteProductResult\2ebefore_model("CompleteProductResult.before_model")
 	RequireProductTool\2eafter_model("RequireProductTool.after_model")
-	SingleProductSubmitPerModelCall\2eafter_model("SingleProductSubmitPerModelCall.after_model")
 	ProductModelCallLimit\2ebefore_model("ProductModelCallLimit.before_model")
 	ProductModelCallLimit\2eafter_model("ProductModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
@@ -295,13 +290,12 @@ graph TD;
 	CompleteProductResult\2ebefore_model -.-> ProductModelCallLimit\2ebefore_model;
 	CompleteProductResult\2ebefore_model -.-> __end__;
 	EnforceProductToolSequence\2eafter_model --> ToolCallLimitMiddleware\5bsubmit_domain_result\5d\2eafter_model;
-	ProductModelCallLimit\2eafter_model --> SingleProductSubmitPerModelCall\2eafter_model;
+	ProductModelCallLimit\2eafter_model --> RequireProductTool\2eafter_model;
 	ProductModelCallLimit\2ebefore_model -.-> __end__;
 	ProductModelCallLimit\2ebefore_model -.-> model;
 	RequireProductTool\2eafter_model -.-> CompleteProductResult\2ebefore_model;
 	RequireProductTool\2eafter_model -.-> __end__;
 	RequireProductTool\2eafter_model -.-> tools;
-	SingleProductSubmitPerModelCall\2eafter_model --> RequireProductTool\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_deferred_sales_fee\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_frontend_sales_fee\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_deferred_sales_fee\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_fund_frontend_sales_fee\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model;

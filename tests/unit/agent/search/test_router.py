@@ -39,6 +39,30 @@ def test_router_uses_global_search_for_plain_semantic_request() -> None:
     assert (plan.neighbor_before, plan.neighbor_after) == (2, 3)
 
 
+def test_router_expands_neighbors_only_for_explicit_request() -> None:
+    plan = _router().route(
+        SearchRequest(
+            objective="서비스 제공 여부와 신청 절차를 확인한다.",
+            expand_neighbors=True,
+        ),
+        document_types=_PENSION_TYPES,
+    )
+
+    assert plan.route == "global"
+    assert plan.expand_neighbors is True
+    assert (plan.neighbor_before, plan.neighbor_after) == (2, 3)
+
+
+def test_router_does_not_infer_neighbor_expansion_from_objective_words() -> None:
+    plan = _router().route(
+        SearchRequest(objective="서비스 신청 절차와 메뉴 경로를 확인한다."),
+        document_types=_PENSION_TYPES,
+    )
+
+    assert plan.route == "global"
+    assert plan.expand_neighbors is False
+
+
 def test_router_uses_document_route_only_for_explicit_source_hint() -> None:
     plan = _router().route(
         SearchRequest(

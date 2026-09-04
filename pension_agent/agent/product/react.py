@@ -52,7 +52,6 @@ SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 SUBMIT_DOMAIN_RESULT_TOOL_NAME = "submit_domain_result"
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
-_NUMERIC_CLAIM_PATTERN = re.compile(r"(?:\d|%|퍼센트|프로|만\s*원|억\s*원|금액|가격|등급)")
 _VAR_QUESTION_PATTERN = re.compile(r"(?:VaR|최대손실예상액|위험등급)", re.IGNORECASE)
 _CLASS_PATTERN = re.compile(
     r"(?:클래스|class)\s*([A-Z](?:-[A-Za-z]+)?)|([A-Z](?:-[A-Za-z]+)?)\s*(?:클래스|class)",
@@ -140,38 +139,6 @@ class RequireProductTool(AgentMiddleware[Any, Any, Any]):
         return None
 
     @hook_config(can_jump_to=["model"])
-    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self.after_model(state, runtime)
-
-
-class SingleProductSubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
-    """한 모델 응답의 병렬 DomainResult 제출을 하나로 제한한다."""
-
-    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        del runtime
-        last_message = state.get("messages", [])[-1]
-        if not isinstance(last_message, AIMessage):
-            return None
-        submit_calls = [
-            call
-            for call in last_message.tool_calls
-            if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME
-        ]
-        if len(submit_calls) <= 1:
-            return None
-        kept_submit = False
-        tool_calls: list[ToolCall] = []
-        for call in last_message.tool_calls:
-            if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME:
-                tool_calls.append(call)
-                continue
-            if not kept_submit:
-                tool_calls.append(call)
-                kept_submit = True
-        return {
-            "messages": [last_message.model_copy(update={"tool_calls": tool_calls})],
-        }
-
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.after_model(state, runtime)
 
@@ -321,7 +288,6 @@ def create_product_react_agent(
                 max_search_calls=config.max_search_calls,
                 calculation_tool_names=calculation_tool_names,
             ),
-            SingleProductSubmitPerModelCall(),
             ProductModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(
                 tool_name=SEARCH_DOCUMENTS_TOOL_NAME,
@@ -472,7 +438,11 @@ def _allowed_product_tools(
         return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
     if not state.get("product_candidate_codes"):
         if search_call_count == 0:
-            return (lookup_tool_name, SEARCH_DOCUMENTS_TOOL_NAME)
+            return (
+                lookup_tool_name,
+                SEARCH_DOCUMENTS_TOOL_NAME,
+                SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+            )
         return (lookup_tool_name,)
     if not state.get("product_scoped_search_completed"):
         return (SEARCH_DOCUMENTS_TOOL_NAME,)
@@ -510,6 +480,10 @@ def _product_tool_call_is_allowed(
 
     if call["name"] not in allowed_tools:
         return False
+    if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and _is_initial_not_applicable_submit_call(
+        call, state
+    ):
+        return True
     if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and not state.get("product_candidate_codes"):
         if state.get("product_catalog_result") is not None:
             return _is_product_catalog_submit_call(call)
@@ -527,6 +501,20 @@ def _product_tool_call_is_allowed(
     if not isinstance(product_code, str):
         return False
     return product_code.strip().upper() in candidate_codes
+
+
+def _is_initial_not_applicable_submit_call(
+    call: ToolCall,
+    state: Mapping[str, Any],
+) -> bool:
+    """검색·카탈로그 조회 전 범위 밖 판단만 조기 제출하도록 허용한다."""
+
+    return (
+        call["args"].get("status") == "not_applicable"
+        and state.get("search_result") is None
+        and state.get("product_catalog_result") is None
+        and not state.get("product_candidate_codes")
+    )
 
 
 def _is_product_catalog_submit_call(call: ToolCall) -> bool:
@@ -554,8 +542,9 @@ def _product_next_tool_instruction(
     if not state.get("product_candidate_codes"):
         if search_call_count == 0:
             return (
-                "lookup_product_codes Tool로 상품을 식별하거나 product_code 없이 "
-                "search_documents Tool로 상품 문서를 먼저 검색하세요."
+                "판단 목표가 상품·운용 범위 밖이면 not_applicable로 최종 결과를 "
+                "제출하세요. 그 외에는 lookup_product_codes Tool로 상품을 식별하거나 "
+                "product_code 없이 search_documents Tool로 상품 문서를 먼저 검색하세요."
             )
         return "lookup_product_codes Tool로 검색 대상 상품 코드를 식별하세요."
     if not state.get("product_scoped_search_completed"):
@@ -628,6 +617,22 @@ def _create_product_result_tool() -> Any:
         ],
         runtime: ToolRuntime[ExecutionContext, ProductAgentState],
     ) -> Command | str:
+        tool_call_id = runtime.tool_call_id
+        if tool_call_id is None:
+            raise ValueError("최종 Product Agent 결과 제출 Tool 호출 ID가 없습니다.")
+        if status == "not_applicable":
+            return Command(
+                update={
+                    "domain_result": _not_applicable_product_result(),
+                    "messages": [
+                        ToolMessage(
+                            content=json.dumps({"status": "accepted"}, ensure_ascii=False),
+                            tool_call_id=tool_call_id,
+                            name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                        )
+                    ],
+                }
+            )
         search_result = runtime.state.get("search_result")
         if search_result is None:
             try:
@@ -643,15 +648,13 @@ def _create_product_result_tool() -> Any:
                     {"error": "상품 카탈로그 결과가 공통 계약을 위반했습니다."},
                     ensure_ascii=False,
                 )
-            if runtime.tool_call_id is None:
-                raise ValueError("최종 Product Agent 결과 제출 Tool 호출 ID가 없습니다.")
             return Command(
                 update={
                     "domain_result": result,
                     "messages": [
                         ToolMessage(
                             content=json.dumps({"status": "accepted"}, ensure_ascii=False),
-                            tool_call_id=runtime.tool_call_id,
+                            tool_call_id=tool_call_id,
                             name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                         )
                     ],
@@ -679,15 +682,13 @@ def _create_product_result_tool() -> Any:
                 {"error": "최종 도메인 판단 결과가 공통 계약을 위반했습니다."},
                 ensure_ascii=False,
             )
-        if runtime.tool_call_id is None:
-            raise ValueError("최종 Domain Agent 결과 제출 Tool 호출 ID가 없습니다.")
         return Command(
             update={
                 "domain_result": result,
                 "messages": [
                     ToolMessage(
                         content=json.dumps({"status": "accepted"}, ensure_ascii=False),
-                        tool_call_id=runtime.tool_call_id,
+                        tool_call_id=tool_call_id,
                         name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                     )
                 ],
@@ -695,6 +696,21 @@ def _create_product_result_tool() -> Any:
         )
 
     return submit_domain_result
+
+
+def _not_applicable_product_result() -> DomainResult:
+    return {
+        "domain": "product",
+        "execution_status": "completed",
+        "decision": {
+            "status": "not_applicable",
+            "conclusion": _NOT_APPLICABLE_CONCLUSION,
+            "missing_conditions": [],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
+    }
 
 
 def _build_product_result(
@@ -731,9 +747,6 @@ def _build_product_result(
         normalized_conclusion = "검증된 Python 계산 결과:\n" + format_calculation_summary(
             calculations
         )
-        normalized_warnings = [
-            value for value in normalized_warnings if not _NUMERIC_CLAIM_PATTERN.search(value)
-        ]
         normalized_warnings.extend(
             warning for calculation in calculations for warning in calculation["warnings"]
         )

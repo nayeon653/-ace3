@@ -42,7 +42,7 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
 
 class FakeEmbedder:
     async def aembed_query(self, text: str) -> list[float]:
-        assert text == "IRP 이전 절차"
+        assert text == ("IRP 이전 가능 조건과 절차 판단\nIRP 이전 절차")
         return [1.0, 0.0]
 
 

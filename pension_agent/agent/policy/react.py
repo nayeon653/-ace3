@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import operator
-import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, NotRequired, Protocol, cast
 from uuid import UUID
@@ -14,10 +13,13 @@ from langchain.agents import AgentState, create_agent
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
+    ModelCallResult,
+    ModelRequest,
+    ModelResponse,
     ToolCallLimitMiddleware,
     hook_config,
 )
-from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from langchain.messages import AIMessage, HumanMessage, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langgraph.types import Command
@@ -42,23 +44,50 @@ from pension_agent.agent.contracts import (
 )
 from pension_agent.agent.domain_runner import failed_domain_result
 from pension_agent.agent.execution import ExecutionContext, ModelConcurrencyMiddleware
-from pension_agent.agent.search import SearchRequest, SearchResult, SearchRunner
+from pension_agent.agent.search import (
+    SearchRequest,
+    SearchResult,
+    SearchRunner,
+    combine_search_objective,
+)
 from pension_agent.config import DomainAgentConfig
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 SUBMIT_DOMAIN_RESULT_TOOL_NAME = "submit_domain_result"
 _NOT_APPLICABLE_CONCLUSION = "이 질문에는 해당 도메인 판단이 적용되지 않습니다."
 _NO_EVIDENCE_CONCLUSION = "제공 문서에서 관련 근거를 확인하지 못해 판단할 수 없습니다."
-_DC_ELIGIBILITY_MISSING_CONDITION = (
-    "DC 의료비 중도인출의 6개월 이상 요양·가족관계·서류 요건 확인 필요"
-)
-_RETIREMENT_SCHEME_MISSING_CONDITION = "DB 또는 DC 제도 유형 확인 필요"
-_SERVICE_RECOGNITION_MISSING_CONDITION = "계속근로·근속 인정 여부 확인 필요"
-_DB_TO_DC_ELIGIBILITY_MISSING_CONDITION = "DB→DC 전환 가능 조건 확인 필요"
-_ISA_MATURITY_DATE_MISSING_CONDITION = "ISA 만기일 확인 필요"
-_ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION = "입금확인·전환완료 처리일 확인 필요"
-_ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION = "남은 일수 기준일 확인 필요"
-_ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION = "ISA 연금전환의 나머지 적용 요건 확인 필요"
+
+
+def _policy_model_request_tool_name(model_tool: Any) -> str | None:
+    """ModelRequest의 LangChain·provider Tool 표현에서 이름을 읽는다."""
+
+    name = getattr(model_tool, "name", None)
+    if isinstance(name, str):
+        return name
+    if not isinstance(model_tool, Mapping):
+        return None
+    name = model_tool.get("name")
+    if isinstance(name, str):
+        return name
+    function = model_tool.get("function")
+    if not isinstance(function, Mapping):
+        return None
+    function_name = function.get("name")
+    return function_name if isinstance(function_name, str) else None
+
+
+def _policy_historical_tool_names(messages: list[Any]) -> set[str]:
+    """provider 대화 이력이 참조하는 과거 Tool 이름을 수집한다."""
+
+    names: set[str] = set()
+    for message in messages:
+        if isinstance(message, AIMessage):
+            names.update(
+                call["name"] for call in message.tool_calls if isinstance(call.get("name"), str)
+            )
+        elif isinstance(message, ToolMessage) and isinstance(message.name, str):
+            names.add(message.name)
+    return names
 
 
 class PolicyAgentState(AgentState):
@@ -131,9 +160,11 @@ class RequirePolicyTool(AgentMiddleware[Any, Any, Any]):
             instruction = "최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
         elif state.get("search_result") is not None:
             instruction = (
-                "DC 의료비 중도인출의 임금 12.5% 기준 또는 ISA 연금전환 60일 기한 "
-                "계산이면 의미에 맞는 Calculation Tool을 호출하고, "
-                "그 외에는 최종 도메인 판단 결과 제출 Tool로 결과를 제출하세요."
+                "사용자 조건으로 새 기준값·날짜를 산출해야 할 때만 시스템 지침의 "
+                "Calculation Tool 하나를 호출하세요. 그렇지 않으면 방금 판단에서 "
+                "objective의 확인 항목과 근거의 조건·예외를 삭제하거나 축약하지 말고, "
+                "스스로 완결된 conclusion과 실제 사용한 근거 UUID를 "
+                "submit_domain_result Tool로 제출하세요. 설명문 대신 Tool만 호출하세요."
             )
         else:
             instruction = "search_documents Tool로 제공 문서 근거를 검색하세요."
@@ -149,26 +180,49 @@ class RequirePolicyTool(AgentMiddleware[Any, Any, Any]):
         return self.after_model(state, runtime)
 
 
-class SinglePolicySubmitPerModelCall(AgentMiddleware[Any, Any, Any]):
-    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        del runtime
-        last_message = state.get("messages", [])[-1]
-        if not isinstance(last_message, AIMessage):
-            return None
-        kept_submit = False
-        tool_calls: list[ToolCall] = []
-        for call in last_message.tool_calls:
-            if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME:
-                tool_calls.append(call)
-            elif not kept_submit:
-                tool_calls.append(call)
-                kept_submit = True
-        if tool_calls == last_message.tool_calls:
-            return None
-        return {"messages": [last_message.model_copy(update={"tool_calls": tool_calls})]}
+class PolicyToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]):
+    """Policy 실행 단계에 필요한 Tool schema만 auto 선택으로 노출한다."""
 
-    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self.after_model(state, runtime)
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelCallResult[Any]:
+        state = request.state
+        state = state or {}
+        required_tool_names = set(_policy_historical_tool_names(request.messages))
+        required_tool_names.add(SUBMIT_DOMAIN_RESULT_TOOL_NAME)
+        optional_tool_names: set[str] = set()
+        if state.get("search_result") is None:
+            required_tool_names.add(SEARCH_DOCUMENTS_TOOL_NAME)
+        elif not state.get("calculations"):
+            optional_tool_names.update(
+                {
+                    CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME,
+                    CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME,
+                }
+            )
+
+        available_tools = list(request.tools or [])
+        available_tool_names = [
+            _policy_model_request_tool_name(model_tool) for model_tool in available_tools
+        ]
+        selected_name_set = required_tool_names | (
+            optional_tool_names & {name for name in available_tool_names if name is not None}
+        )
+        selected_tools = [
+            model_tool
+            for model_tool, name in zip(available_tools, available_tool_names, strict=True)
+            if name in selected_name_set
+        ]
+        selected_tool_names = [name for name in available_tool_names if name in selected_name_set]
+        if (
+            any(name is None for name in available_tool_names)
+            or any(selected_tool_names.count(name) != 1 for name in selected_name_set)
+            or not required_tool_names <= set(selected_tool_names)
+        ):
+            raise RuntimeError("Policy 상태별 Tool 구성이 올바르지 않습니다.")
+        return await handler(request.override(tools=selected_tools, tool_choice=None))
 
 
 class EnforcePolicyToolSequence(AgentMiddleware[Any, Any, Any]):
@@ -190,11 +244,7 @@ class EnforcePolicyToolSequence(AgentMiddleware[Any, Any, Any]):
                 CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME,
                 SUBMIT_DOMAIN_RESULT_TOOL_NAME,
             )
-        allowed_calls = [
-            call
-            for call in last_message.tool_calls
-            if call["name"] in allowed and _policy_tool_call_is_allowed(call, state)
-        ]
+        allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed]
         calculation_calls = [
             call for call in allowed_calls if call["name"] != SUBMIT_DOMAIN_RESULT_TOOL_NAME
         ]
@@ -254,7 +304,7 @@ def create_policy_react_agent(
             *((model_concurrency,) if model_concurrency is not None else ()),
             CompletePolicyResult(),
             RequirePolicyTool(),
-            SinglePolicySubmitPerModelCall(),
+            PolicyToolAvailabilityMiddleware(),
             PolicyModelCallLimit(max_model_calls=config.max_model_calls),
             ToolCallLimitMiddleware(
                 tool_name=SEARCH_DOCUMENTS_TOOL_NAME,
@@ -287,14 +337,16 @@ def _create_policy_search_tool(search_service: SearchRunner) -> Any:
     @tool(
         SEARCH_DOCUMENTS_TOOL_NAME,
         description=(
-            "연금 참고자료에서 판단 목표의 근거를 검색한다. objective를 쓰고 "
+            "연금 참고자료에서 판단 목표의 근거를 검색한다. objective에는 원래 판단 목표에 "
+            "덧붙일 구체적인 검색 초점을 쓰고 "
             "source_file_name과 chunk_id는 둘 다 null로 시작한다. "
             "사용자가 조회 식별자를 명시한 경우에만 하나를 바꾼다. 문서 타입은 시스템이 제한한다."
         ),
     )
     async def search_documents(
         objective: Annotated[
-            str, Field(min_length=1, description="하나의 구체적인 근거 검색 목표")
+            str,
+            Field(min_length=1, description="원래 판단 목표에 덧붙일 구체적인 검색 초점"),
         ],
         runtime: ToolRuntime[ExecutionContext, PolicyAgentState],
         source_file_name: Annotated[
@@ -332,7 +384,10 @@ def _create_policy_search_tool(search_service: SearchRunner) -> Any:
             ):
                 raise ValueError("검색 힌트 출처를 확인할 수 없습니다.")
             request = SearchRequest(
-                objective=objective,
+                objective=combine_search_objective(
+                    domain_objective=runtime.state.get("objective", ""),
+                    model_focus=objective,
+                ),
                 source_file_name=source_file_name,
                 chunk_id=chunk_id,
                 expand_neighbors=expand_neighbors,
@@ -368,7 +423,8 @@ def _create_policy_result_tool() -> Any:
         SUBMIT_DOMAIN_RESULT_TOOL_NAME,
         description=(
             "최종 업무·제도 판단 결과 제출 Tool. 검증된 검색 근거에서 도출한 "
-            "판단, 누락 조건과 경고만 제출한다."
+            "판단, 누락 조건과 경고만 제출한다. objective의 각 확인 항목은 "
+            "근거가 있으면 conclusion에, 없으면 missing_conditions에 남겨야 한다."
         ),
     )
     async def submit_domain_result(
@@ -376,10 +432,19 @@ def _create_policy_result_tool() -> Any:
             DecisionStatus,
             Field(description="determined, conditional, undetermined, not_applicable 중 하나"),
         ],
-        conclusion: Annotated[str, Field(min_length=1, description="근거에서 도출한 결론")],
+        conclusion: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description=(
+                    "질문에 직접 답하고 objective에서 근거로 확인한 대상·절차·"
+                    "조건·예외를 누락하지 않은 스스로 완결된 결론"
+                ),
+            ),
+        ],
         missing_conditions: Annotated[
             list[str],
-            Field(description="조건부 또는 미확정 판단에 필요한 누락 조건"),
+            Field(description="objective 항목 중 근거·사용자 조건이 부족해 확정하지 못한 내용"),
         ],
         warnings: Annotated[list[str], Field(description="이용자가 알아야 할 제한과 주의사항")],
         evidence_chunk_ids: Annotated[
@@ -387,15 +452,23 @@ def _create_policy_result_tool() -> Any:
             Field(description="결론에 실제 사용한 SearchResult 청크 UUID 목록"),
         ],
         runtime: ToolRuntime[ExecutionContext, PolicyAgentState],
-        dc_medical_eligibility_conditions_confirmed: Annotated[
-            bool,
-            Field(
-                description=(
-                    "DC 의료비 중도인출의 6개월 요양·가족관계·서류 요건이 모두 확인됐는지 여부"
-                )
-            ),
-        ] = False,
     ) -> Command | str:
+        tool_call_id = runtime.tool_call_id
+        if tool_call_id is None:
+            raise ValueError("최종 Policy Agent 결과 제출 Tool 호출 ID가 없습니다.")
+        if status == "not_applicable":
+            return Command(
+                update={
+                    "domain_result": _not_applicable_policy_result(),
+                    "messages": [
+                        ToolMessage(
+                            content=json.dumps({"status": "accepted"}, ensure_ascii=False),
+                            tool_call_id=tool_call_id,
+                            name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
+                        )
+                    ],
+                }
+            )
         search_result = runtime.state.get("search_result")
         if search_result is None:
             return json.dumps(
@@ -406,15 +479,11 @@ def _create_policy_result_tool() -> Any:
             result = _build_policy_result(
                 search_result=search_result,
                 calculations=list(runtime.state.get("calculations", [])),
-                question=runtime.state.get("question", ""),
                 status=status,
                 conclusion=conclusion,
                 missing_conditions=missing_conditions,
                 warnings=warnings,
                 evidence_chunk_ids=evidence_chunk_ids,
-                dc_medical_eligibility_conditions_confirmed=(
-                    dc_medical_eligibility_conditions_confirmed
-                ),
             )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
@@ -422,15 +491,13 @@ def _create_policy_result_tool() -> Any:
                 {"error": "최종 업무·제도 판단 결과가 공통 계약을 위반했습니다."},
                 ensure_ascii=False,
             )
-        if runtime.tool_call_id is None:
-            raise ValueError("최종 Policy Agent 결과 제출 Tool 호출 ID가 없습니다.")
         return Command(
             update={
                 "domain_result": result,
                 "messages": [
                     ToolMessage(
                         content=json.dumps({"status": "accepted"}, ensure_ascii=False),
-                        tool_call_id=runtime.tool_call_id,
+                        tool_call_id=tool_call_id,
                         name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
                     )
                 ],
@@ -440,17 +507,30 @@ def _create_policy_result_tool() -> Any:
     return submit_domain_result
 
 
+def _not_applicable_policy_result() -> DomainResult:
+    return {
+        "domain": "policy",
+        "execution_status": "completed",
+        "decision": {
+            "status": "not_applicable",
+            "conclusion": _NOT_APPLICABLE_CONCLUSION,
+            "missing_conditions": [],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
+    }
+
+
 def _build_policy_result(
     *,
     search_result: SearchResult,
     calculations: list[CalculationResult],
-    question: str = "",
     status: DecisionStatus,
     conclusion: str,
     missing_conditions: list[str],
     warnings: list[str],
     evidence_chunk_ids: list[str],
-    dc_medical_eligibility_conditions_confirmed: bool = False,
 ) -> DomainResult:
     if search_result.execution_status != "completed":
         return failed_domain_result(
@@ -477,50 +557,15 @@ def _build_policy_result(
         normalized_warnings.extend(
             warning for calculation in calculations for warning in calculation["warnings"]
         )
-        has_dc_threshold = any(
-            calculation["calculator_id"] == "dc_medical_withdrawal_threshold"
-            for calculation in calculations
-        )
-        if has_dc_threshold and not dc_medical_eligibility_conditions_confirmed:
-            if status == "determined":
-                status = "conditional"
-            if _DC_ELIGIBILITY_MISSING_CONDITION not in normalized_missing:
-                normalized_missing.append(_DC_ELIGIBILITY_MISSING_CONDITION)
-    if _is_isa_transfer_question(question):
-        isa_calculations = [
-            calculation
-            for calculation in calculations
-            if calculation["calculator_id"] == "isa_transfer_deadline"
-        ]
-        if not isa_calculations:
-            status = _conditional_unless_stronger(status)
-            normalized_missing.append(_ISA_MATURITY_DATE_MISSING_CONDITION)
-        else:
-            isa_inputs = isa_calculations[0]["inputs"]
-            if (
-                _asks_isa_completion_status(question)
-                and "transfer_completion_date" not in isa_inputs
-            ):
-                status = _conditional_unless_stronger(status)
-                normalized_missing.append(_ISA_TRANSFER_COMPLETION_DATE_MISSING_CONDITION)
-            if _asks_today_remaining_days(question):
-                status = _conditional_unless_stronger(status)
-                normalized_missing.append(_ISA_TRANSFER_REMAINING_REFERENCE_DATE_MISSING_CONDITION)
-            if _asks_overall_isa_transfer_eligibility(question):
-                status = _conditional_unless_stronger(status)
-                normalized_missing.append(_ISA_TRANSFER_ELIGIBILITY_MISSING_CONDITION)
-        normalized_missing = list(dict.fromkeys(normalized_missing))
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION
-        normalized_missing = ["제공 문서의 관련 근거"]
-        normalized_warnings.append("검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.")
-    elif status in {"conditional", "undetermined"}:
-        normalized_missing = list(
+        normalized_missing = list(dict.fromkeys(normalized_missing or ["제공 문서의 관련 근거"]))
+        normalized_warnings = list(
             dict.fromkeys(
                 [
-                    *normalized_missing,
-                    *_retirement_policy_missing_conditions(question),
+                    *search_result.limitations,
+                    "검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.",
                 ]
             )
         )
@@ -542,76 +587,6 @@ def _build_policy_result(
         "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
-
-
-def _retirement_policy_missing_conditions(question: str) -> list[str]:
-    """미확정 #118 제도 판단에 필요한 표준 확인 조건을 반환한다."""
-
-    conditions: list[str] = []
-    if "퇴직급여" in question and "DB" not in question and "DC" not in question:
-        conditions.append(_RETIREMENT_SCHEME_MISSING_CONDITION)
-    if any(label in question for label in ("계속근로", "근속")) and any(
-        label in question for label in ("인정", "포함")
-    ):
-        conditions.append(_SERVICE_RECOGNITION_MISSING_CONDITION)
-    if ("DB→DC" in question or "DB에서 DC" in question) and "가능" in question:
-        conditions.append(_DB_TO_DC_ELIGIBILITY_MISSING_CONDITION)
-    return conditions
-
-
-def _policy_tool_call_is_allowed(call: ToolCall, state: Mapping[str, Any]) -> bool:
-    question = state.get("question", "")
-    isa_question = isinstance(question, str) and _is_isa_transfer_question(question)
-    if call["name"] == CALCULATE_ISA_TRANSFER_DEADLINE_TOOL_NAME:
-        return isa_question
-    if call["name"] == CALCULATE_DC_MEDICAL_WITHDRAWAL_THRESHOLD_TOOL_NAME:
-        return not isa_question
-    return True
-
-
-def _is_isa_transfer_question(question: str) -> bool:
-    if re.search(r"ISA", question, re.IGNORECASE) is None:
-        return False
-    if any(label in question for label in ("마감", "기한", "60일")):
-        return True
-    return "만기" in question and any(
-        label in question for label in ("연금전환", "연금 전환", "연금계좌 전환")
-    )
-
-
-def _asks_isa_completion_status(question: str) -> bool:
-    has_action_date = any(
-        label in question
-        for label in (
-            "입금확인",
-            "전환완료",
-            "전환 완료",
-            "신청일",
-            "신청했",
-            "입금일",
-            "입금했",
-            "처리했",
-            "처리일",
-        )
-    )
-    asks_status = any(label in question for label in ("기한 안", "기한 내", "늦", "충족", "가능"))
-    return has_action_date and asks_status
-
-
-def _asks_today_remaining_days(question: str) -> bool:
-    return "오늘" in question and any(label in question for label in ("며칠", "남았", "남은"))
-
-
-def _asks_overall_isa_transfer_eligibility(question: str) -> bool:
-    return (
-        any(label in question for label in ("연금전환 가능", "연금 전환 가능", "전환 가능 여부"))
-        and "기한" not in question
-        and "60일" not in question
-    )
-
-
-def _conditional_unless_stronger(status: DecisionStatus) -> DecisionStatus:
-    return "conditional" if status == "determined" else status
 
 
 def _select_evidence(search_result: SearchResult, evidence_chunk_ids: list[str]) -> list[Any]:
