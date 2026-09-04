@@ -12,7 +12,8 @@ Product Catalog Query Planner는 독립 Domain Agent가 아니다. Product Agent
 
 | 항목 | 값 |
 |---|---|
-| 모델 | `HCX-005` |
+| 모델 | `HCX-007` |
+| Thinking | `none` |
 | temperature / 최대 토큰 | `0.1` / `1024` |
 | Provider timeout/retry | 호출당 30초, 최대 2회 retry |
 | 프롬프트 | `pension_agent/prompts/domain/product-catalog-query-planner.md` |

@@ -18,7 +18,7 @@
 | 2026-08-18 | architecture | superseded | [Search Agent의 근거 선택 책임과 결과 계약을 채택](20260818-search-agent-result-contract.md) |
 | 2026-08-19 | architecture | accepted | [온라인 Agent 실행 경로를 native async로 전환](20260819-agent-runtime-native-async.md) |
 | 2026-08-20 | architecture | accepted | [Router 기반 결정론적 Search Service를 채택](20260820-80-router-search-service.md) |
-| 2026-08-24 | architecture | accepted | [Main Supervisor와 Product ReAct에 HCX-007을 선택 적용](20260824-96-selective-hcx-007-models.md) |
+| 2026-08-24 | architecture | superseded | [Main Supervisor와 Product ReAct에 HCX-007을 선택 적용](20260824-96-selective-hcx-007-models.md) |
 | 2026-08-25 | architecture | accepted | [도메인 Agent 구현과 생성 책임을 각 도메인 패키지가 소유](20260825-98-domain-agent-implementation-ownership.md) |
 | 2026-08-26 | architecture | accepted | [계산 기반을 Domain Agent와 분리된 공용 Python 컴포넌트로 둔다](20260826-104-domain-neutral-calculation-service.md) |
-| 2026-09-05 | architecture | proposed | [Policy Agent에 HCX-007 비추론 모델을 분리 적용하는 후보](20260905-policy-agent-hcx-007-candidate.md) |
+| 2026-09-05 | architecture | accepted | [모든 생성 LLM 역할을 HCX-007 비추론 모드로 통일](20260905-all-generation-hcx-007.md) |

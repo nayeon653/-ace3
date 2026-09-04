@@ -5,12 +5,12 @@
 
 ## 절대 어기지 말 것
 
-1. **LLM은 HyperCLOVA X만 사용 가능.** Main Supervisor와 Product Agent ReAct에는
-   HCX-007 비추론 모드를 사용하고, 나머지 Domain Agent와 Product Catalog Planner에는
-   HCX-005를 사용한다. 제품(평가 대상 시스템) 안에서 다른 LLM을 호출하는 코드를
-   작성하지 않는다. 위반 시 대회 규정상 평가대상 제외 사유다. 역할별 모델은 추후
-   검증 결과에 따라 HyperCLOVA X 범위 안에서 버전 관리되는 config와 결정 기록으로
-   변경할 수 있다.
+1. **LLM은 HyperCLOVA X만 사용 가능.** Main Supervisor, 모든 Domain Agent와 Product
+   Catalog Planner를 포함한 모든 생성 LLM 역할에는 HCX-007 비추론 모드를 사용한다.
+   검색 임베딩 전용 CLOVA `bge-m3`는 생성 모델 통일 범위에 포함하지 않는다.
+   제품(평가 대상 시스템) 안에서 다른 LLM을 호출하는 코드를 작성하지 않는다. 위반 시
+   대회 규정상 평가대상 제외 사유다. 역할별 모델은 추후 검증 결과에 따라 HyperCLOVA X
+   범위 안에서 버전 관리되는 config와 결정 기록으로 변경할 수 있다.
    (개발 보조 도구로서의 코딩 어시스턴트 사용 가부는 별도 확인 대상이며,
    이 규칙은 제출 시스템 자체에 적용된다.)
 2. **제출 마감은 2026-09-06 23:59.** 마감 이후 커밋·push·배포 등 변경 행위가

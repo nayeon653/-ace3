@@ -11,7 +11,7 @@ Product Agent는 검증된 상품 카탈로그를 조회하고 개별 상품의 
 | 항목 | 값 |
 |---|---|
 | ReAct 모델 | `HCX-007`, Thinking `none` |
-| Catalog Planner 모델 | `HCX-005` |
+| Catalog Planner 모델 | `HCX-007`, Thinking `none` |
 | 공통 생성 설정 | temperature `0.1`, 최대 1024토큰, 호출당 30초, retry 2회 |
 | 프롬프트 | `pension_agent/prompts/domain/product-agent.md` |
 | 구현 | `pension_agent/agent/product/` |

@@ -25,7 +25,7 @@ flowchart TB
 
     subgraph domains["Domain Agents · 각각 CompiledStateGraph"]
         domain_policy["Policy Agent<br/>HCX-007"]
-        domain_tax_payout["Tax/Payout Agent<br/>HCX-005"]
+        domain_tax_payout["Tax/Payout Agent<br/>HCX-007"]
         domain_product["Product Agent<br/>HCX-007"]
     end
 
@@ -37,7 +37,7 @@ flowchart TB
     domain_product --> search_tools
 
     subgraph catalog["HCX 카탈로그 Query 계획 · Python 조회"]
-        catalog_lookup["lookup_product_codes"] --> catalog_hcx["HCX-005 model"]
+        catalog_lookup["lookup_product_codes"] --> catalog_hcx["HCX-007 model"]
         product_catalog["상품 카탈로그"] --> catalog_hcx
         catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]
         catalog_query --> catalog_execute["Python 정확 조회"]

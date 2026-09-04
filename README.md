@@ -47,8 +47,8 @@ GET /answer → api(FastAPI) → agent(라우터/도구 오케스트레이션)
                                 ├→ retrieval(검색)
                                 ├→ rules(결정론적 세제 계산)
                                 └→ prompts + HyperCLOVA X
-                                   (Main·Policy 후보·Product ReAct: HCX-007,
-                                    Tax/Payout·Catalog Planner: HCX-005)
+                                   (모든 생성 LLM 역할: HCX-007, Thinking none;
+                                    검색 임베딩: bge-m3)
 ```
 
 원칙: **계산은 코드가, 설명은 LLM이 한다.** 세액공제 한도·세율 등 확정
@@ -137,7 +137,7 @@ LangSmith tracing은 기본적으로 꺼져 있습니다. 개발자가 개인 �
 로컬에 등록해 활성화하면 일반 `/answer` 요청을 포함한 모든 Agent 실행을 추적합니다.
 개인 계정·project 설정과 활성화 방법은
 [`docs/operations/langsmith-tracing.md`](docs/operations/langsmith-tracing.md)를 따릅니다.
-서버 시작 과정에서 역할별 HCX-007·HCX-005, bge-m3, Qdrant, 결정론적 `SearchService`,
+서버 시작 과정에서 역할별 HCX-007 비추론 모델, bge-m3, Qdrant, 결정론적 `SearchService`,
 Domain Agent 3종, Main Supervisor와 `AnswerService`를 프로세스당 한 번 조립하고 모든 `/answer`
 요청에서 재사용합니다. 온라인 경로는 HCX, query embedding과 Qdrant까지 native async로
 실행하며 프로세스 단위 동시성 상한과 요청 전체 deadline을 적용합니다.
@@ -155,13 +155,13 @@ Docling 오프라인 파싱 스크립트와 FastAPI 평가 실행 진입점이 �
 
 ### HyperCLOVA X 설정
 
-Main Supervisor와 Product Agent ReAct에는 HCX-007 비추론 모드를 사용합니다. 현재 후보
-구성은 Policy Agent도 HCX-007 비추론 모드로 분리하고, Tax/Payout Agent와 Product Catalog
-Planner는 HCX-005를 유지합니다. Policy 후보의 배경과 채택 조건은
-[`Policy Agent에 HCX-007 비추론 모델을 분리 적용하는 후보`](docs/decisions/20260905-policy-agent-hcx-007-candidate.md)에
+Main Supervisor, Policy·Tax/Payout·Product Domain Agent와 Product Catalog Planner를
+포함한 모든 생성 LLM 역할에 HCX-007 비추론 모드를 사용합니다. 검색 임베딩
+전용 `bge-m3`는 생성 모델 통일 범위에 포함하지 않습니다. 선택 배경과 영향은
+[`모든 생성 LLM 역할을 HCX-007 비추론 모드로 통일`](docs/decisions/20260905-all-generation-hcx-007.md)에
 기록합니다. 모델명, Thinking, 생성 토큰 수, temperature, timeout과 retry는 환경변수가 아니라
 [`pension_agent/config/hcx.py`](pension_agent/config/hcx.py)의 불변 config에서 버전
-관리합니다. HCX-007의 Function Calling 구간은 Thinking을 `none`으로 고정합니다.
+관리합니다. HCX-007의 Function Calling 구간은 모두 Thinking을 `none`으로 고정합니다.
 후속 검증 결과에 따라 HyperCLOVA X 범위 안에서 config와 결정 기록을 변경할 수 있습니다.
 
 Pydantic Settings가 로컬 `.env` 또는 프로세스 환경에서 인증·연결 정보만 읽습니다.

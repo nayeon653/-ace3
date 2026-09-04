@@ -75,11 +75,12 @@ PRODUCT_REACT_HCX_CONFIG = ChatClovaXConfig(
 )
 
 DEFAULT_DOMAIN_AGENT_HCX_CONFIG = ChatClovaXConfig(
-    model="HCX-005",
+    model="HCX-007",
     max_tokens=1024,
     temperature=0.1,
     timeout_seconds=30.0,
     max_retries=2,
+    thinking_effort="none",
 )
 
 BGE_M3_EMBEDDING_CONFIG = ClovaEmbeddingConfig(
