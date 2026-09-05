@@ -1,4 +1,6 @@
 {
+  "schema_conclusion": "표를 반복하지 않는 짧은 조건별 결론. 개별 상품 사실은 필수 comparison_cells에 기록하고 사용자 조건에 따른 판단과 제한만 요약한다.",
+  "schema_evidence_chunk_ids": "항상 빈 배열. 근거는 comparison_cells.evidence_refs에만 기록한다.",
   "search": "lookup_product_codes가 반환한 product_codes와 criteria를 그대로 사용해 compare_products를 호출하세요. 후보를 추가하거나 생략하지 마세요.",
   "submit": "상품별 근거에서 모든 target_id와 criterion 조합의 comparison_cells를 작성해 submit_domain_result를 호출하세요. 각 셀에는 status, finding, evidence_refs, limitations를 넣고, 근거 미확인 셀은 not_verified와 빈 evidence_refs로 제출하세요. 근거가 부족하고 검색 예산이 남았으면 해당 product_code와 누락 항목을 지정해 search_documents로 보완할 수 있습니다."
 }

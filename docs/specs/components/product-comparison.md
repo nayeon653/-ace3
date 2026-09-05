@@ -296,6 +296,10 @@ ComparisonResult {
 
 Product는 `submit_domain_result.comparison_cells`로 셀을 제출한다. Python이 이를 검증하고
 state의 targets·criteria·catalog version을 결합한다.
+비교 state에서 모델에 노출하는 제출 schema는 `comparison_cells`를 null 없는 필수 배열로
+제한하고 길이를 전체 대상 수 × 항목 수로 고정한다. `evidence_chunk_ids`는 빈 배열만
+허용하고, 결론은 표를 반복하지 않는 짧은 조건별 요약으로 지시한다. 실행 Tool의 공통
+schema를 변경하지 않고 모델 바인딩의 사본에만 적용하므로 단일 상품 제출 계약은 유지한다.
 모델이 대상 목록을 바꿔 제출하지 못하게 한다. 최종 evidence는 셀에서 실제 인용한 청크의
 합집합이며, 단순 검색 결과 전체를 넣지 않는다. 0~1개 식별로 비교를 실행하지 못했을 때도
 미확인 셀과 요청 대상들을 이 구조에 보존할 수 있다.

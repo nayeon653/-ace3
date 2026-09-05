@@ -150,7 +150,9 @@ Planner는 `resolve_products` 계획 하나를 반환하며 Python이 원문 조
 `catalog_version`이 기록된다.
 
 비교 제출은 `comparison_cells`에 전체 대상×항목의 상태, finding, 상품 코드·청크 ID 참조,
-제한을 담는다. Python이 상품별 성공 검색과 참조를 대조하고 실제 인용 청크만 최종 evidence로
+제한을 담는다. 비교 state에만 노출하는 모델 schema에서 이 배열을 필수로 만들고 전체
+대상×항목 개수로 길이를 고정한다. 별도 `evidence_chunk_ids`는 빈 배열만 허용한다.
+Python이 상품별 성공 검색과 참조를 대조하고 실제 인용 청크만 최종 evidence로
 보존한다. coverage는 Python이 계산하며 `partial`은 `conditional`, `none`은 `undetermined`로
 강제한다. 미확인 셀이나 근거가 전혀 없는 비교의 자유 생성 내용을 최종 사실로 채택하지 않는다.
 

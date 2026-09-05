@@ -20,6 +20,7 @@ from pydantic import Field
 from pension_agent.agent.contracts import Permission, validate_domain_result
 from pension_agent.agent.product import create_product_agent
 from pension_agent.agent.product.catalog_query import PRODUCT_CATALOG_QUERY_TOOL_NAME
+from pension_agent.agent.product.react import _product_model_tool_name
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult, SearchRunner
 from pension_agent.core import DocumentType
 from pension_agent.retrieval import load_product_catalog
@@ -52,7 +53,7 @@ class ComparisonFakeModel(FakeMessagesListChatModel):
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Runnable[Any, AIMessage]:
         del kwargs
-        self.bound_tool_names.append([tool.name for tool in tools])
+        self.bound_tool_names.append([cast(str, _product_model_tool_name(tool)) for tool in tools])
         return self
 
 

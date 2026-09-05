@@ -10,6 +10,7 @@ from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 
 from pension_agent.agent.contracts import Permission
@@ -18,6 +19,8 @@ from pension_agent.agent.product.catalog_query import PRODUCT_CATALOG_QUERY_TOOL
 from pension_agent.agent.product.react import (
     EnforceProductToolSequence,
     ProductComparisonToolAvailabilityMiddleware,
+    _create_product_result_tool,
+    _product_model_tool_name,
 )
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult
 from pension_agent.core import DocumentType
@@ -29,7 +32,10 @@ _SEARCH = "search_documents"
 _SUBMIT = "submit_domain_result"
 _CALCULATE = "calculate_fund_standard_price"
 _ALL_TOOLS = [_LOOKUP, _COMPARE, _SEARCH, _CALCULATE, _SUBMIT]
-_STATE = {"comparison_targets": [{"target_id": "target_1"}]}
+_STATE = {
+    "comparison_targets": [{"target_id": "target_1"}, {"target_id": "target_2"}],
+    "comparison_criteria": ["risk", "capital_protection"],
+}
 
 
 @pytest.fixture
@@ -64,7 +70,13 @@ async def _captured(
     request = ModelRequest(
         model=FakeMessagesListChatModel(responses=[]),
         messages=history or [],
-        tools=cast(Any, [SimpleNamespace(name=name) for name in (names or _ALL_TOOLS)]),
+        tools=cast(
+            Any,
+            [
+                _create_product_result_tool() if name == _SUBMIT else SimpleNamespace(name=name)
+                for name in (names or _ALL_TOOLS)
+            ],
+        ),
         state=cast(Any, state),
         tool_choice="auto",
     )
@@ -81,7 +93,7 @@ async def _captured(
 
 
 def _names(request: ModelRequest[Any]) -> list[str]:
-    return [cast(str, tool.name) for tool in request.tools]
+    return [cast(str, _product_model_tool_name(tool)) for tool in request.tools]
 
 
 @pytest.mark.anyio
@@ -119,6 +131,40 @@ async def test_comparison_after_search_uses_auto_and_keeps_history_schemas() -> 
 
     assert received.tool_choice is None
     assert _names(received) == [_LOOKUP, _COMPARE, _SEARCH, _SUBMIT]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "target_count, criteria",
+    [
+        (2, ["risk"]),
+        (3, ["risk", "fees"]),
+        (5, ["investment_strategy", "risk", "capital_protection", "fees", "liquidity"]),
+    ],
+)
+async def test_comparison_submit_schema_requires_every_cell_without_mutating_executor(
+    target_count: int, criteria: list[str]
+) -> None:
+    original, received = await _captured(
+        {
+            "comparison_targets": [{"target_id": str(i)} for i in range(target_count)],
+            "comparison_criteria": criteria,
+            "comparison_evidence": object(),
+        },
+        history=_history(_LOOKUP, _COMPARE),
+    )
+    source = next(tool for tool in original.tools if _product_model_tool_name(tool) == _SUBMIT)
+    source_schema = convert_to_openai_tool(source)["function"]["parameters"]
+    exposed = next(tool for tool in received.tools if _product_model_tool_name(tool) == _SUBMIT)
+    schema = convert_to_openai_tool(exposed)["function"]["parameters"]
+    assert "comparison_cells" not in source_schema["required"]
+    assert "comparison_cells" in schema["required"]
+    cells = schema["properties"]["comparison_cells"]
+    assert cells["type"] == "array"
+    assert "anyOf" not in cells and "default" not in cells
+    assert cells["minItems"] == cells["maxItems"] == target_count * len(criteria)
+    assert schema["properties"]["evidence_chunk_ids"]["maxItems"] == 0
+    assert "maxItems" not in source_schema["properties"]["evidence_chunk_ids"]
 
 
 @pytest.mark.anyio
@@ -211,7 +257,12 @@ class BindingRecorderModel(FakeMessagesListChatModel):
     bindings: list[tuple[list[str], Any]] = Field(default_factory=list)
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Runnable[Any, AIMessage]:
-        self.bindings.append(([tool.name for tool in tools], kwargs.get("tool_choice")))
+        self.bindings.append(
+            (
+                [cast(str, _product_model_tool_name(tool)) for tool in tools],
+                kwargs.get("tool_choice"),
+            )
+        )
         return self
 
 

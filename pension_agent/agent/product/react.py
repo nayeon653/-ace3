@@ -6,6 +6,7 @@ import json
 import operator
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import cache
 from importlib import resources
@@ -26,6 +27,7 @@ from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.types import Command
 from pydantic import Field, ValidationError
 
@@ -195,7 +197,9 @@ class ProductComparisonToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]
         ):
             raise RuntimeError("Product 비교 상태별 Tool 구성이 올바르지 않습니다.")
         selected_tools = [
-            model_tool
+            _comparison_submit_model_tool(model_tool, state=state)
+            if name == SUBMIT_DOMAIN_RESULT_TOOL_NAME
+            else model_tool
             for model_tool, name in zip(available_tools, available_names, strict=True)
             if name in selected_names
         ]
@@ -211,6 +215,42 @@ class ProductComparisonToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]
         ):
             tool_choice = SUBMIT_DOMAIN_RESULT_TOOL_NAME
         return await handler(request.override(tools=selected_tools, tool_choice=tool_choice))
+
+
+def _comparison_submit_model_tool(model_tool: Any, *, state: Mapping[str, Any]) -> dict[str, Any]:
+    """실행 Tool을 바꾸지 않고 비교 제출의 모델 노출 schema만 강화한다."""
+
+    cell_count = len(state["comparison_targets"]) * len(state["comparison_criteria"])
+    if not 1 <= cell_count <= 25:
+        raise RuntimeError("비교 제출 schema의 셀 개수가 올바르지 않습니다.")
+    exposed = deepcopy(convert_to_openai_tool(model_tool))
+    parameters = exposed["function"]["parameters"]
+    properties = parameters["properties"]
+    original_cells = properties["comparison_cells"]
+    array_schema = (
+        original_cells
+        if original_cells.get("type") == "array"
+        else next(
+            (branch for branch in original_cells.get("anyOf", []) if branch.get("type") == "array"),
+            None,
+        )
+    )
+    if array_schema is None:
+        raise RuntimeError("비교 제출 schema에 셀 배열이 없습니다.")
+    properties["comparison_cells"] = {
+        **{key: value for key, value in original_cells.items() if key not in {"anyOf", "default"}},
+        **array_schema,
+        "minItems": cell_count,
+        "maxItems": cell_count,
+    }
+    parameters["required"] = list(
+        dict.fromkeys([*parameters.get("required", []), "comparison_cells"])
+    )
+    properties["evidence_chunk_ids"]["maxItems"] = 0
+    guidance = _comparison_instructions()
+    properties["evidence_chunk_ids"]["description"] = guidance["schema_evidence_chunk_ids"]
+    properties["conclusion"]["description"] = guidance["schema_conclusion"]
+    return exposed
 
 
 def _product_model_tool_name(model_tool: Any) -> str | None:
