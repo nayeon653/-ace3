@@ -13,9 +13,14 @@
 
 ```mermaid
 flowchart TB
-    question["GET /answer 질문"] --> supervisor
+    question["GET /answer 질문"] --> regex_guard
 
     subgraph main["Main Supervisor · CompiledStateGraph"]
+        regex_guard{"시작 시 1회<br/>정규식 공격 패턴"} -->|일치| guard_refusal["거절 응답"]
+        regex_guard -->|통과| input_guard["의미 판별<br/>HCX-007"]
+        input_guard -->|허용| supervisor
+        input_guard -->|공격| guard_refusal
+        input_guard -->|실패| guard_unavailable["안전성 확인 실패 응답"]
         supervisor["HCX-007 model"] <--> domain_tools["Domain Agent tools"]
     end
 
@@ -75,12 +80,15 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	model("model")
 	tools("tools")
+	MainInputGuardMiddleware\2ebefore_agent("MainInputGuardMiddleware.before_agent")
 	SupervisorModelCallLimit\2ebefore_model("SupervisorModelCallLimit.before_model")
 	SupervisorModelCallLimit\2eafter_model("SupervisorModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5banalyze_policy\5d\2eafter_model("ToolCallLimitMiddleware[analyze_policy].after_model")
 	ToolCallLimitMiddleware\5banalyze_tax_payout\5d\2eafter_model("ToolCallLimitMiddleware[analyze_tax_payout].after_model")
 	ToolCallLimitMiddleware\5banalyze_product\5d\2eafter_model("ToolCallLimitMiddleware[analyze_product].after_model")
 	__end__([<p>__end__</p>]):::last
+	MainInputGuardMiddleware\2ebefore_agent -.-> SupervisorModelCallLimit\2ebefore_model;
+	MainInputGuardMiddleware\2ebefore_agent -.-> __end__;
 	SupervisorModelCallLimit\2eafter_model -.-> SupervisorModelCallLimit\2ebefore_model;
 	SupervisorModelCallLimit\2eafter_model -.-> __end__;
 	SupervisorModelCallLimit\2eafter_model -.-> tools;
@@ -92,7 +100,7 @@ graph TD;
 	ToolCallLimitMiddleware\5banalyze_product\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5banalyze_tax_payout\5d\2eafter_model -.-> ToolCallLimitMiddleware\5banalyze_policy\5d\2eafter_model;
 	ToolCallLimitMiddleware\5banalyze_tax_payout\5d\2eafter_model -.-> __end__;
-	__start__ --> SupervisorModelCallLimit\2ebefore_model;
+	__start__ --> MainInputGuardMiddleware\2ebefore_agent;
 	model --> ToolCallLimitMiddleware\5banalyze_product\5d\2eafter_model;
 	tools -.-> SupervisorModelCallLimit\2ebefore_model;
 	classDef default fill:#f2f0ff,line-height:1.2

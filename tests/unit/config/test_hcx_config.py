@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from pension_agent.config import (
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+    INJECTION_GUARD_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
     POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
@@ -34,10 +35,17 @@ def test_role_configs_use_hcx_007_without_thinking() -> None:
         POLICY_AGENT_HCX_CONFIG,
         PRODUCT_REACT_HCX_CONFIG,
         DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+        INJECTION_GUARD_HCX_CONFIG,
     )
 
     assert all(config.model == "HCX-007" for config in configs)
     assert all(config.thinking_effort == "none" for config in configs)
+
+
+def test_input_guard_has_a_short_deterministic_generation_budget() -> None:
+    assert INJECTION_GUARD_HCX_CONFIG.temperature == 0
+    assert INJECTION_GUARD_HCX_CONFIG.timeout_seconds == 10
+    assert INJECTION_GUARD_HCX_CONFIG.max_retries == 0
 
 
 def test_function_calling_config_requires_at_least_1024_tokens() -> None:

@@ -28,6 +28,7 @@ from pension_agent.config import (
     BGE_M3_EMBEDDING_CONFIG,
     DEFAULT_AGENT_RUNTIME_CONFIG,
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+    INJECTION_GUARD_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
     POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
@@ -94,9 +95,20 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
 
     lines = [
         "flowchart TB",
-        '    question["GET /answer 질문"] --> supervisor',
+        '    question["GET /answer 질문"] --> regex_guard',
         "",
         '    subgraph main["Main Supervisor · CompiledStateGraph"]',
+        (
+            '        regex_guard{"시작 시 1회<br/>정규식 공격 패턴"} '
+            '-->|일치| guard_refusal["거절 응답"]'
+        ),
+        (
+            '        regex_guard -->|통과| input_guard["의미 판별<br/>'
+            f'{INJECTION_GUARD_HCX_CONFIG.model}"]'
+        ),
+        "        input_guard -->|허용| supervisor",
+        "        input_guard -->|공격| guard_refusal",
+        '        input_guard -->|실패| guard_unavailable["안전성 확인 실패 응답"]',
         (
             f'        supervisor["{MAIN_SUPERVISOR_HCX_CONFIG.model} model"] '
             '<--> domain_tools["Domain Agent tools"]'

@@ -116,6 +116,77 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 
 ## 실행 제한과 실패 처리
 
+### 프롬프트 인젝션 방어
+
+`MainInputGuardMiddleware`의 `before_agent`에서 요청마다 Main 실행 시작 시 사용자
+입력을 한 번 검사한다. 원문 `question`과 Human 메시지에서 알려진 한국어·영어 지침 무시, 내부
+프롬프트 추출, 역할 사칭 표식을 발견하면 HCX·Domain Tool 호출 없이 고정된 자연어
+거절 응답을 반환한다. NFKC, 공백, 비표시 서식 문자 정규화는 검사 복사본에만 적용한다.
+
+정규식을 통과한 입력은 전용 `HCXPromptInjectionClassifier`로 의미를 판별한다.
+`pension_agent/prompts/security/injection-classifier.md`를 System 메시지로 사용하고,
+원문은 Human 메시지의 `untrusted_input` JSON 값에 넣는다. 업무용 도구·문서·비밀 설정은
+판별기에 제공하지 않는다. 반환 스키마용 `return_prompt_injection_verdict` 호출 하나의
+`decision=allow|block`만 엄격히 검증하며 이 Tool을 실제로 실행하지 않는다. 자연어,
+추가 필드, 알 수 없는 판정, 여러 Tool 호출은 판별 실패다. 판별 근거 원문을 사용자에게
+전달하거나 자유 문자열에서 allow/block 단어를 찾아 판정하지 않는다.
+
+HCX 판별 범위에는 비공개 개인정보·인증정보의 유출 요구를 포함한다. 타인의 연락처·
+주소·주민등록번호·개인 계좌·거래·연금 가입내역 조회, 비밀번호·API 키·토큰 공개,
+마스킹 복원과 외부 전송 요구를 차단한다. 관리자·본인·동의 주장은 조회 권한으로
+취급하지 않으며 실제 데이터 보유 여부와 무관하게 요청 의도를 판별한다.
+개인정보 보호 방법·공식 열람 절차·공개 고객센터 연락처와 사용자가 제공한 일반적인
+연금 상담 조건은 허용한다. 개인정보 단어를 정규식 차단 목록에 추가하지 않고 HCX가
+문맥을 구분한다. 기존 정규식의 직접 공격 검사는 유지한다.
+
+| 판별 단계와 결과 | 처리 |
+|---|---|
+| 정규식 일치 | 기존 고정 거절, 의미 판별·Main·Domain 호출 없음 |
+| 정규식 통과 + HCX `allow` | 기존 Main 실행 진행 |
+| HCX `block` | 기존 고정 거절, Main·Domain 호출 없음 |
+| HCX 오류·시간 초과·잘못된 응답 | 공격 판정과 구분한 고정 안전성 확인 실패 응답, Main·Domain 호출 없음 |
+| 요청 전체 deadline·취소 | 기존 AnswerService timeout·취소 정책 적용 |
+
+거절과 안전성 확인 실패도 `GET /answer`의 기존 5개 필드와 HTTP 200을 유지하며,
+원문 질문을 변경하지 않는다. 이 경우 검색 근거와 Domain 실행 결과는 비어 있다.
+차단 답변은 "개인정보·인증정보 유출이나 내부 지침 공개, 시스템 규칙 변경 요청은
+처리할 수 없습니다. 연금 제도·세금·상품에 관한 질문을 입력해 주세요."다.
+이는 정보 유출 요구의 입력 차단이며 사용자가 질문에 직접 적은 개인정보를 탐지해
+마스킹·삭제하는 기능은 아니다. API의 `question`에는 기존 계약대로 원문이 남는다.
+판별은 요청당 논리적으로 한 번 수행하고 Main의 Tool 왕복이나 Domain 실행 때
+반복하지 않는다. 판정을 공용 객체에 캐시하지 않으며 운영 runtime은 전용 판별기를
+항상 주입한다.
+`create_main_supervisor(injection_classifier=None)`은 오프라인 테스트·그래프 렌더링용
+정규식 단독 조립을 지원한다. 판별기가 주입된 graph는 native async 실행을 사용하며,
+동기 `invoke`는 의미 판별을 생략하지 않고 안전성 확인 실패로 종료한다.
+
+제공 문서는 신뢰할 수 있는 정보로 취급한다. 검색 문서와 Domain Tool 결과를 별도로
+검사하거나 재포장하지 않는다. Main의 후속 모델 호출, Policy, Tax/Payout, Product와
+카탈로그 planner·matcher에는 별도 인젝션 방어 미들웨어나 공통 보안 프롬프트를 추가하지
+않는다. 기존 업무 프롬프트와 Tool 결과 형식을 그대로 사용한다.
+
+의미 판별의 버전 관리 설정은 `INJECTION_GUARD_HCX_CONFIG`다. HCX-007 비추론,
+temperature 0, 최대 생성 1024토큰, timeout 10초, SDK retry 0회를 사용한다. 기존 HCX
+인증과 HTTP client, 프로세스 공용 모델 호출 슬롯을 공유한다. 슬롯 대기·판별·재시도를
+합쳐 10초와 요청의 남은 예산 중 짧은 쪽을 적용한다. 공유 정책의 42901 일시 오류 재시도가
+발생하면 실제 provider 호출은 최대 2회일 수 있다. 새로운 외부 provider나 인증키는 없다.
+
+정규식은 알려진 표현을 차단하는 보조 방어다. 공격을 그대로 인용한 질문도 정규식에서
+차단될 수 있으며, 뒤의 HCX가 이 차단을 번복하지 않는다. 의미 판별도 우회 표현·인코딩·
+다국어 공격을 모두 탐지하지는 못한다. 판별 대상은 최초 사용자 입력이며 최종 출력
+정제는 범위 밖이다. 정상 질문도 추가 HCX 호출 지연을 부담한다.
+
+오프라인 테스트는 실행 순서·오류·시간 예산·원문 보존을 검증한다. 합성 입력의 실제
+HCX 비교 요약은 `docs/experiments.md`에, 입력별 예상·실제 판정과 오탐은
+[입력 보안 검증 결과](../../testing/prompt-injection-results.md)에 기록한다. 평가 실행기와
+JSONL 질문셋은 로컬 검증 자료로 보존하며 `evals/` 변경에 포함하지 않는다.
+고정 소규모 결과를 전체 공격 성공률이나 연금 답변 품질로 일반화하지 않는다.
+
+설계 참고: [OWASP 프롬프트 인젝션 방어 지침](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html),
+[LangChain 모델 호출 미들웨어](https://docs.langchain.com/oss/python/langchain/middleware/custom).
+
+### 호출 제한
+
 | 제한 | 값 |
 |---|---:|
 | 한 요청의 Supervisor 모델 호출 | 최대 12회 |
@@ -139,4 +210,8 @@ Domain Tool Adapter는 Runner 예외, 잘못된 결과 또는 Domain 불일치�
 - `tests/unit/agent/orchestration/test_supervisor.py`
 - `tests/unit/agent/orchestration/test_service.py`
 - `tests/unit/agent/test_agent_contracts.py`
+- `tests/unit/agent/test_prompt_injection.py`
+- `tests/unit/agent/test_prompt_injection_integration.py`
+- `tests/unit/agent/test_injection_classifier.py`
+- `tests/unit/agent/test_hybrid_input_guard.py`
 - `tests/test_agent_graph_document.py`

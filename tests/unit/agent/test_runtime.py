@@ -11,6 +11,7 @@ from pension_agent.agent.orchestration.service import SupervisorRunner
 from pension_agent.agent.search import LimitedChunkRetriever, LimitedQueryEmbedder
 from pension_agent.config import (
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+    INJECTION_GUARD_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
     POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
@@ -71,6 +72,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     policy_model = object()
     default_domain_model = object()
     product_react_model = object()
+    injection_guard_model = object()
     embedder = object()
     qdrant_client = AsyncClosable("qdrant", closed)
     retriever = object()
@@ -91,6 +93,8 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
             return default_domain_model
         if config is PRODUCT_REACT_HCX_CONFIG:
             return product_react_model
+        if config is INJECTION_GUARD_HCX_CONFIG:
+            return injection_guard_model
         raise AssertionError("알 수 없는 HCX 역할 설정")
 
     def create_embedder(**kwargs: Any) -> object:
@@ -138,6 +142,12 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
 
     monkeypatch.setattr(runtime, "create_main_supervisor", create_supervisor)
 
+    def create_classifier(**kwargs: Any) -> object:
+        created["injection_classifier"] = kwargs
+        return object()
+
+    monkeypatch.setattr(runtime, "HCXPromptInjectionClassifier", create_classifier)
+
     config = AgentRuntimeConfig(
         max_concurrent_answers=6,
         max_concurrent_hcx_calls=2,
@@ -159,6 +169,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
         POLICY_AGENT_HCX_CONFIG,
         DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
         PRODUCT_REACT_HCX_CONFIG,
+        INJECTION_GUARD_HCX_CONFIG,
     ]
     assert all(call["http_client"] is model_http.sync for call in created["model_factories"])
     assert all(
@@ -189,6 +200,9 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     assert created["product"]["model"] is product_react_model
     assert created["product"]["catalog_planner_model"] is default_domain_model
     assert created["supervisor"]["model"] is supervisor_model
+    assert created["injection_classifier"]["model"] is injection_guard_model
+    assert created["injection_classifier"]["model_concurrency"] is shared_model_limit
+    assert created["supervisor"]["injection_classifier"] is not None
     assert [tool.name for tool in created["supervisor"]["tools"]] == [
         "analyze_policy",
         "analyze_tax_payout",

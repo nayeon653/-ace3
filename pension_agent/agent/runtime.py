@@ -9,6 +9,7 @@ from httpx import AsyncClient, Client, Limits
 
 from pension_agent.agent.contracts import DomainName, DomainRunner
 from pension_agent.agent.execution import AsyncConcurrencyLimiter, ModelConcurrencyMiddleware
+from pension_agent.agent.injection_classifier import HCXPromptInjectionClassifier
 from pension_agent.agent.model_factory import create_chat_clovax
 from pension_agent.agent.orchestration import (
     AnswerService,
@@ -39,6 +40,7 @@ from pension_agent.config import (
     BGE_M3_EMBEDDING_CONFIG,
     DEFAULT_AGENT_RUNTIME_CONFIG,
     DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
+    INJECTION_GUARD_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
     POLICY_AGENT_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
@@ -194,6 +196,12 @@ async def build_runtime_answer_service(
             http_client=model_http.sync,
             http_async_client=model_http.async_,
         )
+        injection_guard_model = create_chat_clovax(
+            config=INJECTION_GUARD_HCX_CONFIG,
+            connection=clova_connection,
+            http_client=model_http.sync,
+            http_async_client=model_http.async_,
+        )
         embedding_http = _ProviderHttpClients.create(
             max_concurrency=config.max_concurrent_embedding_calls
         )
@@ -261,6 +269,10 @@ async def build_runtime_answer_service(
             model=supervisor_model,
             tools=domain_tools,
             model_concurrency=model_concurrency,
+            injection_classifier=HCXPromptInjectionClassifier(
+                model=injection_guard_model,
+                model_concurrency=model_concurrency,
+            ),
         )
         return AnswerService(
             supervisor,
