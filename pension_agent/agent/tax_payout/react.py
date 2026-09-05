@@ -79,6 +79,7 @@ from pension_agent.agent.search import (
     combine_search_objective,
 )
 from pension_agent.agent.tax_payout.statutory_facts import (
+    ResourceType,
     candidate_fact_hints,
     resolve_statutory_facts,
 )
@@ -572,6 +573,18 @@ def _create_tax_payout_result_tool() -> Any:
                 ),
             ),
         ],
+        fact_resource_types: Annotated[
+            dict[str, list[ResourceType]],
+            Field(
+                default_factory=dict,
+                description=(
+                    "selected_fact_ids의 각 fact_id를 그 fact가 적용될 재원 목록에 연결한다. "
+                    "재원은 tax_credit_contribution, investment_earnings, "
+                    "retirement_income_principal, non_tax_credit_principal 중에서 선택한다. "
+                    "법정 수치 fact를 선택하지 않으면 빈 객체로 둔다."
+                ),
+            ),
+        ],
         runtime: ToolRuntime[ExecutionContext, TaxPayoutAgentState],
     ) -> Command | str:
         if runtime.tool_call_id is None:
@@ -607,6 +620,7 @@ def _create_tax_payout_result_tool() -> Any:
                 warnings=warnings,
                 evidence_chunk_ids=evidence_chunk_ids,
                 selected_fact_ids=selected_fact_ids,
+                fact_resource_types=fact_resource_types,
             )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
@@ -657,6 +671,7 @@ def _build_tax_payout_result(
     warnings: list[str],
     evidence_chunk_ids: list[str],
     selected_fact_ids: list[str] | None = None,
+    fact_resource_types: dict[str, list[ResourceType]] | None = None,
 ) -> DomainResult:
     del question, objective
     if search_result.execution_status != "completed":
@@ -670,7 +685,9 @@ def _build_tax_payout_result(
         search_result,
         list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
     )
-    verified_numeric_statements = resolve_statutory_facts(selected_fact_ids or [], selected_chunks)
+    verified_numeric_statements = resolve_statutory_facts(
+        selected_fact_ids or [], selected_chunks, fact_resource_types
+    )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_warnings.extend(search_result.limitations)

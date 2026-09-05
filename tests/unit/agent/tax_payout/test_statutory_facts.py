@@ -37,6 +37,23 @@ def _unrelated_chunk() -> SearchChunkPayload:
     )
 
 
+def _doc38_resource_scope_chunk() -> SearchChunkPayload:
+    return SearchChunkPayload(
+        chunk_id="a937a2ef-2e51-5cb3-b160-c53d5276677c",
+        source_file_name="doc38.docx",
+        document_type=DocumentType.PENSION_REFERENCE,
+        chunk_index=0,
+        title="doc38",
+        locator="문서 내 청크 1",
+        content=(
+            "사적연금소득을 1년에 1,500만원 초과 수령 시 종합과세 되지만 "
+            "이 1,500만원을 판단할 때 세액공제 안받은 돈과 퇴직금은 포함되지 않는다. "
+            "세액공제 받은 금액과 운용수익은 연 1,500만원 초과로 인출하는 경우 "
+            "종합과세된다."
+        ),
+    )
+
+
 # --- candidate narrowing: 검색된 청크와 같은 출처의 fact만 노출한다 ---
 
 
@@ -172,3 +189,103 @@ def test_resolve_distinguishes_same_role_different_scope_neighbors() -> None:
 
     assert "900만원" in combined[0]["text"]
     assert "600만원" in solo[0]["text"]
+
+
+def test_resolve_drops_fact_when_resource_type_is_missing() -> None:
+    assert (
+        resolve_statutory_facts(
+            ["retirement_income_principal_excluded_from_private_pension_threshold"],
+            [_doc38_resource_scope_chunk()],
+            {},
+        )
+        == []
+    )
+
+
+def test_resolve_drops_threshold_for_retirement_income_principal() -> None:
+    chunk = SearchChunkPayload(
+        chunk_id="6e63c867-ce73-5ad4-a8dc-16e67d60121e",
+        source_file_name="doc38.docx",
+        document_type=DocumentType.PENSION_REFERENCE,
+        chunk_index=2,
+        title="doc38",
+        locator="문서 내 청크 3",
+        content=(
+            "연간 1,500만원 초과 수령 시 전액 다른 소득과 합산 종합과세 또는 16.5% 세율로 분리과세"
+        ),
+    )
+
+    assert (
+        resolve_statutory_facts(
+            ["private_pension_taxable_income_threshold_with_filing_choice"],
+            [chunk],
+            {
+                "private_pension_taxable_income_threshold_with_filing_choice": [
+                    "retirement_income_principal"
+                ]
+            },
+        )
+        == []
+    )
+
+
+def test_resolve_accepts_threshold_for_credited_contribution_and_earnings() -> None:
+    chunk = SearchChunkPayload(
+        chunk_id="6e63c867-ce73-5ad4-a8dc-16e67d60121e",
+        source_file_name="doc38.docx",
+        document_type=DocumentType.PENSION_REFERENCE,
+        chunk_index=2,
+        title="doc38",
+        locator="문서 내 청크 3",
+        content=(
+            "연간 1,500만원 초과 수령 시 전액 다른 소득과 합산 종합과세 또는 16.5% 세율로 분리과세"
+        ),
+    )
+
+    statements = resolve_statutory_facts(
+        ["private_pension_taxable_income_threshold_with_filing_choice"],
+        [chunk],
+        {
+            "private_pension_taxable_income_threshold_with_filing_choice": [
+                "tax_credit_contribution",
+                "investment_earnings",
+            ]
+        },
+    )
+
+    assert [statement["source_id"] for statement in statements] == [
+        "private_pension_taxable_income_threshold_with_filing_choice"
+    ]
+
+
+def test_resolve_returns_atomic_retirement_income_exclusion() -> None:
+    statements = resolve_statutory_facts(
+        ["retirement_income_principal_excluded_from_private_pension_threshold"],
+        [_doc38_resource_scope_chunk()],
+        {
+            "retirement_income_principal_excluded_from_private_pension_threshold": [
+                "retirement_income_principal"
+            ]
+        },
+    )
+
+    assert statements[0]["text"] == (
+        "퇴직금 원금은 사적연금소득 연 1,500만원 판단에 포함되지 않습니다."
+    )
+
+
+def test_resolve_mixed_resources_binds_each_fact_independently() -> None:
+    fact_ids = [
+        "private_pension_threshold_applies_to_credited_contributions_and_earnings",
+        "retirement_income_principal_excluded_from_private_pension_threshold",
+    ]
+    statements = resolve_statutory_facts(
+        fact_ids,
+        [_doc38_resource_scope_chunk()],
+        {
+            fact_ids[0]: ["tax_credit_contribution", "investment_earnings"],
+            fact_ids[1]: ["retirement_income_principal"],
+        },
+    )
+
+    assert [statement["source_id"] for statement in statements] == fact_ids

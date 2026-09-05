@@ -382,7 +382,12 @@ def validated_input_sources(
                     return None
                 if not _matches_single_quantity(source, value):
                     return None
-        matched_source = _match_trusted_source(source, question=question, chunks=chunks)
+        matched_source = _match_trusted_source(
+            source,
+            value=value,
+            question=question,
+            chunks=chunks,
+        )
         if matched_source is None:
             return None
         validated[field] = matched_source
@@ -1218,6 +1223,7 @@ def _trusted_sources(state: Mapping[str, Any]) -> tuple[str, tuple[tuple[str, st
 def _match_trusted_source(
     source: str,
     *,
+    value: Any,
     question: str,
     chunks: tuple[tuple[str, str], ...],
 ) -> CalculationInputSource | None:
@@ -1226,7 +1232,64 @@ def _match_trusted_source(
     for chunk_id, content in chunks:
         if source and source in content:
             return {"origin": "evidence", "text": source, "chunk_id": chunk_id}
+    if _matches_paraphrased_question_source(source, value, question):
+        # LLM이 provenance 문구를 바꾸어 썼더라도 실제 출처는 원 질문으로 고정한다.
+        return {"origin": "question", "text": question, "chunk_id": None}
     return None
+
+
+_SEMANTIC_TOKEN_PATTERN = re.compile(r"[A-Za-z가-힣]{2,}")
+_SEMANTIC_TOKEN_STOPWORDS = {
+    "금액",
+    "입력",
+    "값은",
+    "이고",
+    "이며",
+    "경우",
+    "질문",
+}
+
+
+def _matches_paraphrased_question_source(source: str, value: Any, question: str) -> bool:
+    """값과 의미 단서가 원 질문에 함께 있을 때만 사용자 입력의 표현 변경을 허용한다."""
+
+    if not source or not question:
+        return False
+    source_quantities = _quantities(source)
+    question_quantities = _quantities(question)
+    expected = _decimal(value)
+    if expected.is_nan() or source_quantities != [expected] or expected not in question_quantities:
+        return False
+    source_tokens = _semantic_tokens(source)
+    question_tokens = _semantic_tokens(question)
+    return bool(source_tokens & question_tokens)
+
+
+def _semantic_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for match in _SEMANTIC_TOKEN_PATTERN.finditer(text):
+        token = match.group().casefold()
+        for suffix in (
+            "으로",
+            "에서",
+            "에게",
+            "이면",
+            "이고",
+            "이며",
+            "의",
+            "이",
+            "가",
+            "은",
+            "는",
+            "을",
+            "를",
+        ):
+            if token.endswith(suffix) and len(token) - len(suffix) >= 2:
+                token = token[: -len(suffix)]
+                break
+        if token not in _SEMANTIC_TOKEN_STOPWORDS:
+            tokens.add(token)
+    return tokens
 
 
 def _normalize_text(value: str) -> str:

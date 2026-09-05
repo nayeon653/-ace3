@@ -25,6 +25,12 @@ NumericRole = Literal[
     "withdrawal_limit",
 ]
 NumericUnit = Literal["KRW", "percent", "year", "month", "day", "count"]
+ResourceType = Literal[
+    "tax_credit_contribution",
+    "investment_earnings",
+    "retirement_income_principal",
+    "non_tax_credit_principal",
+]
 
 
 class StatutoryNumericFact(BaseModel):
@@ -38,6 +44,8 @@ class StatutoryNumericFact(BaseModel):
     role: NumericRole
     scope: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
     condition_ids: tuple[str, ...] = ()
+    applies_to: tuple[ResourceType, ...]
+    excludes: tuple[ResourceType, ...] = ()
     source_file_name: str = Field(min_length=1)
     locator: str = Field(min_length=1)
     source_text: str = Field(min_length=1)
@@ -75,6 +83,7 @@ def candidate_fact_hints(chunks: list[SearchChunkPayload]) -> list[dict[str, str
 def resolve_statutory_facts(
     fact_ids: list[str],
     selected_chunks: list[SearchChunkPayload],
+    fact_resource_types: dict[str, list[ResourceType]] | None = None,
 ) -> list[VerifiedNumericStatement]:
     """알려진 fact_id 중 제출된 evidence와 출처가 일치하는 것만 검증한다.
 
@@ -91,6 +100,11 @@ def resolve_statutory_facts(
             continue
         if not _provenance_matches(fact, selected_chunks):
             continue
+        selected_resource_types = (
+            None if fact_resource_types is None else set(fact_resource_types.get(fact_id, []))
+        )
+        if not _applicability_matches(fact, selected_resource_types):
+            continue
         verified.append(
             {
                 "source_type": "statutory_fact",
@@ -99,6 +113,22 @@ def resolve_statutory_facts(
             }
         )
     return verified
+
+
+def _applicability_matches(
+    fact: StatutoryNumericFact, resource_types: set[ResourceType] | None
+) -> bool:
+    """LLM이 제안한 재원과 registry 적용 범위가 일치할 때만 fact를 허용한다."""
+
+    # None은 기존 Python 호출자의 호환 경로다. 제품 Tool은 항상 list를 전달하며,
+    # 빈 list는 재원 미제출이므로 fail-closed 한다.
+    if resource_types is None:
+        return True
+    if not resource_types:
+        return False
+    if resource_types.intersection(fact.excludes):
+        return False
+    return resource_types.issubset(fact.applies_to)
 
 
 def _provenance_matches(

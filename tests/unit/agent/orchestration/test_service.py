@@ -749,6 +749,67 @@ async def test_firewall_H_qualitative_only_answer_is_unaffected_backward_compati
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("status", ["conditional", "undetermined"])
+async def test_failed_or_terminalized_calculation_cannot_add_numeric_claim(status: str) -> None:
+    question = "연금계좌 평가액이 1억원이면 연금수령한도는 얼마인가요?"
+    domain_result: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": status,
+            "conclusion": "계산 도구 결과를 확보하지 못했습니다.",
+            "missing_conditions": ["검증된 계산 결과"],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": ["안전한 결과로 종료했습니다."],
+    }
+    supervisor = FakeSupervisor(
+        result={
+            "messages": [AIMessage(content="연금수령한도는 1,200만원입니다.")],
+            "question_id": "Q-001",
+            "question": question,
+            "domain_results": [domain_result],
+        }
+    )
+
+    result = await AnswerService(supervisor).run(question_id="Q-001", question=question)
+
+    assert "1,200만원" not in result.answer.answer
+    assert "검증된 계산 결과" in result.answer.answer
+
+
+async def test_determined_result_without_calculator_cannot_derive_new_number_from_user_inputs() -> (
+    None
+):
+    question = "연금저축에 600만원을 납입하면 세액공제액은 얼마인가요?"
+    domain_result: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "determined",
+            "conclusion": "세액공제액은 99만원입니다.",
+            "missing_conditions": [],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
+    }
+    supervisor = FakeSupervisor(
+        result={
+            "messages": [AIMessage(content="세액공제액은 99만원입니다.")],
+            "question_id": "Q-001",
+            "question": question,
+            "domain_results": [domain_result],
+        }
+    )
+
+    result = await AnswerService(supervisor).run(question_id="Q-001", question=question)
+
+    assert "99만원" not in result.answer.answer
+    assert "새로운 수치 결론을 제공할 수 없습니다" in result.answer.answer
+
+
 async def test_pseudo_placeholder_stripped_when_no_verified_numeric_statements_exist() -> None:
     """Policy 단독 라우팅처럼 verified_numeric_statements가 전혀 없으면
     `_stabilize_verified_numeric_answer`가 개입하지 않는다 — 그 경로에서 Main이
