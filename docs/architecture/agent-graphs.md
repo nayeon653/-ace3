@@ -52,12 +52,14 @@ flowchart TB
     domain_product --> catalog_lookup
     catalog_result --> domain_product
 
-    subgraph comparison["복수 상품 비교 · Python 근거 수집"]
+    subgraph comparison["복수 상품 비교 · 검색과 답안 생성"]
         compare_tool["compare_products"] --> product_searches["상품별 병렬 검색"]
-        product_searches --> comparison_evidence["상품별 근거 · 실행 상태"]
+        product_searches --> comparison_evidence["중복 제거한 원문 · 새 모델 입력"]
+        comparison_evidence --> comparison_writer["HCX-007 비교 답안 작성"]
+        comparison_writer --> comparison_answer["완성 답안 · 실제 인용 근거"]
     end
     domain_product --> compare_tool
-    comparison_evidence --> domain_product
+    comparison_answer --> domain_product
     product_searches --> search_service
 
     subgraph search["공용 검색 경로"]

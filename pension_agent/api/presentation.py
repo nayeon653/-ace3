@@ -63,6 +63,8 @@ def build_think_trace(domain_results: list[DomainResult]) -> str:
                 f"total_count={catalog_result['total_count']}, "
                 f"catalog_version={catalog_result['catalog_version']})"
             )
+        elif "comparison_answer" in result:
+            conclusion = "compare_products에서 비교 답안 생성 완료"
         elif "comparison_result" in result:
             comparison = result["comparison_result"]
             supported_count = sum(cell["status"] == "supported" for cell in comparison["cells"])
@@ -96,7 +98,7 @@ def _serialize_retrieved_context(
         EvidenceChunkResponse.model_validate(evidence)
         for result in domain_results
         if result["execution_status"] == "completed"
-        and result["decision"]["status"] != "not_applicable"
+        and ("comparison_answer" in result or result["decision"]["status"] != "not_applicable")
         for evidence in result["evidence"]
     ]
 

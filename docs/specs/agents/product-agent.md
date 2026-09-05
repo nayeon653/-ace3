@@ -13,20 +13,25 @@ Product Agent는 검증된 상품 카탈로그를 조회하고 개별 상품 및
 |---|---|
 | ReAct 모델 | `HCX-007`, Thinking `none` |
 | Catalog Planner 모델 | `HCX-007`, Thinking `none` |
-| 공통 생성 설정 | temperature `0.1`, 호출당 30초, retry 2회 |
-| 최대 생성 토큰 | Product ReAct `4096`, Catalog Planner `1024` |
+| 비교 생성기 모델 | `HCX-007`, Thinking `none` |
+| 기본 생성 설정 | temperature `0.1`, 호출당 30초, retry 2회 |
+| 비교 생성기 설정 | temperature `0.1`, 호출당 30초, SDK retry 0회 |
+| 최대 생성 토큰 | Product ReAct·비교 생성기 `4096`, Catalog Planner `1024` |
 | 프롬프트 | `pension_agent/prompts/domain/product-agent.md` |
 | 구현 | `pension_agent/agent/product/` |
 
-Product ReAct와 Catalog Planner는 같은 프로세스 HCX 동시성 제한을 공유하지만 별도 모델
-인스턴스를 사용한다.
+Product ReAct, Catalog Planner와 비교 생성기는 같은 프로세스 HCX 동시성 제한을 공유하지만
+별도 모델 인스턴스를 사용한다. 비교 생성기는 `PRODUCT_COMPARISON_ANSWER_HCX_CONFIG`로
+버전 관리한다. 답변 내용·파싱 실패 후 교정 생성은 없으며, 공통 인프라의 429 재시도는
+같은 deadline 안에서 최대 한 번의 추가 물리 호출만 허용한다.
 
 ## 입력과 출력
 
 입력은 `DomainRequest {question, objective}`다. 출력은 `domain=product`인 공통
 `DomainResult`다. 상품 카탈로그 개수·목록 조회에는 추가로 검증된 `catalog_result`가
-포함된다. 명시적인 복수 비교에는 전체 대상·항목·셀·제한을 가진 `comparison_result`가
-포함되며 `catalog_result`와 함께 넣을 수 없다.
+포함된다. 비교 도구가 생성한 답변은 `comparison_answer`에 담고, 판단·조건·선택 근거와
+함께 반환한다. 비교 대상을 충분히 식별하지 못한 기존 결정론적 안내에는
+`comparison_result`를 유지한다. 비교 답변과 카탈로그 결과를 함께 넣지 않는다.
 
 ## Tool
 
@@ -49,23 +54,23 @@ Product Catalog Query Planner에 질문 원문과 판단 목표를 전달하고 
 선택한다. 비용·환매는 명시 요청에만 선택하며 모델 노출 스키마와 실행 검증 모두 3개를
 상한으로 둔다. 요청 항목이 더 많으면 핵심 항목을 우선하고 미비교 범위를 밝히도록 지시한다.
 Planner는 `resolve_products` 계획 하나를 반환하며 Python이 원문 조각과 공식명·alias의
-대응을 검증한다. 확정된 서로 다른 코드가 0~1개이면 검색 없이 모든 요청 셀을 미확인으로
-보존한 `undetermined` 결과를 생성한다.
+대응을 검증한다. 확정된 서로 다른 코드가 0~1개이면 검색·생성 호출 없이 식별 부족을
+설명하는 기존 결정론적 `undetermined` 결과를 반환한다.
 
 ### `compare_products`
 
 - 카탈로그 조회가 확정한 코드 전체와 순서를 `product_codes`로 전달한다.
 - `criteria`는 조회 때 저장한 비교 항목과 순서까지 같아야 한다.
 - 2~5개 상품의 투자설명서를 같은 항목으로 한 번씩 병렬 검색한다.
-- 상품별 `attempts`, 성공한 원문 근거, 미식별 대상과 검색 오류를 분리해 반환한다.
-- 도구 내부의 생성 LLM 호출은 없으며 기존 Search Service와 provider 제한을 공유한다.
-- 비교 전체는 요청당 한 번만 실행하며 검색 근거를 확보한 후 Product HCX가 해석한다.
-- state에는 시도별 전체 `SearchResult`를 보존한다. 모델 ToolMessage에서는 시도 안의
-  중복 원문만 생략하고 상품별 `evidence`에 유지하며, 시도 상태·오류·제한도 전달한다.
-- ToolMessage의 `next_step`은 비교 셀 제출 안내이며 내부 service 결과 모델이나 API 필드가
-  아니다.
+- 도구 내부 전용 HCX가 질문·대상·항목·상품별 검색 상태·고유 원문만 받은 새 입력에서
+  비교 답변을 한 번 작성한다. 전체 카탈로그나 이전 Product AI/Tool 메시지는 전달하지 않는다.
+- 원문은 청크 ID로 중복 제거하고 전부 보존한다. 자동 보완 검색이나 근거 요약은 수행하지 않는다.
+- 구조화 응답을 파싱하고 선택 청크 ID를 실제 근거에 연결해 `comparison_answer`를 반환한다.
+- 도구 완료와 함께 Product 실행을 종료한다. Product가 재작성하거나
+  `submit_domain_result`로 비교 셀을 제출하지 않는다.
+- 답변 내용·항목 충족·인용 의미 검증이나 검증 실패 후 재작성 로직은 두지 않는다.
 
-입출력·상태표·비교 셀·예산의 상세 계약은
+입출력·상태·생성·예산의 상세 계약은
 [Product 상품 비교 도구](../components/product-comparison.md)를 따른다.
 
 ### `search_documents`
@@ -76,8 +81,7 @@ Planner는 `resolve_products` 계획 하나를 반환하며 Python이 원문 조
 - 상품 식별 전 일반적인 판단 기준을 찾을 때만 상품 코드 없이 전체 검색할 수 있다.
 - 검색 입력은 판단할 비용·위험·유동성·운용 특성을 나타내는 구체적인 `objective`다.
 - 첫 검색이 부족하면 최대 한 번 다른 문서 표현으로 다시 검색할 수 있다.
-- 비교 경로에서는 최초 `compare_products` 이후에만 확정된 상품 코드로 보완 검색한다.
-  전체 보완은 최대 2회, 상품별로 최대 1회이며 최초 검색 마감을 연장하지 않는다.
+- 복수 비교 경로에서는 사용하지 않는다. `compare_products`의 최초 검색 batch로 수집한다.
 
 ### `calculate_fund_standard_price`
 
@@ -152,12 +156,8 @@ Planner는 `resolve_products` 계획 하나를 반환하며 Python이 원문 조
 한 개를 자동으로 포함한다. 이 근거에는 route, 운용사, 반환 방식, 정확한 개수·목록과
 `catalog_version`이 기록된다.
 
-비교 제출은 `comparison_cells`에 전체 대상×항목의 상태, finding, 상품 코드·청크 ID 참조,
-제한을 담는다. 비교 state에만 노출하는 모델 schema에서 이 배열을 필수로 만들고 전체
-대상×항목 개수로 길이를 고정한다. 별도 `evidence_chunk_ids`는 빈 배열만 허용한다.
-Python이 상품별 성공 검색과 참조를 대조하고 실제 인용 청크만 최종 evidence로
-보존한다. coverage는 Python이 계산하며 `partial`은 `conditional`, `none`은 `undetermined`로
-강제한다. 미확인 셀이나 근거가 전혀 없는 비교의 자유 생성 내용을 최종 사실로 채택하지 않는다.
+이 제출 Tool은 단일 상품·카탈로그 경로가 사용한다. 비교 답변은 `compare_products`가
+완료하므로 비교 셀 제출이나 검증 후 재제출을 수행하지 않는다.
 
 ## 실행 경로
 
@@ -206,13 +206,17 @@ product_code 없는 전체 search_documents
 lookup_product_codes(comparison_criteria)
   -> resolve_products 계획 1개, 원문 표현·코드 검증
   -> compare_products(확정 코드 전체, 저장된 항목)
-  -> 필요 시 특정 상품의 search_documents 보완
-  -> 모든 대상×항목의 comparison_cells 제출
-  -> 검증된 comparison_result와 실제 인용 근거
+      -> 상품별 문서 한 번씩 병렬 검색
+      -> 독립 입력을 받은 비교 HCX가 답변 작성
+      -> 구조화 응답 파싱과 실제 근거 ID 연결
+      -> comparison_answer + decision + 선택 근거 + 경고
+  -> Product 종료, Main/API가 완료 답변 보존
 ```
 
 모든 상품 검색이 실패·timeout이면 동일 상태로 종료한다. 완료 시도가 있지만 청크가
-전혀 없으면 원래 대상·항목과 검색 제한을 보존한 `undetermined` 결과를 생성한다.
+전혀 없으면 새 생성 호출 없이 원래 대상·항목과 검색 제한을 보존한 `undetermined` 결과를
+생성한다. 일부 근거만 있으면 생성기에 확보 근거와 실패·미식별 상태를 함께 전달한다.
+답변 생성 이후 Product 재호출, 자동 보완 검색과 셀 제출은 없다.
 
 ## Tool 순서 강제
 
@@ -230,16 +234,13 @@ Middleware는 한 모델 응답에서 현재 단계에 허용된 Tool 호출 하
   허용한다.
 - 한 모델 응답의 결과 제출은 하나로 제한한다.
 - 복수 식별 후에는 확정된 전체 코드와 저장한 항목의 `compare_products`만 허용한다.
-- 최초 비교 검색 후에는 확정된 상품의 보완 검색 또는 비교 셀 제출만 허용한다.
+- 비교 Tool 완료 후에는 Product 모델을 다시 호출하지 않고 Domain 결과로 종료한다.
 
-비교 state에만 모델 호출 전 Tool schema 필터를 추가로 적용한다. 현재 실행 가능한 Tool과
-이전 Tool 메시지 해석에 필요한 schema를 유지하고, 최초 비교에는
-`tool_choice=compare_products`를 사용한다. 검색 후에는 지정 생략(`tool_choice=None`, 기본
-auto)으로 보완 검색을 선택할 수 있게 한다. 가장 최근 AIMessage의 Tool 호출이 비어
-재지시했거나 검색 상한으로 제출만 허용되면 `tool_choice=submit_domain_result`로 구조화
-제출을 강제한다. 빈 호출에는 자유 문장과 불허 호출 제거 결과가 포함된다. 과거 Tool의 재실행은 기존
-순서·횟수 검사로 거절한다. 비교 state가 없는 단일 상품·카탈로그 경로에는 이
-필터와 Tool 선택 강제를 적용하지 않는다.
+비교 state에서는 실행 가능한 Tool과 이전 Tool 메시지 해석에 필요한 schema를 유지하고,
+`tool_choice=compare_products`로 실행을 지정한다. 과거 Tool schema가 남아 있어도 기존
+순서·횟수 검사가 재실행을 거절한다. 비교 생성기에는 자체 구조화 응답 도구만 제공하며
+Product의 검색·계산·제출 도구나 이전 도구 호출 이력을 넘기지 않는다. 비교 state가 없는
+단일 상품·카탈로그 경로의 Tool 선택 방식은 유지한다.
 
 ## 실행 제한
 
@@ -250,8 +251,9 @@ auto)으로 보완 검색을 선택할 수 있게 한다. 가장 최근 AIMessag
 | Catalog Planner 모델 | 기본 1회, 복수 후보·코드 대응 교정에만 최대 1회 추가 |
 | 단일 상품 검색 Tool | 최대 2회 |
 | 비교 Tool | 최대 1회, 실제 최초 검색은 상품별 N회 |
-| 비교 보완 검색 | 전체 최대 2회, 같은 상품 최대 1회 |
-| 비교 대상 / 항목 / 셀 | 최대 5개 / 3개 / 15개 |
+| 비교 보완 검색 | 현재 실행 경로에서는 0회 |
+| 비교 생성기 | 논리적 생성 최대 1회, 내용 교정 없음 |
+| 비교 대상 / 항목 | 최대 5개 / 3개 |
 | 비교 검색 마감 | `min(진입 시각 + 30초, Domain deadline - 30초)` |
 | 기준가격 Tool | 최대 1회 |
 | 공시 연환산 VaR Tool | 최대 1회 |
@@ -259,7 +261,7 @@ auto)으로 보완 검색을 선택할 수 있게 한다. 가장 최근 AIMessag
 | 선취판매수수료 Tool | 최대 1회 |
 | 후취판매수수료 Tool | 최대 1회 |
 | 환매수수료 Tool | 최대 1회 |
-| 제출 Tool | 최대 2회 |
+| 제출 Tool | 단일 상품·카탈로그에서 최대 2회, 비교 작성에서는 사용하지 않음 |
 | 실행 deadline | 75초 또는 상위 deadline 중 빠른 시각 |
 | 동시 실행 | 프로세스당 3개 |
 
@@ -274,6 +276,8 @@ auto)으로 보완 검색을 선택할 수 있게 한다. 가장 최근 AIMessag
 - 과거 수익률이나 개인 포트폴리오 기반 적합성 계산을 수행하지 않는다.
 - 여러 상품의 의미적 순위를 자동 산출하지 않는다.
 - 투자설명서와 카탈로그에 없는 매수 가능 여부를 추정하지 않는다.
+- 비교 답변의 내용·인용 의미를 자동 검증하지 않는다. 프롬프트 준수와 실제 품질은 별도
+  평가하며, 실행 성공이 답변 정확성을 보증하지 않는다.
 
 ## 검증 위치
 

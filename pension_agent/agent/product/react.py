@@ -6,7 +6,6 @@ import json
 import operator
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from copy import deepcopy
 from dataclasses import dataclass
 from functools import cache
 from importlib import resources
@@ -27,7 +26,6 @@ from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
-from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.types import Command
 from pydantic import Field, ValidationError
 
@@ -43,7 +41,6 @@ from pension_agent.agent.calculation import (
 )
 from pension_agent.agent.contracts import (
     CalculationResult,
-    ComparisonCell,
     ComparisonCriterion,
     ComparisonTarget,
     DecisionStatus,
@@ -59,8 +56,8 @@ from pension_agent.agent.product.comparison import (
     ComparisonEvidenceResult,
     ProductComparisonService,
 )
+from pension_agent.agent.product.comparison_answer import HCXProductComparisonAnswerWriter
 from pension_agent.agent.product.comparison_submission import (
-    build_comparison_domain_result,
     unresolved_comparison_result,
 )
 from pension_agent.agent.search import SearchRequest, SearchResult, SearchRunner
@@ -116,7 +113,7 @@ class ProductGraph(Protocol):
 
 
 class CompleteProductResult(AgentMiddleware[Any, Any, Any]):
-    """검증된 DomainResult 제출 후 추가 모델 호출 없이 종료한다."""
+    """완성된 DomainResult가 있으면 추가 모델 호출 없이 종료한다."""
 
     @hook_config(can_jump_to=["end"])
     def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
@@ -198,60 +195,13 @@ class ProductComparisonToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]
         ):
             raise RuntimeError("Product 비교 상태별 Tool 구성이 올바르지 않습니다.")
         selected_tools = [
-            _comparison_submit_model_tool(model_tool, state=state)
-            if name == SUBMIT_DOMAIN_RESULT_TOOL_NAME
-            else model_tool
+            model_tool
             for model_tool, name in zip(available_tools, available_names, strict=True)
             if name in selected_names
         ]
-        last_model_message = next(
-            (message for message in reversed(request.messages) if isinstance(message, AIMessage)),
-            None,
+        return await handler(
+            request.override(tools=selected_tools, tool_choice=COMPARE_PRODUCTS_TOOL_NAME)
         )
-        tool_choice = None
-        if state.get("comparison_evidence") is None:
-            tool_choice = COMPARE_PRODUCTS_TOOL_NAME
-        elif allowed_names == {SUBMIT_DOMAIN_RESULT_TOOL_NAME} or (
-            last_model_message is not None and not last_model_message.tool_calls
-        ):
-            tool_choice = SUBMIT_DOMAIN_RESULT_TOOL_NAME
-        return await handler(request.override(tools=selected_tools, tool_choice=tool_choice))
-
-
-def _comparison_submit_model_tool(model_tool: Any, *, state: Mapping[str, Any]) -> dict[str, Any]:
-    """실행 Tool을 바꾸지 않고 비교 제출의 모델 노출 schema만 강화한다."""
-
-    cell_count = len(state["comparison_targets"]) * len(state["comparison_criteria"])
-    if not 1 <= cell_count <= 25:
-        raise RuntimeError("비교 제출 schema의 셀 개수가 올바르지 않습니다.")
-    exposed = deepcopy(convert_to_openai_tool(model_tool))
-    parameters = exposed["function"]["parameters"]
-    properties = parameters["properties"]
-    original_cells = properties["comparison_cells"]
-    array_schema = (
-        original_cells
-        if original_cells.get("type") == "array"
-        else next(
-            (branch for branch in original_cells.get("anyOf", []) if branch.get("type") == "array"),
-            None,
-        )
-    )
-    if array_schema is None:
-        raise RuntimeError("비교 제출 schema에 셀 배열이 없습니다.")
-    properties["comparison_cells"] = {
-        **{key: value for key, value in original_cells.items() if key not in {"anyOf", "default"}},
-        **array_schema,
-        "minItems": cell_count,
-        "maxItems": cell_count,
-    }
-    parameters["required"] = list(
-        dict.fromkeys([*parameters.get("required", []), "comparison_cells"])
-    )
-    properties["evidence_chunk_ids"]["maxItems"] = 0
-    guidance = _comparison_instructions()
-    properties["evidence_chunk_ids"]["description"] = guidance["schema_evidence_chunk_ids"]
-    properties["conclusion"]["description"] = guidance["schema_conclusion"]
-    return exposed
 
 
 def _product_model_tool_name(model_tool: Any) -> str | None:
@@ -392,7 +342,7 @@ class ProductReactAgent:
                 targets=state["comparison_targets"],
                 criteria=state["comparison_criteria"],
                 catalog_version=state["comparison_catalog_version"],
-                limitation="상품 비교 결과의 근거 검증과 제출을 완료하지 못했습니다.",
+                limitation="상품 비교 답안 생성을 완료하지 못했습니다.",
             )
         return cast(DomainResult, result)
 
@@ -407,6 +357,7 @@ def create_product_react_agent(
     product_code_resolver: ProductCodeResolver,
     product_lookup_tool: BaseTool,
     comparison_service: ProductComparisonService,
+    comparison_answer_writer: HCXProductComparisonAnswerWriter,
 ) -> ProductReactAgent:
     """Product 패키지가 소유하는 ReAct graph를 만든다."""
 
@@ -414,9 +365,8 @@ def create_product_react_agent(
         search_service=search_service,
         product_code_resolver=product_code_resolver,
         max_search_calls=config.max_search_calls,
-        comparison_service=comparison_service,
     )
-    comparison_tool = _create_compare_products_tool(comparison_service)
+    comparison_tool = _create_compare_products_tool(comparison_service, comparison_answer_writer)
     calculation_tools = (
         create_fund_standard_price_tool(),
         create_fund_reported_var_risk_tool(),
@@ -489,7 +439,6 @@ def _create_product_search_tool(
     search_service: SearchRunner,
     product_code_resolver: ProductCodeResolver,
     max_search_calls: int,
-    comparison_service: ProductComparisonService,
 ) -> Any:
     @tool(
         SEARCH_DOCUMENTS_TOOL_NAME,
@@ -517,20 +466,6 @@ def _create_product_search_tool(
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("Search Service Tool 호출 ID가 없습니다.")
-        if runtime.state.get("comparison_targets"):
-            previous = runtime.state.get("comparison_evidence")
-            if previous is None or product_code is None:
-                raise ValueError("비교 후 보완 검색에는 비교 결과와 상품 코드가 필요합니다.")
-            compared = await comparison_service.supplement(
-                previous=previous,
-                product_code=product_code,
-                objective=objective,
-                deadline=runtime.context.deadline,
-                expand_neighbors=expand_neighbors,
-            )
-            return _comparison_search_command(
-                runtime.tool_call_id, SEARCH_DOCUMENTS_TOOL_NAME, compared
-            )
         candidate_codes = runtime.state.get("product_candidate_codes", [])
         scoped_search = bool(candidate_codes)
         try:
@@ -591,12 +526,16 @@ def _create_product_search_tool(
     return search_documents
 
 
-def _create_compare_products_tool(comparison_service: ProductComparisonService) -> BaseTool:
+def _create_compare_products_tool(
+    comparison_service: ProductComparisonService,
+    answer_writer: HCXProductComparisonAnswerWriter,
+) -> BaseTool:
     @tool(
         COMPARE_PRODUCTS_TOOL_NAME,
         description=(
-            "카탈로그에서 확정된 비교 대상 전체에 같은 항목을 적용해 상품별 문서 근거를 "
-            "병렬 검색한다. 상품별 코드와 비교 항목은 lookup_product_codes 결과 그대로 전달한다."
+            "카탈로그에서 확정된 비교 대상의 문서 근거를 병렬 검색하고 비교 답안까지 작성한다. "
+            "상품 코드와 비교 항목은 lookup_product_codes 결과 그대로 전달한다. "
+            "완료되면 Product 분석이 종료된다."
         ),
     )
     async def compare_products(
@@ -616,50 +555,29 @@ def _create_compare_products_tool(comparison_service: ProductComparisonService) 
             expected_criteria=runtime.state.get("comparison_criteria", []),
             deadline=runtime.context.deadline,
         )
-        return _comparison_search_command(
-            runtime.tool_call_id, COMPARE_PRODUCTS_TOOL_NAME, compared
+        result = await answer_writer.write(
+            question=runtime.state["question"],
+            objective=runtime.state["objective"],
+            comparison=compared,
+            deadline=runtime.context.deadline,
+        )
+        return Command(
+            update={
+                "comparison_evidence": compared,
+                "domain_result": result,
+                "messages": [
+                    ToolMessage(
+                        content=json.dumps(
+                            {"execution_status": result["execution_status"]}, ensure_ascii=False
+                        ),
+                        name=COMPARE_PRODUCTS_TOOL_NAME,
+                        tool_call_id=runtime.tool_call_id,
+                    )
+                ],
+            }
         )
 
     return compare_products
-
-
-def _comparison_search_command(
-    tool_call_id: str,
-    tool_name: str,
-    compared: ComparisonEvidenceResult,
-) -> Command:
-    """비교 검색의 원문·상태를 같은 요청 state와 Tool 메시지로 전달한다."""
-
-    payload = compared.model_dump(
-        mode="json",
-        exclude={"products": {"__all__": {"attempts": {"__all__": {"retrieved_chunks"}}}}},
-    )
-    payload["next_step"] = _comparison_instructions()["submit"]
-    update: dict[str, Any] = {
-        "comparison_evidence": compared,
-        "messages": [
-            ToolMessage(
-                content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-                name=tool_name,
-                tool_call_id=tool_call_id,
-            )
-        ],
-    }
-    if compared.execution_status != "completed":
-        update["domain_result"] = failed_domain_result(
-            "product",
-            compared.error or "상품 비교 검색을 완료하지 못했습니다.",
-            execution_status=compared.execution_status,
-        )
-    elif compared.retrieval_coverage == "no_products":
-        update["domain_result"] = unresolved_comparison_result(
-            targets=compared.targets,
-            criteria=compared.criteria,
-            catalog_version=compared.catalog_version,
-            limitation="제공 문서에서 비교 대상의 관련 근거를 확인하지 못했습니다.",
-            limitations=compared.limitations,
-        )
-    return Command(update=update)
 
 
 def _search_call_count(state: Mapping[str, Any]) -> int:
@@ -681,13 +599,10 @@ def _allowed_product_tools(
     """현재 Product Agent 상태에서 실행 가능한 다음 Tool 이름을 반환한다."""
 
     search_call_count = _search_call_count(state)
+    if state.get("domain_result") is not None:
+        return ()
     if state.get("comparison_targets"):
-        compared = state.get("comparison_evidence")
-        if compared is None:
-            return (COMPARE_PRODUCTS_TOOL_NAME,)
-        if search_call_count >= max_search_calls:
-            return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
-        return (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
+        return (COMPARE_PRODUCTS_TOOL_NAME,) if state.get("comparison_evidence") is None else ()
     if state.get("product_catalog_result") is not None:
         return (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
     if not state.get("product_candidate_codes"):
@@ -741,11 +656,7 @@ def _product_tool_call_is_allowed(
                 and call["args"].get("product_codes") == state.get("product_candidate_codes")
                 and call["args"].get("criteria") == state.get("comparison_criteria")
             )
-        if call["name"] == SEARCH_DOCUMENTS_TOOL_NAME:
-            return call["args"].get("product_code") in state.get("product_candidate_codes", [])
-        return call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and bool(
-            state.get("comparison_evidence")
-        )
+        return False
     if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and _is_initial_not_applicable_submit_call(
         call, state
     ):
@@ -804,9 +715,7 @@ def _product_next_tool_instruction(
 
     search_call_count = _search_call_count(state)
     if state.get("comparison_targets"):
-        if state.get("comparison_evidence") is None:
-            return _comparison_instructions()["search"]
-        return _comparison_instructions()["submit"]
+        return _comparison_instructions()["search"]
     if state.get("product_catalog_result") is not None:
         return "검증된 상품 개수·목록을 determined로 최종 결과 제출 Tool에 제출하세요."
     if not state.get("product_candidate_codes"):
@@ -886,41 +795,10 @@ def _create_product_result_tool() -> Any:
             Field(description="결론에 실제 사용한 SearchResult 청크 UUID 목록"),
         ],
         runtime: ToolRuntime[ExecutionContext, ProductAgentState],
-        comparison_cells: Annotated[
-            list[ComparisonCell] | None,
-            Field(description="비교 요청에만 사용. 모든 target_id × criterion 셀과 상품별 근거"),
-        ] = None,
     ) -> Command | str:
         tool_call_id = runtime.tool_call_id
         if tool_call_id is None:
             raise ValueError("최종 Product Agent 결과 제출 Tool 호출 ID가 없습니다.")
-        if runtime.state.get("comparison_targets"):
-            try:
-                result = build_comparison_domain_result(
-                    state=runtime.state,
-                    status=status,
-                    conclusion=conclusion,
-                    missing_conditions=missing_conditions,
-                    warnings=warnings,
-                    cells=comparison_cells,
-                    evidence_chunk_ids=evidence_chunk_ids,
-                )
-            except (KeyError, TypeError, ValueError, ValidationError) as error:
-                return json.dumps(
-                    {"error": f"상품 비교 제출 검증 실패: {error}"}, ensure_ascii=False
-                )
-            return Command(
-                update={
-                    "domain_result": result,
-                    "messages": [
-                        ToolMessage(
-                            content=json.dumps({"status": "accepted"}),
-                            tool_call_id=tool_call_id,
-                            name=SUBMIT_DOMAIN_RESULT_TOOL_NAME,
-                        )
-                    ],
-                }
-            )
         if status == "not_applicable":
             return Command(
                 update={

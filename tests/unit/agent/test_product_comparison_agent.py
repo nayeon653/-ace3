@@ -1,15 +1,13 @@
-"""실제 Product 그래프에서 복수 식별·검색·비교 제출과 실패 복구를 검증한다."""
+"""실제 Product 그래프에서 비교 Tool의 답변 소유권과 별도 모델 입력을 검증한다."""
 
 import asyncio
-import json
 from collections.abc import Sequence
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, cast
 from uuid import UUID
 
 import pytest
-from langchain.messages import AIMessage, ToolMessage
+from langchain.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import BaseMessage
@@ -150,71 +148,46 @@ def _start_calls(*, criteria: list[str] | None = None) -> list[AIMessage]:
     ]
 
 
-def _cells(
-    *, failed_index: int | None = None, criteria: list[str] | None = None
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "target_id": f"target_{index + 1}",
-            "criterion": criterion,
-            "status": "not_verified" if index == failed_index else "supported",
-            "finding": (
-                "검색 실패로 이 상품의 해당 항목을 확인하지 못했습니다."
-                if index == failed_index
-                else {
-                    "investment_strategy": "국공채에 투자합니다.",
-                    "risk": "금리 변동 위험이 있습니다.",
-                    "capital_protection": "원금이 보장되지 않습니다.",
-                }[criterion]
-            ),
-            "evidence_refs": (
-                []
-                if index == failed_index
-                else [{"product_code": code, "chunk_id": _chunk(index).chunk_id}]
-            ),
-            "limitations": ["해당 상품의 문서 검색 실패"] if index == failed_index else [],
-        }
-        for index, code in enumerate(_CODES)
-        for criterion in (_CRITERIA if criteria is None else criteria)
-    ]
+_ANSWER = "세 상품 모두 금리 변동 위험이 있고 원금은 보장되지 않습니다. [근거 1]"
 
 
-def _submit(cells: list[dict[str, Any]], *, call_id: str = "submit") -> AIMessage:
+def _answer_call(
+    *, answer: str = _ANSWER, status: str = "determined", failed_index: int | None = None
+) -> AIMessage:
     return _call(
-        "submit_domain_result",
+        "submit_comparison_answer",
         {
-            "status": "determined",
-            "conclusion": "확인된 상품에는 금리 변동 위험과 원금 손실 가능성이 있습니다.",
+            "answer": answer,
+            "status": status,
             "missing_conditions": [],
             "warnings": [],
-            "evidence_chunk_ids": [],
-            "comparison_cells": cells,
+            "evidence_chunk_ids": [
+                _chunk(index).chunk_id for index in range(3) if index != failed_index
+            ],
         },
-        call_id,
+        "comparison-answer",
     )
-
-
-def _tool_results(model: ComparisonFakeModel, name: str) -> list[dict[str, Any]]:
-    unique_messages = {
-        message.tool_call_id: message
-        for messages in model.received_messages
-        for message in messages
-        if isinstance(message, ToolMessage) and message.name == name
-    }
-    return [json.loads(str(message.content)) for message in unique_messages.values()]
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("criteria", [_CRITERIA, ["investment_strategy", *_CRITERIA]])
-async def test_product_graph_compares_three_products_and_keeps_only_cited_evidence(
+async def test_product_graph_finishes_with_tool_written_answer_and_cited_evidence(
     criteria: list[str],
 ) -> None:
-    cells = _cells(criteria=criteria)
-    model = ComparisonFakeModel(responses=[*_start_calls(criteria=criteria), _submit(cells)])
+    model = ComparisonFakeModel(
+        responses=[
+            *_start_calls(criteria=criteria),
+            AIMessage(content="이 외부 모델의 재작성은 실행되면 안 됩니다."),
+        ]
+    )
+    writer = ComparisonFakeModel(responses=[_answer_call()])
     planner = _planner()
     search = _search_results()
     agent = create_product_agent(
-        model=model, catalog_planner_model=planner, search_service=cast(SearchRunner, search)
+        model=model,
+        catalog_planner_model=planner,
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
     )
 
     result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
@@ -222,31 +195,60 @@ async def test_product_graph_compares_three_products_and_keeps_only_cited_eviden
     validate_domain_result(result)
     assert result["execution_status"] == "completed"
     assert result["decision"]["status"] == "determined"
-    comparison = result["comparison_result"]
-    assert comparison["coverage"] == "complete"
-    assert comparison["criteria"] == criteria
-    assert [target["product_code"] for target in comparison["targets"]] == _CODES
-    assert comparison["cells"] == cells
-    assert len(comparison["cells"]) == 3 * len(criteria)
+    assert result["decision"]["conclusion"] == _ANSWER
+    assert result["comparison_answer"] == _ANSWER
+    assert "comparison_result" not in result
     assert [chunk["chunk_id"] for chunk in result["evidence"]] == [
         _chunk(index).chunk_id for index in range(3)
     ]
     assert len(planner.received_messages) == 1
-    assert len(model.received_messages) == 3
-    assert "compare_products" in {name for names in model.bound_tool_names for name in names}
+    assert len(model.received_messages) == 2
+    assert len(writer.received_messages) == 1
+    assert writer.bound_tool_names == [["submit_comparison_answer"]]
     assert {request.source_file_name for request, _, _ in search.calls} == set(search.results)
     assert len(search.calls) == 3
     assert all(permission == Permission.PRODUCT for _, permission, _ in search.calls)
     assert len({deadline for _, _, deadline in search.calls}) == 1
-    collected = _tool_results(model, "compare_products")[0]
-    assert collected["retrieval_coverage"] == "all_products"
-    assert len(collected["products"]) == 3
-    assert all(
-        "retrieved_chunks" not in attempt
-        for product in collected["products"]
-        for attempt in product["attempts"]
+    assert all(not request.expand_neighbors for request, _, _ in search.calls)
+
+    writer_messages = writer.received_messages[0]
+    assert [type(message) for message in writer_messages] == [SystemMessage, HumanMessage]
+    writer_input = str(writer_messages[1].content)
+    assert _QUESTION in writer_input
+    assert "상품별 위험과 원금보장 비교" in writer_input
+    for code in _CODES:
+        assert code in writer_input
+    for criterion in criteria:
+        assert criterion in writer_input
+    for index in range(3):
+        assert writer_input.count(_chunk(index).content) == 1
+        assert writer_input.count(_chunk(index, unused=True).chunk_id) >= 1
+    assert not any(
+        isinstance(message, ToolMessage) and message.name == "compare_products"
+        for messages in model.received_messages
+        for message in messages
     )
-    assert "submit_domain_result" in collected["next_step"]
+
+
+@pytest.mark.anyio
+async def test_product_graph_same_model_fallback_still_starts_fresh_comparison_context() -> None:
+    model = ComparisonFakeModel(responses=[*_start_calls(), _answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model, catalog_planner_model=_planner(), search_service=cast(SearchRunner, search)
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
+
+    assert result["execution_status"] == "completed"
+    assert result["comparison_answer"] == _ANSWER
+    assert len(model.received_messages) == 3
+    assert any(isinstance(message, ToolMessage) for message in model.received_messages[1])
+    assert [type(message) for message in model.received_messages[2]] == [
+        SystemMessage,
+        HumanMessage,
+    ]
+    assert model.bound_tool_names.count(["submit_comparison_answer"]) == 1
 
 
 @pytest.mark.anyio
@@ -337,69 +339,60 @@ async def test_single_product_lookup_still_omits_comparison_criteria() -> None:
 
 
 @pytest.mark.anyio
-async def test_product_graph_partial_search_failure_forces_conditional_result() -> None:
-    model = ComparisonFakeModel(responses=[*_start_calls(), _submit(_cells(failed_index=1))])
+async def test_partial_search_preserves_writer_answer_without_cell_or_status_gate() -> None:
+    model = ComparisonFakeModel(responses=_start_calls())
+    writer = ComparisonFakeModel(responses=[_answer_call(failed_index=1)])
     search = _search_results(failed_index=1)
     agent = create_product_agent(
-        model=model, catalog_planner_model=_planner(), search_service=cast(SearchRunner, search)
+        model=model,
+        catalog_planner_model=_planner(),
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
     )
 
     result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
 
     validate_domain_result(result)
     assert result["execution_status"] == "completed"
-    assert result["decision"]["status"] == "conditional"
-    assert result["comparison_result"]["coverage"] == "partial"
-    assert len(result["comparison_result"]["targets"]) == 3
-    assert len(result["comparison_result"]["cells"]) == 6
+    assert result["decision"]["status"] == "determined"
+    assert result["comparison_answer"] == _ANSWER
+    assert "comparison_result" not in result
     assert {chunk["chunk_id"] for chunk in result["evidence"]} == {
         _chunk(0).chunk_id,
         _chunk(2).chunk_id,
     }
     assert any("검색 서비스 오류" in warning for warning in result["warnings"])
-    assert result["decision"]["missing_conditions"]
-    collected = _tool_results(model, "compare_products")[0]
-    assert collected["execution_status"] == "completed"
-    assert collected["retrieval_coverage"] == "some_products"
-    assert collected["products"][1]["attempts"][0]["execution_status"] == "failed"
-    assert collected["products"][1]["evidence"] == []
+    assert len(model.received_messages) == 2
+    assert len(writer.received_messages) == 1
+    assert "검색 서비스 오류" in str(writer.received_messages[0][1].content)
+    assert len(search.calls) == 3
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("wrong_attribution", ["target_product", "chunk_product"])
-async def test_product_graph_rejects_cross_product_reference_then_accepts_corrected_submission(
-    wrong_attribution: str,
-) -> None:
-    invalid_cells = deepcopy(_cells())
-    invalid_cells[0]["evidence_refs"] = [
-        {
-            "product_code": _CODES[1] if wrong_attribution == "target_product" else _CODES[0],
-            "chunk_id": _chunk(1).chunk_id,
-        }
-    ]
+async def test_product_graph_invalid_writer_output_finishes_without_outer_rewrite_or_retry() -> (
+    None
+):
     model = ComparisonFakeModel(
-        responses=[
-            *_start_calls(),
-            _submit(invalid_cells, call_id="wrong-submit"),
-            _submit(_cells(), call_id="correct-submit"),
-        ]
+        responses=[*_start_calls(), AIMessage(content="외부 Product가 다시 쓴 답변")]
     )
+    writer = ComparisonFakeModel(responses=[AIMessage(content="제출 도구 없는 응답")])
     search = _search_results()
     agent = create_product_agent(
-        model=model, catalog_planner_model=_planner(), search_service=cast(SearchRunner, search)
+        model=model,
+        catalog_planner_model=_planner(),
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
     )
 
     result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
 
     validate_domain_result(result)
-    assert result["execution_status"] == "completed"
-    assert result["comparison_result"]["coverage"] == "complete"
-    assert result["comparison_result"]["cells"] == _cells()
-    assert len(model.received_messages) == 4
+    assert result["execution_status"] == "failed"
+    assert result["evidence"] == []
+    assert "comparison_answer" not in result
+    assert len(model.received_messages) == 2
+    assert len(writer.received_messages) == 1
     assert len(search.calls) == 3
-    errors = _tool_results(model, "submit_domain_result")
-    assert len(errors) == 1
-    assert "상품 비교 제출 검증 실패" in errors[0]["error"]
 
 
 @pytest.mark.anyio
@@ -453,69 +446,20 @@ async def test_product_graph_preserves_all_unresolved_targets_without_search(
 
 
 @pytest.mark.anyio
-async def test_product_graph_empty_search_stops_unverified_recommendation() -> None:
+@pytest.mark.parametrize("failed_index", [None, 1])
+async def test_empty_comparison_evidence_finishes_without_answer_model(
+    failed_index: int | None,
+) -> None:
     model = ComparisonFakeModel(
-        responses=[*_start_calls(), AIMessage(content="안정적이므로 단기 상품을 추천합니다.")]
+        responses=[*_start_calls(), AIMessage(content="단기 상품을 추천합니다.")]
     )
-    search = _search_results(empty=True)
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results(empty=True, failed_index=failed_index)
     agent = create_product_agent(
-        model=model, catalog_planner_model=_planner(), search_service=cast(SearchRunner, search)
-    )
-
-    result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
-
-    validate_domain_result(result)
-    assert result["decision"]["status"] == "undetermined"
-    assert result["comparison_result"]["coverage"] == "none"
-    assert result["evidence"] == []
-    assert "추천" not in result["decision"]["conclusion"]
-    assert len(model.received_messages) == 2
-    assert len(search.calls) == 3
-
-
-@pytest.mark.anyio
-async def test_product_graph_forwards_neighbor_expansion_in_comparison_supplement() -> None:
-    model = ComparisonFakeModel(
-        responses=[
-            *_start_calls(),
-            _call(
-                "search_documents",
-                {
-                    "product_code": _CODES[0],
-                    "objective": "위험등급 앞뒤 문맥 확인",
-                    "expand_neighbors": True,
-                },
-                "supplement",
-            ),
-            _submit(_cells()),
-        ]
-    )
-    search = _search_results()
-    agent = create_product_agent(
-        model=model, catalog_planner_model=_planner(), search_service=cast(SearchRunner, search)
-    )
-
-    result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
-
-    validate_domain_result(result)
-    assert result["comparison_result"]["coverage"] == "complete"
-    assert len(search.calls) == 4
-    assert all(not request.expand_neighbors for request, _, _ in search.calls[:3])
-    request, permission, deadline = search.calls[-1]
-    assert request.expand_neighbors is True
-    assert request.source_file_name == load_product_catalog().resolve_source_file_name(_CODES[0])
-    assert permission is Permission.PRODUCT
-    assert deadline == search.calls[0][2]
-
-
-@pytest.mark.anyio
-async def test_product_graph_empty_success_and_search_failure_preserve_failure_limitations() -> (
-    None
-):
-    model = ComparisonFakeModel(responses=_start_calls())
-    search = _search_results(empty=True, failed_index=1)
-    agent = create_product_agent(
-        model=model, catalog_planner_model=_planner(), search_service=cast(SearchRunner, search)
+        model=model,
+        catalog_planner_model=_planner(),
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
     )
 
     result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
@@ -523,12 +467,65 @@ async def test_product_graph_empty_success_and_search_failure_preserve_failure_l
     validate_domain_result(result)
     assert result["execution_status"] == "completed"
     assert result["decision"]["status"] == "undetermined"
-    assert result["comparison_result"]["coverage"] == "none"
+    assert result["comparison_answer"] == result["decision"]["conclusion"]
+    assert "comparison_result" not in result
     assert result["evidence"] == []
-    official_name = load_product_catalog().select_products([_CODES[1]])[0].official_name
-    expected_failure = f"{official_name}: 이 상품의 검색 서비스 오류"
-    assert expected_failure in result["comparison_result"]["limitations"]
-    assert expected_failure in result["warnings"]
-    assert expected_failure in result["decision"]["missing_conditions"]
-    assert len(search.calls) == 3
+    assert "추천" not in result["decision"]["conclusion"]
+    assert result["decision"]["missing_conditions"]
     assert len(model.received_messages) == 2
+    assert writer.received_messages == []
+    assert len(search.calls) == 3
+    if failed_index is not None:
+        assert any("검색 서비스 오류" in warning for warning in result["warnings"])
+
+
+@pytest.mark.anyio
+async def test_all_comparison_searches_failed_do_not_invoke_answer_model() -> None:
+    model = ComparisonFakeModel(responses=_start_calls())
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    search.results = {
+        source: SearchResult(execution_status="failed", error="검색 서비스 오류")
+        for source in search.results
+    }
+    agent = create_product_agent(
+        model=model,
+        catalog_planner_model=_planner(),
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "failed"
+    assert result["evidence"] == []
+    assert "comparison_answer" not in result
+    assert len(model.received_messages) == 2
+    assert writer.received_messages == []
+    assert len(search.calls) == 3
+
+
+@pytest.mark.anyio
+async def test_comparison_parent_deadline_keeps_answer_reserve_and_skips_expired_searches() -> None:
+    model = ComparisonFakeModel(responses=_start_calls())
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model,
+        catalog_planner_model=_planner(),
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+    )
+    deadline = asyncio.get_running_loop().time() + 10
+
+    result = await agent(
+        {"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"}, deadline=deadline
+    )
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "timeout"
+    assert result["evidence"] == []
+    assert len(model.received_messages) == 2
+    assert writer.received_messages == []
+    assert search.calls == []

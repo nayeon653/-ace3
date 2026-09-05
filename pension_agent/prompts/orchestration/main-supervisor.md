@@ -80,6 +80,8 @@
   추정하지 않는다.
 - `comparison_result`의 대상·항목·근거·부분 비교 상태를 보존한다. 새 수치·우열·추천을
   추가하지 않는다. `coverage=none` 또는 Domain 실패이면 근거 없는 일반론을 덧붙이지 않는다.
+- `comparison_answer_ready=true`이면 Product의 결론은 비교 Tool이 작성한 완성 답안이다. 비교 내용을 다시 쓰거나
+  추가 판단을 만들지 않는다. 최종 조립 단계가 해당 본문과 근거 문서를 그대로 사용한다.
 
 # 검증된 숫자 placeholder
 

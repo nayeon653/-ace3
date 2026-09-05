@@ -1,4 +1,4 @@
-"""비교 전용 Tool 선택·과거 schema 보존과 실제 모델 바인딩을 검증한다."""
+"""비교 위임 전의 Tool 선택과 위임 완료 후 그래프 종료를 검증한다."""
 
 from collections.abc import Sequence
 from types import SimpleNamespace
@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 from langchain.agents.middleware import ModelRequest, ModelResponse
-from langchain.messages import AIMessage, HumanMessage, ToolMessage
+from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.runnables import Runnable
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -17,14 +17,15 @@ from pension_agent.agent.contracts import Permission
 from pension_agent.agent.product import create_product_agent
 from pension_agent.agent.product.catalog_query import PRODUCT_CATALOG_QUERY_TOOL_NAME
 from pension_agent.agent.product.react import (
+    CompleteProductResult,
     EnforceProductToolSequence,
     ProductComparisonToolAvailabilityMiddleware,
+    _allowed_product_tools,
     _create_product_result_tool,
     _product_model_tool_name,
 )
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult
 from pension_agent.core import DocumentType
-from pension_agent.retrieval import load_product_catalog
 
 _LOOKUP = "lookup_product_codes"
 _COMPARE = "compare_products"
@@ -123,108 +124,42 @@ def test_comparison_rejects_uncontracted_search_parameters() -> None:
     assert update["messages"][0].tool_calls == []
 
 
-@pytest.mark.anyio
-async def test_comparison_after_search_uses_auto_and_keeps_history_schemas() -> None:
-    _, received = await _captured(
-        {**_STATE, "comparison_evidence": object()}, history=_history(_LOOKUP, _COMPARE)
-    )
-
-    assert received.tool_choice is None
-    assert _names(received) == [_LOOKUP, _COMPARE, _SEARCH, _SUBMIT]
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    "target_count, criteria",
-    [
-        (2, ["risk"]),
-        (3, ["risk", "fees"]),
-        (5, ["investment_strategy", "risk", "capital_protection"]),
-    ],
-)
-async def test_comparison_submit_schema_requires_every_cell_without_mutating_executor(
-    target_count: int, criteria: list[str]
-) -> None:
-    original, received = await _captured(
-        {
-            "comparison_targets": [{"target_id": str(i)} for i in range(target_count)],
-            "comparison_criteria": criteria,
-            "comparison_evidence": object(),
-        },
-        history=_history(_LOOKUP, _COMPARE),
-    )
-    source = next(tool for tool in original.tools if _product_model_tool_name(tool) == _SUBMIT)
-    source_schema = convert_to_openai_tool(source)["function"]["parameters"]
-    exposed = next(tool for tool in received.tools if _product_model_tool_name(tool) == _SUBMIT)
-    schema = convert_to_openai_tool(exposed)["function"]["parameters"]
-    assert "comparison_cells" not in source_schema["required"]
-    assert "comparison_cells" in schema["required"]
-    cells = schema["properties"]["comparison_cells"]
-    assert cells["type"] == "array"
-    assert "anyOf" not in cells and "default" not in cells
-    assert cells["minItems"] == cells["maxItems"] == target_count * len(criteria)
-    assert schema["properties"]["evidence_chunk_ids"]["maxItems"] == 0
-    assert "maxItems" not in source_schema["properties"]["evidence_chunk_ids"]
-
-
-@pytest.mark.anyio
-async def test_comparison_keeps_search_history_but_enforces_search_limit() -> None:
-    history = _history(_LOOKUP, _COMPARE, _SEARCH, _SEARCH)
-    state = {**_STATE, "comparison_evidence": object(), "messages": history}
-    _, received = await _captured(state, history=history)
-
-    assert received.tool_choice == _SUBMIT
-    assert _names(received) == [_LOOKUP, _COMPARE, _SEARCH, _SUBMIT]
-    invalid_search = _call(_SEARCH, {"product_code": "KR5153420063"})
+@pytest.mark.parametrize("name", [_LOOKUP, _SEARCH, _SUBMIT, _CALCULATE])
+def test_comparison_targets_only_allow_delegating_to_compare_tool(name: str) -> None:
+    state = {
+        **_STATE,
+        "product_candidate_codes": ["KR5153420063", "KR5153420105"],
+        "messages": [*_history(_LOOKUP), _call(name)],
+    }
     update = EnforceProductToolSequence(
         lookup_tool_name=_LOOKUP, max_search_calls=2, calculation_tool_names=(_CALCULATE,)
-    ).after_model({**state, "messages": [*history, invalid_search]}, runtime=None)
+    ).after_model(state, runtime=None)
+
     assert update is not None
     assert update["messages"][0].tool_calls == []
 
 
-@pytest.mark.anyio
-async def test_comparison_after_free_text_forces_named_submit_and_keeps_history() -> None:
-    history = [
-        *_history(_LOOKUP, _COMPARE),
-        AIMessage(content="제출 도구 없이 작성한 자유 형식 답변"),
-        HumanMessage(content="최종 제출 도구로 제출하세요."),
-    ]
-    _, received = await _captured({**_STATE, "comparison_evidence": object()}, history=history)
+def test_completed_comparison_has_no_executable_tools_and_skips_the_model() -> None:
+    state = {
+        **_STATE,
+        "domain_result": {"comparison_answer": "비교 Tool에서 작성한 답변"},
+        "messages": _history(_LOOKUP, _COMPARE),
+    }
 
-    assert received.tool_choice == _SUBMIT
-    assert _names(received) == [_LOOKUP, _COMPARE, _SEARCH, _SUBMIT]
-
-
-@pytest.mark.anyio
-async def test_comparison_rejected_historical_tool_call_forces_named_submit() -> None:
-    state = {**_STATE, "comparison_evidence": object()}
-    history = _history(_LOOKUP, _COMPARE)
-    repeated_lookup = _call(_LOOKUP)
-    update = EnforceProductToolSequence(
-        lookup_tool_name=_LOOKUP, max_search_calls=2, calculation_tool_names=(_CALCULATE,)
-    ).after_model({**state, "messages": [*history, repeated_lookup]}, runtime=None)
-    assert update is not None
-    _, received = await _captured(
+    assert not _allowed_product_tools(
         state,
-        history=[
-            *history,
-            *update["messages"],
-            HumanMessage(content="허용된 제출 도구를 사용하세요."),
-        ],
+        lookup_tool_name=_LOOKUP,
+        max_search_calls=2,
+        calculation_tool_names=(_CALCULATE,),
     )
+    assert CompleteProductResult().before_model(state, runtime=None) == {"jump_to": "end"}
 
-    assert received.tool_choice == _SUBMIT
 
+def test_product_submit_schema_does_not_ask_for_comparison_cells() -> None:
+    schema = convert_to_openai_tool(_create_product_result_tool())["function"]["parameters"]
 
-@pytest.mark.anyio
-async def test_comparison_preserves_historical_tool_schema_from_ai_message_alone() -> None:
-    _, received = await _captured(
-        {**_STATE, "comparison_evidence": object()},
-        history=[_call(_LOOKUP), _call(_COMPARE), _call(_CALCULATE)],
-    )
-
-    assert _names(received) == _ALL_TOOLS
+    assert "comparison_cells" not in schema["properties"]
+    assert "evidence_chunk_ids" in schema["properties"]
 
 
 @pytest.mark.anyio
@@ -304,43 +239,32 @@ class ScopedSearch:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("free_response", [False, True])
-async def test_product_graph_uses_supported_choices_and_recovers_free_text(
-    free_response: bool,
-) -> None:
+async def test_product_graph_binds_comparison_once_and_writer_owns_the_answer_schema() -> None:
     codes = ["KR5153420063", "KR5153420105"]
     targets = [
         {"mention_parts": ["솔로몬", duration], "resolution_status": "single", "product_code": code}
         for duration, code in zip(["단기", "장기"], codes, strict=True)
     ]
-    cells = [
-        {
-            "target_id": f"target_{index}",
-            "criterion": "risk",
-            "status": "supported",
-            "finding": "금리 변동에 따른 손실 가능성이 있습니다.",
-            "evidence_refs": [{"product_code": code, "chunk_id": str(UUID(int=index))}],
-            "limitations": [],
-        }
-        for index, code in enumerate(codes, start=1)
-    ]
     model = BindingRecorderModel(
         responses=[
             _call(_LOOKUP, {"comparison_criteria": ["risk"]}, call_id="lookup"),
             _call(_COMPARE, {"product_codes": codes, "criteria": ["risk"]}, call_id="compare"),
-            *([AIMessage(content="두 상품에는 금리 위험이 있습니다.")] if free_response else []),
+            AIMessage(content="비교 Tool 실행 뒤 Product 모델 호출은 없어야 합니다."),
+        ]
+    )
+    writer = BindingRecorderModel(
+        responses=[
             _call(
-                _SUBMIT,
+                "submit_comparison_answer",
                 {
                     "status": "determined",
-                    "conclusion": "두 상품에 금리 변동에 따른 손실 가능성이 있습니다.",
+                    "answer": "두 상품에 금리 변동에 따른 손실 가능성이 있습니다.",
                     "missing_conditions": [],
                     "warnings": [],
-                    "evidence_chunk_ids": [],
-                    "comparison_cells": cells,
+                    "evidence_chunk_ids": [str(UUID(int=index)) for index in (1, 2)],
                 },
-                call_id="submit",
-            ),
+                call_id="comparison-answer",
+            )
         ]
     )
     planner = BindingRecorderModel(
@@ -352,7 +276,10 @@ async def test_product_graph_uses_supported_choices_and_recovers_free_text(
         ]
     )
     agent = create_product_agent(
-        model=model, catalog_planner_model=planner, search_service=ScopedSearch()
+        model=model,
+        catalog_planner_model=planner,
+        comparison_answer_model=writer,
+        search_service=ScopedSearch(),
     )
 
     result = await agent(
@@ -360,14 +287,20 @@ async def test_product_graph_uses_supported_choices_and_recovers_free_text(
     )
 
     assert result["execution_status"] == "completed"
-    assert result["comparison_result"]["coverage"] == "complete"
-    assert result["comparison_result"]["catalog_version"] == load_product_catalog().version
+    assert result["comparison_answer"] == "두 상품에 금리 변동에 따른 손실 가능성이 있습니다."
     assert model.bindings[0][1] is None
-    assert model.bindings[1:] == [
-        ([_LOOKUP, _COMPARE], _COMPARE),
-        ([_LOOKUP, _COMPARE, _SEARCH, _SUBMIT], None),
-        *([([_LOOKUP, _COMPARE, _SEARCH, _SUBMIT], _SUBMIT)] if free_response else []),
-    ]
+    assert model.bindings[1:] == [([_LOOKUP, _COMPARE], _COMPARE)]
+    assert len(writer.bindings) == 1
+    assert writer.bindings[0][0] == ["submit_comparison_answer"]
+    writer_schema = writer.bound_tool_schemas[0]["submit_comparison_answer"]
+    assert set(writer_schema["properties"]) == {
+        "answer",
+        "status",
+        "missing_conditions",
+        "warnings",
+        "evidence_chunk_ids",
+    }
+    assert "comparison_cells" not in model.bound_tool_schemas[0][_SUBMIT]["properties"]
     lookup_schema = model.bound_tool_schemas[0][_LOOKUP]
     assert "comparison_criteria" not in lookup_schema.get("required", [])
     lookup_criteria = next(

@@ -310,12 +310,17 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
     class CatalogPlannerModel(ToolCallingFakeModel):
         bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
 
+    class ComparisonAnswerModel(ToolCallingFakeModel):
+        bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
+
+    answer_model = ComparisonAnswerModel(responses=[])
     react_model = ProductReactModel(responses=[])
     planner_model = CatalogPlannerModel(responses=[])
 
     create_product_agent(
         model=react_model,
         catalog_planner_model=planner_model,
+        comparison_answer_model=answer_model,
         search_service=cast(
             SearchRunner,
             FakeSearchService(SearchResult(execution_status="completed")),
@@ -325,10 +330,14 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
     assert planner_model.bindings == [
         ([PRODUCT_CATALOG_QUERY_TOOL_NAME], {"tool_choice": PRODUCT_CATALOG_QUERY_TOOL_NAME})
     ]
+    assert answer_model.bindings == [
+        (["submit_comparison_answer"], {"tool_choice": "submit_comparison_answer"})
+    ]
     assert all(
         set(names)
         == {
             "lookup_product_codes",
+            "compare_products",
             "search_documents",
             "calculate_fund_standard_price",
             "calculate_fund_reported_var_risk",
@@ -413,7 +422,8 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         chunk.chunk_id for chunk in search.result.retrieved_chunks
     }
     assert domain == "policy" or all(
-        set(names)
+        (domain == "product" and names == ["submit_comparison_answer"])
+        or set(names)
         == (
             {
                 "lookup_product_codes",

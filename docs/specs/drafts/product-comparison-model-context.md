@@ -1,8 +1,14 @@
 # Product 비교 작성 입력 재구성 초안
 
-- 상태: 리뷰용 제안, 런타임 미구현
+- 상태: 대체됨, 아래 내용은 당시 제안이며 해당 방식으로 구현하지 않음
 - 작성일: 2026-09-06
 - 상위 계약: [상품 비교 도구](../components/product-comparison.md), [Product Agent](../agents/product-agent.md)
+
+이 초안은 [비교 답변 소유권 결정](../../decisions/20260906-product-comparison-answer-ownership.md)으로
+대체했다. 현재 구현은 `compare_products` 내부의 독립 HCX 호출이 비교 답변을 완료한다.
+Product의 입력 middleware, 셀·snapshot 검증과 오류 후 재제출 순환은 채택하지 않았다.
+최신 동작은 [현재 비교 도구 스펙](../components/product-comparison.md)을 따른다.
+아래의 “현재”와 “변경 후”는 초안 작성 당시의 두 안을 가리키며 현재 런타임 설명이 아니다.
 
 ## 1. 목적과 1차 범위
 

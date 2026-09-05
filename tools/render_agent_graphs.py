@@ -159,12 +159,14 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
             f"    {product_node} --> catalog_lookup",
             f"    catalog_result --> {product_node}",
             "",
-            '    subgraph comparison["복수 상품 비교 · Python 근거 수집"]',
+            '    subgraph comparison["복수 상품 비교 · 검색과 답안 생성"]',
             '        compare_tool["compare_products"] --> product_searches["상품별 병렬 검색"]',
-            '        product_searches --> comparison_evidence["상품별 근거 · 실행 상태"]',
+            '        product_searches --> comparison_evidence["중복 제거한 원문 · 새 모델 입력"]',
+            '        comparison_evidence --> comparison_writer["HCX-007 비교 답안 작성"]',
+            '        comparison_writer --> comparison_answer["완성 답안 · 실제 인용 근거"]',
             "    end",
             f"    {product_node} --> compare_tool",
-            f"    comparison_evidence --> {product_node}",
+            f"    comparison_answer --> {product_node}",
             "    product_searches --> search_service",
         )
     )

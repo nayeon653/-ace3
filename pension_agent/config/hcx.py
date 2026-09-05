@@ -92,6 +92,15 @@ DEFAULT_DOMAIN_AGENT_HCX_CONFIG = ChatClovaXConfig(
     thinking_effort="none",
 )
 
+PRODUCT_COMPARISON_ANSWER_HCX_CONFIG = ChatClovaXConfig(
+    model="HCX-007",
+    max_tokens=4096,
+    temperature=0.1,
+    timeout_seconds=30.0,
+    max_retries=0,
+    thinking_effort="none",
+)
+
 BGE_M3_EMBEDDING_CONFIG = ClovaEmbeddingConfig(
     model="bge-m3",
     dimensions=1024,

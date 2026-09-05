@@ -12,7 +12,10 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import TypeAdapter, ValidationError
 
 from pension_agent.agent.calculation import format_calculation_summary
-from pension_agent.agent.comparison_formatting import format_comparison_result
+from pension_agent.agent.comparison_formatting import (
+    format_comparison_answer,
+    format_comparison_result,
+)
 from pension_agent.agent.contracts import (
     AgentAnswer,
     CatalogResult,
@@ -282,15 +285,19 @@ def _validate_supervisor_state(
 def _stabilize_verified_answer(
     answer: AgentAnswer, domain_results: list[DomainResult], question: str
 ) -> AgentAnswer:
-    """비교 또는 실행 실패가 포함된 답변을 검증된 도메인 결과로 조립한다."""
+    """완성된 비교 답안과 다른 도메인의 결과를 보존해 조립한다."""
 
     if any(
-        "comparison_result" in result or result["execution_status"] != "completed"
+        "comparison_result" in result
+        or "comparison_answer" in result
+        or result["execution_status"] != "completed"
         for result in domain_results
     ):
         parts: list[str] = []
         for result in domain_results:
-            if "comparison_result" in result:
+            if "comparison_answer" in result:
+                parts.append(format_comparison_answer(result))
+            elif "comparison_result" in result:
                 parts.append(format_comparison_result(result))
             elif "catalog_result" in result:
                 parts.append(_catalog_answer(result["catalog_result"]))

@@ -2,6 +2,28 @@
 
 from pension_agent.agent.contracts import ComparisonCriterion, DomainResult
 
+
+def format_comparison_answer(result: DomainResult) -> str:
+    """Tool이 작성한 본문에 실제 선택 문서와 반환된 조건·주의사항을 붙인다."""
+
+    parts = [result["comparison_answer"]]
+    if result["evidence"]:
+        parts.append(
+            "근거 문서:\n"
+            + "\n".join(
+                f"- {chunk['source_file_name']} — {chunk['title']}, {chunk['locator']}"
+                for chunk in result["evidence"]
+            )
+        )
+    for label, values in (
+        ("확인이 필요한 조건", result["decision"]["missing_conditions"]),
+        ("주의사항", result["warnings"]),
+    ):
+        if values:
+            parts.append(label + ":\n" + "\n".join(f"- {value}" for value in dict.fromkeys(values)))
+    return "\n\n".join(parts)
+
+
 _CRITERION_LABELS: dict[ComparisonCriterion, str] = {
     "investment_strategy": "투자전략",
     "risk": "위험",

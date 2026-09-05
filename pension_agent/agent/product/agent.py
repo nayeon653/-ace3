@@ -40,6 +40,7 @@ from pension_agent.agent.product.catalog_query import (
     UnresolvedProductQuery,
 )
 from pension_agent.agent.product.comparison import ProductComparisonService
+from pension_agent.agent.product.comparison_answer import HCXProductComparisonAnswerWriter
 from pension_agent.agent.product.comparison_submission import unresolved_comparison_result
 from pension_agent.agent.product.react import ProductAgentState, create_product_react_agent
 from pension_agent.agent.search import SearchRunner
@@ -74,6 +75,7 @@ def create_product_agent(
     *,
     model: BaseChatModel,
     catalog_planner_model: BaseChatModel | None = None,
+    comparison_answer_model: BaseChatModel | None = None,
     search_service: SearchRunner,
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
     model_concurrency: ModelConcurrencyMiddleware | None = None,
@@ -110,6 +112,10 @@ def create_product_agent(
         comparison_service=ProductComparisonService(
             search_service=search_service,
             catalog=selected_catalog,
+        ),
+        comparison_answer_writer=HCXProductComparisonAnswerWriter(
+            model=comparison_answer_model or model,
+            model_concurrency=model_concurrency,
         ),
     )
     return GuardedDomainRunner(
