@@ -428,3 +428,93 @@ def test_four_criteria_are_rejected_even_when_all_cells_have_valid_references() 
     assert len(comparison["cells"]) == 8
     with pytest.raises(ValueError, match="1~3"):
         validate_domain_result(result)
+
+
+def _numeric_comparison_domain() -> DomainResult:
+    result = comparison_domain()
+    finding = "가격이 10% 하락할 수 있습니다."
+    result["comparison_result"]["cells"][0]["finding"] = finding
+    result["evidence"][0]["content"] = finding
+    return result
+
+
+@pytest.mark.anyio
+async def test_mixed_comparison_preserves_numeric_cells_and_tax_canonical_statement() -> None:
+    from pension_agent.agent.orchestration import AnswerService
+
+    canonical = "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다."
+    tax: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "conditional",
+            "conclusion": "세액공제 한도는 999만원입니다.",
+            "missing_conditions": ["소득 구간 확인 필요"],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": ["세액공제 적용 조건 확인"],
+        "verified_numeric_statements": [
+            {
+                "source_type": "statutory_fact",
+                "source_id": "tax_credit_limit_combined",
+                "text": canonical,
+            }
+        ],
+    }
+
+    result = await AnswerService(ComparisonSupervisor([_numeric_comparison_domain(), tax])).run(
+        question_id="Q-comparison-canonical", question="솔로몬 단기·장기와 세액공제 한도"
+    )
+
+    answer = result.answer.answer
+    for expected in (
+        "| 상품 | 비교 항목 | 확인 내용 | 상태 | 근거 |",
+        "솔로몬 단기국공채",
+        "솔로몬 장기국공채",
+        "가격이 10% 하락할 수 있습니다.",
+        "fund-1.pdf",
+        "소득 구간 확인 필요",
+        "세액공제 적용 조건 확인",
+    ):
+        assert expected in answer
+    assert answer.count(canonical) == 1
+    assert "999만원" not in answer
+    assert "VERIFIED_NUMERIC" not in answer
+
+
+@pytest.mark.anyio
+async def test_mixed_comparison_keeps_numeric_cells_with_unverified_tax_calculation() -> None:
+    from pension_agent.agent.orchestration import AnswerService
+
+    tax: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "conditional",
+            "conclusion": "연금수령한도는 999만원입니다.",
+            "missing_conditions": ["연금수령연차 확인 필요"],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": ["검증된 계산 결과 없음"],
+    }
+
+    result = await AnswerService(ComparisonSupervisor([_numeric_comparison_domain(), tax])).run(
+        question_id="Q-comparison-unverified",
+        question="평가액 1천만원인 계좌의 수령한도와 솔로몬 단기·장기를 비교해주세요.",
+    )
+
+    answer = result.answer.answer
+    for expected in (
+        "| 상품 | 비교 항목 | 확인 내용 | 상태 | 근거 |",
+        "솔로몬 단기국공채",
+        "솔로몬 장기국공채",
+        "가격이 10% 하락할 수 있습니다.",
+        "fund-1.pdf",
+        "새로운 수치 결론을 제공할 수 없습니다",
+        "연금수령연차 확인 필요",
+        "검증된 계산 결과 없음",
+    ):
+        assert expected in answer
+    assert "999만원" not in answer

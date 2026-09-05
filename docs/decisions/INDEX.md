@@ -23,3 +23,4 @@
 | 2026-08-26 | architecture | accepted | [계산 기반을 Domain Agent와 분리된 공용 Python 컴포넌트로 둔다](20260826-104-domain-neutral-calculation-service.md) |
 | 2026-09-05 | architecture | accepted | [모든 생성 LLM 역할을 HCX-007 비추론 모드로 통일](20260905-all-generation-hcx-007.md) |
 | 2026-09-05 | architecture | accepted | [상품 비교의 검색 예산과 Product 출력 상한을 분리](20260905-product-comparison-execution-budget.md) |
+| 2026-09-06 | architecture | accepted | [상품 비교 항목을 필요한 최소 1~3개로 제한](20260906-product-comparison-minimal-criteria.md) |
