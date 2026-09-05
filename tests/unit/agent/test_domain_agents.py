@@ -417,6 +417,7 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         == (
             {
                 "lookup_product_codes",
+                "compare_products",
                 "search_documents",
                 "calculate_fund_standard_price",
                 "calculate_fund_reported_var_risk",
