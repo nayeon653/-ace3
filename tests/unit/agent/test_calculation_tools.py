@@ -1322,6 +1322,85 @@ def test_pension_tax_credit_accepts_account_qualified_isa_sources() -> None:
     assert retirement_result is not None
 
 
+def test_user_input_provenance_accepts_paraphrased_source_with_same_value_and_meaning() -> None:
+    result = validated_input_sources(
+        inputs={"account_valuation_krw": Decimal(100_000_000)},
+        input_sources={"account_valuation_krw": "연금계좌 평가액 1억원"},
+        state={"question": "연금계좌 평가액이 1억원이고 연금수령 3년차이면 한도는?"},
+    )
+
+    assert result == {
+        "account_valuation_krw": {
+            "origin": "question",
+            "text": "연금계좌 평가액이 1억원이고 연금수령 3년차이면 한도는?",
+            "chunk_id": None,
+        }
+    }
+
+
+def test_user_input_provenance_rejects_value_absent_from_question() -> None:
+    result = validated_input_sources(
+        inputs={"account_valuation_krw": Decimal(200_000_000)},
+        input_sources={"account_valuation_krw": "연금계좌 평가액 2억원"},
+        state={"question": "연금계좌 평가액이 1억원이면 한도는?"},
+    )
+
+    assert result is None
+
+
+def test_user_input_provenance_rejects_wrong_semantic_assignment() -> None:
+    result = validated_input_sources(
+        inputs={"requested_withdrawal_krw": Decimal(100_000_000)},
+        input_sources={"requested_withdrawal_krw": "요청 인출액 1억원"},
+        state={"question": "연금계좌 평가액이 1억원이면 한도는?"},
+        calculator_id="pension_withdrawal_tax_breakdown",
+    )
+
+    assert result is None
+
+
+def test_user_input_provenance_accepts_explicit_zero_but_not_omitted_or_null() -> None:
+    zero = validated_input_sources(
+        inputs={"pension_savings_net_contribution_krw": Decimal(0)},
+        input_sources={"pension_savings_net_contribution_krw": "연금저축 순납입액 0원"},
+        state={"question": "연금저축 순납입액은 0원입니다."},
+    )
+    omitted = validated_input_sources(
+        inputs={"pension_savings_net_contribution_krw": None},
+        input_sources={"pension_savings_net_contribution_krw": "연금저축 순납입액 미입력"},
+        state={"question": "연금저축 순납입액은 입력하지 않았습니다."},
+    )
+
+    assert zero is not None
+    assert omitted is None
+
+
+def test_document_provenance_still_requires_exact_evidence_text() -> None:
+    result = validated_input_sources(
+        inputs={"account_valuation_krw": Decimal(100_000_000)},
+        input_sources={"account_valuation_krw": "연금계좌 평가액 1억원"},
+        state={
+            "question": "연금수령한도를 계산해 주세요.",
+            "search_result": SearchResult(
+                execution_status="completed",
+                retrieved_chunks=[
+                    {
+                        "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+                        "source_file_name": "rules.pdf",
+                        "document_type": "pension_reference",
+                        "chunk_index": 0,
+                        "title": "계산 규칙",
+                        "locator": "1쪽",
+                        "content": "문서상 연금계좌 평가액은 1억원입니다.",
+                    }
+                ],
+            ),
+        },
+    )
+
+    assert result is None
+
+
 def test_pension_tax_credit_rejects_cross_phrase_token_reuse() -> None:
     source = "연금저축 ISA 만기자금 전환액 600만원, IRP 순납입액 400만원"
 

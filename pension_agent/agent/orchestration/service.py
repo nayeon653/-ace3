@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -159,7 +160,11 @@ class AnswerService:
                                 _stabilize_catalog_answer(
                                     _stabilize_calculation_answer(
                                         _stabilize_verified_numeric_answer(
-                                            answer,
+                                            _stabilize_unverified_calculation_answer(
+                                                answer,
+                                                state["domain_results"],
+                                                question,
+                                            ),
                                             state["domain_results"],
                                         ),
                                         state["domain_results"],
@@ -346,6 +351,79 @@ def _stabilize_calculation_answer(
         warning_text = "\n".join(f"- {warning}" for warning in unique_warnings)
         answer_parts.append(f"주의사항:\n{warning_text}")
     return AgentAnswer(answer="\n\n".join(answer_parts))
+
+
+def _stabilize_unverified_calculation_answer(
+    answer: AgentAnswer,
+    domain_results: list[DomainResult],
+    question: str,
+) -> AgentAnswer:
+    """계산 근거가 없는 파생 숫자가 Main 응답으로 빠져나가는 것을 막는다."""
+
+    if any(
+        result["calculations"] or result.get("verified_numeric_statements", [])
+        for result in domain_results
+    ):
+        return answer
+    answer_numbers = set(extract_numbers(answer.answer))
+    if not answer_numbers:
+        return answer
+    question_numbers = set(extract_numbers(question))
+    has_incomplete_result = any(
+        result["execution_status"] != "completed"
+        or result["decision"]["status"] in {"conditional", "undetermined"}
+        for result in domain_results
+    )
+    if not has_incomplete_result and answer_numbers <= question_numbers:
+        return answer
+    if not has_incomplete_result and not question_numbers:
+        return answer
+    if answer_numbers <= question_numbers:
+        return answer
+    return AgentAnswer(answer=_unverified_calculation_fallback(domain_results, question_numbers))
+
+
+def _unverified_calculation_fallback(
+    domain_results: list[DomainResult],
+    question_numbers: AbstractSet[object],
+) -> str:
+    """미검증 파생 숫자를 제외하고 상태·누락 조건·경고만 결정적으로 보존한다."""
+
+    conclusions: list[str] = []
+    conditions: list[str] = []
+    warnings: list[str] = []
+    for result in domain_results:
+        if "catalog_result" in result:
+            continue
+        warnings.extend(result["warnings"])
+        if result["execution_status"] != "completed":
+            conclusions.append(
+                f"{_domain_label(result['domain'])} 분석을 완료하지 못했습니다. {result['error']}"
+            )
+            continue
+        decision = result["decision"]
+        if decision["status"] == "not_applicable":
+            continue
+        conclusion_numbers = set(extract_numbers(decision["conclusion"]))
+        if conclusion_numbers - question_numbers:
+            conclusions.append(
+                f"{_domain_label(result['domain'])}: 검증된 계산 결과가 없어 "
+                "새로운 수치 결론을 제공할 수 없습니다."
+            )
+        else:
+            conclusions.append(decision["conclusion"])
+        if decision["missing_conditions"]:
+            condition_text = "\n".join(
+                f"- {condition}" for condition in decision["missing_conditions"]
+            )
+            conditions.append(f"{_domain_label(result['domain'])} 확인 조건:\n{condition_text}")
+    if not conclusions:
+        conclusions.append("검증된 계산 결과가 없어 새로운 수치 결론을 제공할 수 없습니다.")
+    answer_parts = [*conclusions, *conditions]
+    unique_warnings = list(dict.fromkeys(warnings))
+    if unique_warnings:
+        answer_parts.append("주의사항:\n" + "\n".join(f"- {item}" for item in unique_warnings))
+    return "\n\n".join(answer_parts)
 
 
 def _stabilize_verified_numeric_answer(
