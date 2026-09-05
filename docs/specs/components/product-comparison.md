@@ -268,8 +268,10 @@ Main → analyze_product
 Main용 Domain Tool 결과에는 기존 `decision`과 `comparison_answer_ready=true`를 전달한다.
 전체 근거는 state의 DomainResult에 보존하며 Main 모델 입력에는 넣지 않는다. 본문을 두
 필드에 반복하지 않으며 AnswerService는 원래 DomainResult의
-`comparison_answer` 본문을 그대로 보존하고 실제 선택된 근거의 출처를 덧붙인다. Product가 완료한
-답변을 다른 모델이 새로 쓰거나 비교표로 재구성하지 않는다. 조건과 경고도 최종 결과에
+`comparison_answer` 본문을 그대로 보존한다. 청크별 파일명·제목·페이지 목록을 답변 끝에
+자동 추가하지 않는다. 작성 모델은 본문의 관련 설명에 문서명·위치를 짧게 표시하도록
+지시받으며, 실제 선택 근거는 `retrieved_context`에 남긴다. Product가 완료한 답변을 다른
+모델이 새로 쓰거나 비교표로 재구성하지 않는다. 조건과 경고도 최종 결과에
 보존한다. 복합 질문에서는 다른 Domain 결과와 함께 결정론적으로 조립하고, 다른 Domain의
 기존 계산·숫자 처리 계약을 유지한다.
 

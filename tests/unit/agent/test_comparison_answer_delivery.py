@@ -84,11 +84,13 @@ async def test_finished_comparison_is_preserved_through_exact_five_field_api(
     }
     assert response["answer"].startswith(domain["comparison_answer"])
     assert "Main이 임의로" not in response["answer"]
-    assert "fund.pdf" in response["answer"]
+    assert "fund.pdf" not in response["answer"]
+    assert "근거 문서:" not in response["answer"]
     assert "공시 기준일 확인 필요" in response["answer"]
     assert "사용자가 선택한 투자기간 확인 필요" in response["answer"]
     assert "검증된 상품 비교" not in response["think_trace"]
     assert len(response["retrieved_context"]) == 1
+    assert response["retrieved_context"][0]["source_file_name"] == "fund.pdf"
 
 
 @pytest.mark.anyio
