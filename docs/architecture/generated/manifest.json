@@ -1,12 +1,12 @@
 {
   "artifacts": {
     "agent-system.png": {
-      "image_sha256": "ae32868f392ec55f836a1cc72a0c5901540d0c40da8f2ec20313018e4fe8ea4b",
-      "mermaid_sha256": "dbb54cba0e252960447b8d150c3c0aa01efa0120f0211da5b32c2c6c3a8c1b22"
+      "image_sha256": "70d53920ff55813cceede6978570ef13ce28038d739397193105b5c3dead822b",
+      "mermaid_sha256": "956894d6213c44f64571391a81fdd877f7b2e6d52029fb6682c6e5fb668f5bce"
     },
     "main-supervisor.png": {
-      "image_sha256": "66689de5b945aae5eec407f5fe16976fb8bcbf7638bd395bdbefbdb56ceb7e65",
-      "mermaid_sha256": "bfc8ee2d66e90ce8816070e5bfe8ab815c7c286c538c44a8922771bab5ebe4a2"
+      "image_sha256": "318ff94645225be2dade60c3a0ba1207f1afb96d166089fc8c829547862dc305",
+      "mermaid_sha256": "7159b8d204e6495584dbe8996d66f60d4ba6bf3a2d913444d31c575dde737aac"
     },
     "policy.png": {
       "image_sha256": "dc32b6beb0388c407aa771c487e88c418eb3b4d6f7ff1d182cb601dd960acd02",

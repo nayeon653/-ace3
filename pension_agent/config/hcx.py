@@ -56,6 +56,15 @@ MAIN_SUPERVISOR_HCX_CONFIG = ChatClovaXConfig(
     thinking_effort="none",
 )
 
+INJECTION_GUARD_HCX_CONFIG = ChatClovaXConfig(
+    model="HCX-007",
+    max_tokens=1024,
+    temperature=0.0,
+    timeout_seconds=10.0,
+    max_retries=0,
+    thinking_effort="none",
+)
+
 POLICY_AGENT_HCX_CONFIG = ChatClovaXConfig(
     model="HCX-007",
     max_tokens=1024,

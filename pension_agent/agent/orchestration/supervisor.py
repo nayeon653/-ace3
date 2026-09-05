@@ -18,8 +18,9 @@ from langgraph.graph.state import CompiledStateGraph
 
 from pension_agent.agent.contracts import AgentAnswer
 from pension_agent.agent.execution import ExecutionContext, ModelConcurrencyMiddleware
+from pension_agent.agent.injection_classifier import PromptInjectionClassifier
 from pension_agent.agent.orchestration.state import SupervisorState
-from pension_agent.agent.prompt_injection import PromptInjectionMiddleware
+from pension_agent.agent.prompt_injection import MainInputGuardMiddleware, PromptInjectionMiddleware
 
 
 class SupervisorModelCallLimit(ModelCallLimitMiddleware):
@@ -56,13 +57,15 @@ def create_main_supervisor(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     model_concurrency: ModelConcurrencyMiddleware | None = None,
+    injection_classifier: PromptInjectionClassifier | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """모델과 Domain Agent Tool을 주입받아 Main Supervisor를 만든다."""
 
     middleware = cast(
         Sequence[AgentMiddleware[Any, Any, Any]],
         (
-            PromptInjectionMiddleware(block_user_input=True),
+            MainInputGuardMiddleware(injection_classifier),
+            PromptInjectionMiddleware(),
             *((model_concurrency,) if model_concurrency is not None else ()),
             SupervisorModelCallLimit(max_model_calls=12),
             *(

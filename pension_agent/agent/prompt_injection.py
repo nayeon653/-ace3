@@ -1,6 +1,7 @@
 """직접 인젝션 차단과 모델 입력의 지시·데이터 경계 보강."""
 
 import json
+import logging
 import re
 import unicodedata
 from collections.abc import Awaitable, Callable
@@ -8,12 +9,23 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse, hook_config
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+from pension_agent.agent.execution import ExecutionContext
+from pension_agent.agent.injection_classifier import (
+    InjectionClassificationError,
+    PromptInjectionClassifier,
+)
+
+logger = logging.getLogger(__name__)
 
 INJECTION_REFUSAL = (
     "내부 지침 공개나 시스템 규칙 변경 요청은 처리할 수 없습니다. "
     "연금 제도·세금·상품에 관한 질문을 입력해 주세요."
+)
+INPUT_CHECK_UNAVAILABLE = (
+    "질문의 안전성을 확인하지 못해 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."
 )
 
 # 일반적인 연금 규정의 제외·변경 요청과 구분하기 위해 지시 대상과 행위를 함께 검사한다.
@@ -83,6 +95,63 @@ def protect_system_message(message: SystemMessage | None) -> SystemMessage:
     else:
         protected_content = [*content, {"type": "text", "text": policy}]
     return message.model_copy(update={"content": protected_content})
+
+
+def _user_inputs(state: Any) -> list[str]:
+    inputs: list[str] = [
+        message.text for message in state.get("messages", []) if isinstance(message, HumanMessage)
+    ]
+    question = state.get("question")
+    if isinstance(question, str):
+        inputs.append(question)
+    return list(dict.fromkeys(text for text in inputs if text.strip()))
+
+
+def _end_with_message(content: str) -> dict[str, Any]:
+    return {"messages": [AIMessage(content=content)], "jump_to": "end"}
+
+
+class MainInputGuardMiddleware(AgentMiddleware[Any, ExecutionContext, Any]):
+    """Main 실행 시작 시 정규식과 HCX로 사용자 입력을 한 번 검사한다."""
+
+    def __init__(self, classifier: PromptInjectionClassifier | None) -> None:
+        self._classifier = classifier
+
+    @hook_config(can_jump_to=["end"])
+    def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        del runtime
+        if any(is_direct_prompt_injection(text) for text in _user_inputs(state)):
+            return _end_with_message(INJECTION_REFUSAL)
+        # 제품 런타임은 native async이며 동기 실행으로 HCX 검사를 우회하지 않는다.
+        if self._classifier is not None:
+            return _end_with_message(INPUT_CHECK_UNAVAILABLE)
+        return None
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        inputs = _user_inputs(state)
+        if any(is_direct_prompt_injection(text) for text in inputs):
+            return _end_with_message(INJECTION_REFUSAL)
+        if self._classifier is None:
+            return None
+        context = getattr(runtime, "context", None)
+        if not inputs or not isinstance(context, ExecutionContext):
+            return _end_with_message(INPUT_CHECK_UNAVAILABLE)
+        text = (
+            inputs[0]
+            if len(inputs) == 1
+            else json.dumps({"user_inputs": inputs}, ensure_ascii=False)
+        )
+        try:
+            decision = await self._classifier.classify(text, deadline=context.deadline)
+        except (InjectionClassificationError, TimeoutError) as error:
+            logger.warning("입력 안전성 판별을 완료하지 못했습니다: %s", type(error).__name__)
+            return _end_with_message(INPUT_CHECK_UNAVAILABLE)
+        if decision == "block":
+            return _end_with_message(INJECTION_REFUSAL)
+        if decision != "allow":
+            return _end_with_message(INPUT_CHECK_UNAVAILABLE)
+        return None
 
 
 class PromptInjectionMiddleware(AgentMiddleware[Any, Any, Any]):
