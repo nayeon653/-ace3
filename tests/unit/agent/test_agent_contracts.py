@@ -133,6 +133,67 @@ def test_invalid_domain_result_combinations_raise() -> None:
             validate_domain_result(result)
 
 
+def test_domain_tool_result_exposes_placeholder_not_canonical_text() -> None:
+    result = _completed_result()
+    result["verified_numeric_statements"] = [
+        {
+            "source_type": "statutory_fact",
+            "source_id": "tax_credit_limit_combined",
+            "text": "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+        }
+    ]
+
+    tool_result = build_domain_tool_result(result)
+
+    assert tool_result["verified_numeric_placeholders"] == [
+        {
+            "placeholder": "{{VERIFIED_NUMERIC:policy:tax_credit_limit_combined}}",
+            "source_id": "tax_credit_limit_combined",
+        }
+    ]
+    assert "900만원" not in str(tool_result)
+    assert "text" not in str(tool_result["verified_numeric_placeholders"][0])
+
+
+def test_domain_tool_result_omits_placeholders_when_no_statements() -> None:
+    tool_result = build_domain_tool_result(_completed_result())
+
+    assert "verified_numeric_placeholders" not in tool_result
+
+
+def test_domain_result_rejects_verified_numeric_statement_on_failed_result() -> None:
+    result: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "failed",
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
+        "error": "실패",
+        "verified_numeric_statements": [
+            {"source_type": "statutory_fact", "source_id": "x", "text": "x"}
+        ],
+    }
+
+    with pytest.raises(ValueError, match="검증된 숫자 문장"):
+        validate_domain_result(result)
+
+
+@pytest.mark.parametrize(
+    ("source_id", "text"),
+    [("", "본문"), ("id", ""), ("   ", "본문"), ("id", "   ")],
+)
+def test_domain_result_rejects_blank_verified_numeric_statement_fields(
+    source_id: str, text: str
+) -> None:
+    result = _completed_result()
+    result["verified_numeric_statements"] = [
+        {"source_type": "statutory_fact", "source_id": source_id, "text": text}
+    ]
+
+    with pytest.raises(ValueError):
+        validate_domain_result(result)
+
+
 def test_domain_result_requires_calculation_source_evidence() -> None:
     result = _completed_result()
     result["calculations"][0]["input_sources"]["amount"] = {

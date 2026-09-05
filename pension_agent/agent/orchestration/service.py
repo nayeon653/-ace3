@@ -17,6 +17,12 @@ from pension_agent.agent.contracts import (
     validate_domain_result,
 )
 from pension_agent.agent.execution import ExecutionContext
+from pension_agent.agent.orchestration.numeric_firewall import (
+    extract_numbers,
+    placeholder_token,
+    scan_placeholders,
+    strip_known_placeholders,
+)
 from pension_agent.agent.orchestration.state import SupervisorState
 from pension_agent.agent.orchestration.supervisor import build_agent_answer
 from pension_agent.config import DEFAULT_AGENT_RUNTIME_CONFIG, AgentRuntimeConfig
@@ -150,7 +156,10 @@ class AnswerService:
                                 ) from None
                             answer = _stabilize_catalog_answer(
                                 _stabilize_calculation_answer(
-                                    answer,
+                                    _stabilize_verified_numeric_answer(
+                                        answer,
+                                        state["domain_results"],
+                                    ),
                                     state["domain_results"],
                                 ),
                                 state["domain_results"],
@@ -334,6 +343,98 @@ def _stabilize_calculation_answer(
         warning_text = "\n".join(f"- {warning}" for warning in unique_warnings)
         answer_parts.append(f"주의사항:\n{warning_text}")
     return AgentAnswer(answer="\n\n".join(answer_parts))
+
+
+def _stabilize_verified_numeric_answer(
+    answer: AgentAnswer,
+    domain_results: list[DomainResult],
+) -> AgentAnswer:
+    """Main이 검증된 숫자 placeholder 밖에서 새 숫자를 만들지 못하게 막는다.
+
+    Main은 `VerifiedNumericStatement.text`를 직접 본 적이 없다 — Tool 결과에서는
+    placeholder token만 받았다. 따라서 최종 답변에서 그 token들이 정확히(같은
+    token 반복은 허용) 등장하고, token 밖 자유 생성 영역에 금액·세율 같은
+    검증되지 않은 숫자가 전혀 없을 때만 Main의 표현을 그대로 쓴다. 하나라도
+    어긋나면 Main 답변 전체를 버리고 결정론적으로 다시 조립한다 — 문장 일부만
+    지우면 문맥이 깨지므로 부분 삭제는 하지 않는다.
+    """
+
+    canonical_by_token: dict[str, str] = {
+        placeholder_token(result["domain"], statement["source_id"]): statement["text"]
+        for result in domain_results
+        for statement in result.get("verified_numeric_statements", [])
+    }
+    if not canonical_by_token:
+        return answer
+
+    expected_tokens = set(canonical_by_token)
+    text = answer.answer
+    scan = scan_placeholders(text, expected_tokens)
+    missing = expected_tokens - set(scan.counts)
+    free_text = strip_known_placeholders(text, expected_tokens)
+    leaked = extract_numbers(free_text)
+
+    if missing or scan.malformed or leaked:
+        return AgentAnswer(answer=_deterministic_numeric_fallback(domain_results))
+
+    return AgentAnswer(answer=_substitute_with_dedup(text, canonical_by_token))
+
+
+def _substitute_with_dedup(text: str, canonical_by_token: dict[str, str]) -> str:
+    """token 첫 등장만 canonical 문장으로 바꾸고, 반복 등장은 지운다."""
+
+    result = text
+    for token, canonical_text in canonical_by_token.items():
+        parts = result.split(token)
+        if len(parts) <= 1:
+            continue
+        result = parts[0] + canonical_text + "".join(parts[1:])
+    return result
+
+
+def _deterministic_numeric_fallback(domain_results: list[DomainResult]) -> str:
+    """LLM 호출 없이 검증된 텍스트만으로 안전한 답변을 다시 조립한다."""
+
+    conclusions: list[str] = []
+    conditions: list[str] = []
+    warnings: list[str] = []
+    for result in domain_results:
+        if "catalog_result" in result:
+            continue
+        warnings.extend(result["warnings"])
+        if result["execution_status"] != "completed":
+            conclusions.append(
+                f"{_domain_label(result['domain'])} 분석을 완료하지 못했습니다: {result['error']}"
+            )
+            continue
+        decision = result["decision"]
+        if decision["status"] == "not_applicable":
+            continue
+        statements = result.get("verified_numeric_statements", [])
+        if statements:
+            conclusions.extend(dict.fromkeys(statement["text"] for statement in statements))
+        elif result["calculations"]:
+            conclusions.append(
+                "검증된 Python 계산 결과:\n" + format_calculation_summary(result["calculations"])
+            )
+        else:
+            conclusions.append(decision["conclusion"])
+        if decision["missing_conditions"]:
+            condition_text = "\n".join(
+                f"- {condition}" for condition in decision["missing_conditions"]
+            )
+            conditions.append(f"{_domain_label(result['domain'])} 확인 조건:\n{condition_text}")
+        warnings.extend(
+            warning for calculation in result["calculations"] for warning in calculation["warnings"]
+        )
+    if not conclusions:
+        conclusions.append("검증된 근거만으로는 확인할 수 있는 결론이 없습니다.")
+    answer_parts = [*conclusions, *conditions]
+    unique_warnings = list(dict.fromkeys(warnings))
+    if unique_warnings:
+        warning_text = "\n".join(f"- {warning}" for warning in unique_warnings)
+        answer_parts.append(f"주의사항:\n{warning_text}")
+    return "\n\n".join(answer_parts)
 
 
 def _domain_label(domain: str) -> str:

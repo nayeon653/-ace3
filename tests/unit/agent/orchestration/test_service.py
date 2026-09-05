@@ -18,6 +18,7 @@ from pension_agent.agent.orchestration import (
     InvalidSupervisorResultError,
     SupervisorExecutionError,
 )
+from pension_agent.agent.orchestration.numeric_firewall import placeholder_token
 from pension_agent.config import AgentRuntimeConfig
 
 pytestmark = pytest.mark.anyio
@@ -466,6 +467,416 @@ async def test_answer_service_preserves_benefit_and_does_not_invent_retirement_t
     assert [item["calculator_id"] for item in tax_result["calculations"]] == [
         "db_retirement_benefit"
     ]
+
+
+def _verified_numeric_result(
+    *,
+    domain: str = "tax_payout",
+    statements: list[dict[str, str]],
+    conclusion: str = "검증된 근거 기반 결론입니다.",
+    missing_conditions: list[str] | None = None,
+    calculations: list[Any] | None = None,
+) -> DomainResult:
+    status = "conditional" if missing_conditions else "determined"
+    result: DomainResult = {
+        "domain": domain,
+        "execution_status": "completed",
+        "decision": {
+            "status": status,
+            "conclusion": conclusion,
+            "missing_conditions": missing_conditions or [],
+        },
+        "evidence": [],
+        "calculations": calculations or [],
+        "warnings": [],
+    }
+    result["verified_numeric_statements"] = statements
+    return result
+
+
+def _statement(*, source_id: str, text: str, source_type: str = "statutory_fact") -> dict[str, str]:
+    return {"source_type": source_type, "source_id": source_id, "text": text}
+
+
+# ---------------------------------------------------------------------------
+# Main Numeric Firewall — item 11의 A~O 공격 케이스.
+# ---------------------------------------------------------------------------
+
+
+async def test_firewall_A_single_static_verified_number_is_substituted() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"세액공제 한도는 {token}입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert (
+        result.answer.answer
+        == "세액공제 한도는 연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.입니다."
+    )
+    assert token not in result.answer.answer
+
+
+async def test_firewall_B_two_static_verified_numbers_are_both_substituted() -> None:
+    contribution = _statement(
+        source_id="contribution_limit_combined",
+        text="연금저축과 IRP를 합산한 납입한도는 연 1,800만원입니다.",
+    )
+    tax_credit = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token_a = placeholder_token("tax_payout", "contribution_limit_combined")
+    token_b = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[contribution, tax_credit])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"납입한도는 {token_a}, 공제한도는 {token_b}입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "1,800만원" in result.answer.answer
+    assert "900만원" in result.answer.answer
+    assert token_a not in result.answer.answer
+    assert token_b not in result.answer.answer
+
+
+async def test_firewall_C_static_plus_calculation_mixed_when_no_calculations_present() -> None:
+    """이번 단계는 calculation path를 재설계하지 않는다 — verified_numeric_statements만
+    있고 calculations가 비어 있으면(정적 사실 전용) 그대로 firewall만 적용된다."""
+
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"세액공제 한도는 {token}입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "900만원" in result.answer.answer
+
+
+async def test_firewall_C2_existing_calculation_stabilizer_still_wins_when_calculations_present() -> (
+    None
+):
+    """기존 `_stabilize_calculation_answer` 동작은 이번 작업으로 절대 깨지지 않는다."""
+
+    domain_result = _calculation_result()
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="연금수령한도는 999원입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "연금수령한도: 1200000.0 KRW" in result.answer.answer
+    assert "999" not in result.answer.answer
+
+
+async def test_firewall_D_reformatted_verified_number_outside_placeholder_falls_back() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"세액공제 한도는 9,000,000원({token})이 맞습니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "9,000,000원" not in result.answer.answer
+    assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
+
+
+async def test_firewall_E_unverified_percentage_falls_back() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"{token} 적용 세율은 16.5%입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "16.5" not in result.answer.answer
+    assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
+
+
+async def test_firewall_F_unverified_krw_amount_falls_back() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"{token} 최대 절세액은 148만 5천원입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "148만 5천원" not in result.answer.answer
+    assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
+
+
+async def test_firewall_G_hallucinated_calculation_never_survives_final_answer() -> None:
+    """item 12: 관찰된 실제 hallucination(16.5%, 13.2%, 148만 5천원, 약 1,125만원)이
+    최종 답변에 절대 남지 않아야 한다."""
+
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    hallucinated = (
+        f"{token} 총 급여가 5,500만원 이하인 경우 16.5%, 이상인 경우 13.2%가 적용되며 "
+        "최대 148만 5천원의 절세 효과를 볼 수 있습니다. 최대 공제를 받으려면 "
+        "약 1,125만원을 납입하면 됩니다."
+    )
+    supervisor = FakeSupervisor(
+        result=_state(messages=[AIMessage(content=hallucinated)], domain_results=[domain_result])
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    for leaked in ("16.5%", "13.2%", "148만 5천원", "1,125만원", "5,500만원"):
+        assert leaked not in result.answer.answer
+    assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
+
+
+async def test_firewall_H_qualitative_only_answer_is_unaffected_backward_compatible() -> None:
+    """verified_numeric_statements가 없는 기존 결과는 firewall이 전혀 개입하지 않는다."""
+
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="연금저축과 IRP는 세제상 차이가 있습니다.")],
+            domain_results=[_completed_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert result.answer.answer == "연금저축과 IRP는 세제상 차이가 있습니다."
+
+
+async def test_firewall_I_policy_and_tax_mixed_domain_placeholders_do_not_collide() -> None:
+    policy_statement = _statement(source_id="x", text="IRP 계좌 이전은 접수 절차가 필요합니다.")
+    tax_statement = _statement(source_id="x", text="세액공제 한도는 연 900만원입니다.")
+    policy_token = placeholder_token("policy", "x")
+    tax_token = placeholder_token("tax_payout", "x")
+    assert policy_token != tax_token
+
+    policy_result = _verified_numeric_result(domain="policy", statements=[policy_statement])
+    tax_result = _verified_numeric_result(domain="tax_payout", statements=[tax_statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"{policy_token} 그리고 {tax_token}")],
+            domain_results=[policy_result, tax_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "접수 절차가 필요합니다" in result.answer.answer
+    assert "연 900만원" in result.answer.answer
+
+
+async def test_firewall_J_user_input_numeric_echo_outside_placeholder_falls_back() -> None:
+    """질문에 있던 숫자라도 placeholder 밖에서 그대로 쓰면 안전 우선으로 fallback한다."""
+
+    statement = _statement(
+        source_id="tax_credit_limit_pension_savings_only",
+        text="연금저축 단독 세액공제 한도는 연 600만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_pension_savings_only")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"700만원을 납입하셨군요. {token}")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "700만원" not in result.answer.answer
+    assert "연금저축 단독 세액공제 한도는 연 600만원입니다." in result.answer.answer
+
+
+async def test_firewall_K_missing_placeholder_falls_back() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="네, 맞습니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
+
+
+async def test_firewall_L_duplicate_placeholder_is_tolerated_and_deduped() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"{token} 다시 말하지만 {token}입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert (
+        result.answer.answer.count("연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.") == 1
+    )
+    assert token not in result.answer.answer
+
+
+async def test_firewall_M_malformed_placeholder_falls_back() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    domain_result = _verified_numeric_result(statements=[statement])
+    broken_token = "{{VERIFIED_NUMERIC:tax_payout:tax_credit_limit_combined"  # 닫는 중괄호 없음
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"한도는 {broken_token} 입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
+    assert broken_token not in result.answer.answer
+
+
+async def test_firewall_N_unknown_placeholder_falls_back() -> None:
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    unknown_token = placeholder_token("tax_payout", "invented_by_main")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"{token} 그리고 참고로 {unknown_token}")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert unknown_token not in result.answer.answer
+    assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
+
+
+async def test_firewall_O_reordered_placeholders_are_both_accepted() -> None:
+    contribution = _statement(
+        source_id="contribution_limit_combined",
+        text="연금저축과 IRP를 합산한 납입한도는 연 1,800만원입니다.",
+    )
+    tax_credit = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token_a = placeholder_token("tax_payout", "contribution_limit_combined")
+    token_b = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[contribution, tax_credit])
+    # domain_results 목록 순서(contribution, tax_credit)와 반대로 배치한다.
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"공제한도는 {token_b}, 납입한도는 {token_a}입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "900만원" in result.answer.answer
+    assert "1,800만원" in result.answer.answer
+    assert result.answer.answer.index("900만원") < result.answer.answer.index("1,800만원")
 
 
 async def test_answer_service_normalizes_supervisor_execution_failure() -> None:
