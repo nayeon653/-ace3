@@ -78,6 +78,10 @@ from pension_agent.agent.search import (
     SearchRunner,
     combine_search_objective,
 )
+from pension_agent.agent.tax_payout.statutory_facts import (
+    candidate_fact_hints,
+    resolve_statutory_facts,
+)
 from pension_agent.config import DomainAgentConfig
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
@@ -475,7 +479,7 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
             "search_result": result,
             "messages": [
                 ToolMessage(
-                    content=result.model_dump_json(),
+                    content=_search_result_message_content(result),
                     tool_call_id=runtime.tool_call_id,
                     name=SEARCH_DOCUMENTS_TOOL_NAME,
                 )
@@ -487,6 +491,25 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
         return Command(update=update)
 
     return search_documents
+
+
+def _search_result_message_content(result: SearchResult) -> str:
+    """검색 결과 JSON 뒤에, 검색된 청크와 같은 출처의 법정 수치 fact_id 후보를 덧붙인다.
+
+    fact_id와 원문 발췌만 보여준다 — value·role·scope·canonical 문장은 절대
+    포함하지 않는다. registry 전체가 아니라 이번 검색으로 실제로 찾은 청크와
+    연결된 fact만 후보로 좁힌다.
+    """
+
+    payload = result.model_dump_json()
+    candidates = candidate_fact_hints(result.retrieved_chunks)
+    if not candidates:
+        return payload
+    candidate_lines = "\n".join(
+        f'- fact_id={candidate["fact_id"]}\n  원문 발췌: "{candidate["source_excerpt"]}"'
+        for candidate in candidates
+    )
+    return f"{payload}\n\n[검색된 근거와 연결된 법정 수치 fact_id 후보]\n{candidate_lines}"
 
 
 def _create_tax_payout_result_tool() -> Any:
@@ -522,6 +545,19 @@ def _create_tax_payout_result_tool() -> Any:
             list[str],
             Field(description="결론에 실제 사용한 SearchResult 청크 UUID 목록"),
         ],
+        selected_fact_ids: Annotated[
+            list[str],
+            Field(
+                default_factory=list,
+                description=(
+                    "결론에 인용한 법정 수치가 있으면, search_documents 결과에 제시된 "
+                    "fact_id candidate 중 실제로 필요한 것만 선택한다. 값·단위·세율· "
+                    "한도 숫자는 여기에도 conclusion에도 직접 쓰지 않는다 — fact_id만 "
+                    "고르면 실제 문장은 시스템이 채운다. 후보에 없는 fact_id는 만들지 "
+                    "않는다. 법정 수치를 인용하지 않으면 빈 목록으로 둔다."
+                ),
+            ),
+        ],
         runtime: ToolRuntime[ExecutionContext, TaxPayoutAgentState],
     ) -> Command | str:
         if runtime.tool_call_id is None:
@@ -556,6 +592,7 @@ def _create_tax_payout_result_tool() -> Any:
                 missing_conditions=missing_conditions,
                 warnings=warnings,
                 evidence_chunk_ids=evidence_chunk_ids,
+                selected_fact_ids=selected_fact_ids,
             )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
@@ -605,6 +642,7 @@ def _build_tax_payout_result(
     missing_conditions: list[str],
     warnings: list[str],
     evidence_chunk_ids: list[str],
+    selected_fact_ids: list[str] | None = None,
 ) -> DomainResult:
     del question, objective
     if search_result.execution_status != "completed":
@@ -618,6 +656,7 @@ def _build_tax_payout_result(
         search_result,
         list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
     )
+    verified_numeric_statements = resolve_statutory_facts(selected_fact_ids or [], selected_chunks)
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_warnings.extend(search_result.limitations)
@@ -675,13 +714,15 @@ def _build_tax_payout_result(
         normalized_missing = ["제공 문서의 관련 근거"]
         normalized_warnings.append("검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.")
         calculations = []
+        verified_numeric_statements = []
     if status == "not_applicable":
         normalized_conclusion = _NOT_APPLICABLE_CONCLUSION
         normalized_missing = []
         normalized_warnings = []
         selected_chunks = []
         calculations = []
-    return {
+        verified_numeric_statements = []
+    result: DomainResult = {
         "domain": "tax_payout",
         "execution_status": "completed",
         "decision": {
@@ -693,6 +734,9 @@ def _build_tax_payout_result(
         "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
+    if verified_numeric_statements:
+        result["verified_numeric_statements"] = verified_numeric_statements
+    return result
 
 
 def _has_unconditioned_pension_tax_credit_rate_scenarios(

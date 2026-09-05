@@ -195,3 +195,256 @@ def test_calculation_result_keeps_summary_explanation_and_numeric_warning() -> N
     assert "근거 기반 설명" in conclusion
     assert "질문에 명시된 연간임금총액" in conclusion
     assert result["warnings"] == ["입력 금액 1,200만원의 기준기간을 확인하세요."]
+
+
+# ---------------------------------------------------------------------------
+# #159 static statutory fact 선택 — item 10의 A~D, H, I, J.
+# ---------------------------------------------------------------------------
+
+_DOC41_CHUNK_ID = "4c8f5763-1014-5d69-a612-5ca1c897a0b1"
+
+
+def _doc41_chunk() -> SearchChunkPayload:
+    return SearchChunkPayload(
+        chunk_id=_DOC41_CHUNK_ID,
+        source_file_name="doc41.docx",
+        document_type=DocumentType.PENSION_REFERENCE,
+        chunk_index=0,
+        title="doc41",
+        locator="문서 내 청크 1",
+        content=(
+            "연금저축과 IRP는 합산해서 연1,800만원까지 입금이 가능하다. "
+            "연금저축은 연600만원, IRP는 연금저축 납입액을 포함해서 연900만원이다."
+        ),
+    )
+
+
+def test_fact_A_combined_tax_credit_selection_renders_canonical_text() -> None:
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[_doc41_chunk()]),
+        calculations=[],
+        status="determined",
+        conclusion="합산 세액공제 한도를 안내합니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[_DOC41_CHUNK_ID],
+        selected_fact_ids=["combined_pension_tax_credit_limit"],
+    )
+
+    assert result["verified_numeric_statements"] == [
+        {
+            "source_type": "statutory_fact",
+            "source_id": "combined_pension_tax_credit_limit",
+            "text": "연금저축과 IRP를 합산한 세액공제 대상 납입한도는 900만원입니다.",
+        }
+    ]
+
+
+def test_fact_B_total_contribution_limit_selection() -> None:
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[_doc41_chunk()]),
+        calculations=[],
+        status="determined",
+        conclusion="전체 납입한도를 안내합니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[_DOC41_CHUNK_ID],
+        selected_fact_ids=["annual_pension_account_contribution_limit"],
+    )
+
+    assert result["verified_numeric_statements"][0]["text"] == (
+        "연금저축과 IRP를 합산한 연간 납입한도는 1,800만원입니다."
+    )
+
+
+def test_fact_C_pension_savings_only_tax_credit_selection() -> None:
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[_doc41_chunk()]),
+        calculations=[],
+        status="determined",
+        conclusion="연금저축 단독 세액공제 한도를 안내합니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[_DOC41_CHUNK_ID],
+        selected_fact_ids=["pension_savings_tax_credit_limit"],
+    )
+
+    assert result["verified_numeric_statements"][0]["text"] == (
+        "연금저축 단독 세액공제 대상 납입한도는 600만원입니다."
+    )
+
+
+def test_fact_D_both_contribution_and_tax_credit_selected_together() -> None:
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[_doc41_chunk()]),
+        calculations=[],
+        status="determined",
+        conclusion="납입한도와 세액공제 한도를 함께 안내합니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[_DOC41_CHUNK_ID],
+        selected_fact_ids=[
+            "annual_pension_account_contribution_limit",
+            "combined_pension_tax_credit_limit",
+        ],
+    )
+
+    texts = {statement["text"] for statement in result["verified_numeric_statements"]}
+    assert "연금저축과 IRP를 합산한 연간 납입한도는 1,800만원입니다." in texts
+    assert "연금저축과 IRP를 합산한 세액공제 대상 납입한도는 900만원입니다." in texts
+
+
+def test_fact_H_qualitative_only_omits_verified_numeric_statements() -> None:
+    """H: fact_id를 선택하지 않으면(정성 질문) verified_numeric_statements가 없다."""
+
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[_doc41_chunk()]),
+        calculations=[],
+        status="determined",
+        conclusion="연금저축과 IRP는 세제상 이러한 개념적 차이가 있습니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[_DOC41_CHUNK_ID],
+        selected_fact_ids=[],
+    )
+
+    assert "verified_numeric_statements" not in result
+
+
+def test_fact_I_calculation_required_path_is_unaffected() -> None:
+    """I: calculation-only 제출은 selected_fact_ids 없이도 기존과 동일하게 동작한다."""
+
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    chunk = SearchChunkPayload(
+        chunk_id=chunk_id,
+        source_file_name="guide.pdf",
+        document_type=DocumentType.PENSION_REFERENCE,
+        chunk_index=0,
+        title="부담금 안내",
+        locator="1페이지",
+        content="연간임금총액을 기준으로 사용자 부담금을 산정합니다.",
+    )
+    calculation = {
+        "calculator_id": "dc_minimum_employer_contribution",
+        "inputs": {"annual_total_wages_krw": "12000000"},
+        "input_sources": {
+            "annual_total_wages_krw": {
+                "origin": "question",
+                "text": "연간임금총액은 1,200만원",
+                "chunk_id": None,
+            }
+        },
+        "outputs": {
+            "annual_total_wages": "12000000",
+            "minimum_employer_contribution": "1000000",
+        },
+        "units": {"annual_total_wages": "KRW", "minimum_employer_contribution": "KRW"},
+        "warnings": [],
+    }
+
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[chunk]),
+        calculations=[calculation],
+        status="determined",
+        conclusion="계산 결과를 안내합니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[chunk_id],
+    )
+
+    assert "verified_numeric_statements" not in result
+    assert "DC 최소 사용자 부담금" in result["decision"]["conclusion"]
+
+
+def test_fact_J_static_plus_calculation_mixed_coexist() -> None:
+    """J: static fact와 calculation이 한 제출에 함께 있어도 서로 간섭하지 않는다."""
+
+    calc_chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    calc_chunk = SearchChunkPayload(
+        chunk_id=calc_chunk_id,
+        source_file_name="guide.pdf",
+        document_type=DocumentType.PENSION_REFERENCE,
+        chunk_index=0,
+        title="부담금 안내",
+        locator="1페이지",
+        content="연간임금총액을 기준으로 사용자 부담금을 산정합니다.",
+    )
+    calculation = {
+        "calculator_id": "dc_minimum_employer_contribution",
+        "inputs": {"annual_total_wages_krw": "12000000"},
+        "input_sources": {
+            "annual_total_wages_krw": {
+                "origin": "question",
+                "text": "연간임금총액은 1,200만원",
+                "chunk_id": None,
+            }
+        },
+        "outputs": {
+            "annual_total_wages": "12000000",
+            "minimum_employer_contribution": "1000000",
+        },
+        "units": {"annual_total_wages": "KRW", "minimum_employer_contribution": "KRW"},
+        "warnings": [],
+    }
+
+    result = _build_tax_payout_result(
+        search_result=SearchResult(
+            execution_status="completed", retrieved_chunks=[calc_chunk, _doc41_chunk()]
+        ),
+        calculations=[calculation],
+        status="determined",
+        conclusion="계산 결과와 법정 한도를 함께 안내합니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[calc_chunk_id, _DOC41_CHUNK_ID],
+        selected_fact_ids=["combined_pension_tax_credit_limit"],
+    )
+
+    assert "DC 최소 사용자 부담금" in result["decision"]["conclusion"]
+    assert result["verified_numeric_statements"] == [
+        {
+            "source_type": "statutory_fact",
+            "source_id": "combined_pension_tax_credit_limit",
+            "text": "연금저축과 IRP를 합산한 세액공제 대상 납입한도는 900만원입니다.",
+        }
+    ]
+
+
+def test_fact_K_unknown_fact_id_is_dropped_not_rejected() -> None:
+    """K: unknown fact_id가 섞여도 제출 전체가 거부되지 않고, 그 fact만 빠진다."""
+
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[_doc41_chunk()]),
+        calculations=[],
+        status="determined",
+        conclusion="세액공제 한도를 안내합니다.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[_DOC41_CHUNK_ID],
+        selected_fact_ids=["combined_pension_tax_credit_limit", "hallucinated_fact_id"],
+    )
+
+    assert [s["source_id"] for s in result["verified_numeric_statements"]] == [
+        "combined_pension_tax_credit_limit"
+    ]
+
+
+def test_fact_regression_wrong_neighbor_selection_never_mislabels_the_number() -> None:
+    """item 9 핵심 회귀: '다 합쳐서' 질문에서 contribution_limit(1,800만원)을 골라도
+    그 문장은 '납입한도'로만 렌더링되고, 세액공제 한도로 오인되지 않는다."""
+
+    result = _build_tax_payout_result(
+        search_result=SearchResult(execution_status="completed", retrieved_chunks=[_doc41_chunk()]),
+        calculations=[],
+        status="determined",
+        conclusion="연금저축이랑 IRP에 넣으면 세액공제 얼마까지 되나요? 다 합쳐서요.",
+        missing_conditions=[],
+        warnings=[],
+        evidence_chunk_ids=[_DOC41_CHUNK_ID],
+        selected_fact_ids=["annual_pension_account_contribution_limit"],
+    )
+
+    text = result["verified_numeric_statements"][0]["text"]
+    assert "1,800만원" in text
+    assert "납입한도" in text
+    assert "세액공제" not in text  # registry가 render하므로 role이 뒤섞이지 않는다

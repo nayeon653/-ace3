@@ -668,6 +668,37 @@ async def test_firewall_F_unverified_krw_amount_falls_back() -> None:
     assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
 
 
+async def test_firewall_static_fact_regression_mislabeled_conclusion_never_leaks() -> None:
+    """#159 핵심 회귀(Main 레벨): tax_payout 도메인 conclusion이 잘못 라벨링된
+    숫자(세액공제 한도로 오인된 납입한도 1,800만원)를 담고 있고 Main이 그걸 그대로
+    베껴 써도, verified_numeric_statements가 있으면 최종 답변은 항상 registry가
+    render한 올바른 문장으로만 귀결된다."""
+
+    statement = _statement(
+        source_id="annual_pension_account_contribution_limit",
+        text="연금저축과 IRP를 합산한 연간 납입한도는 1,800만원입니다.",
+    )
+    domain_result = _verified_numeric_result(
+        statements=[statement],
+        # 도메인 conclusion 자체가 잘못 라벨링됐다고 가정(방어 심층화 검증).
+        conclusion="세액공제 한도는 1,800만원입니다.",
+    )
+    # Main이 placeholder 없이 그 잘못된 conclusion을 그대로 베껴 썼다고 가정.
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="세액공제 한도는 1,800만원입니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "연금저축과 IRP를 합산한 연간 납입한도는 1,800만원입니다." in result.answer.answer
+    assert "세액공제 한도는 1,800만원입니다." not in result.answer.answer
+
+
 async def test_firewall_G_hallucinated_calculation_never_survives_final_answer() -> None:
     """item 12: 관찰된 실제 hallucination(16.5%, 13.2%, 148만 5천원, 약 1,125만원)이
     최종 답변에 절대 남지 않아야 한다."""
