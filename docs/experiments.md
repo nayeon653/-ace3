@@ -461,10 +461,10 @@ append-only. 실패한 실험도 남긴다 — 같은 시도를 반복하지 않
   의미 판별은 16회 실행했고 지연 p50은 1.8233초, p95는 2.1971초였다.
   정규식이 먼저 차단한 인용문 1개의 오탐은 HCX가 재검토하지 않아 유지됐다.
   판별 모델·프롬프트는 이 20문항 결과를 보고 수정하지 않았다.
-- 재현: `uv run python -m evals.harness.prompt_injection --env-file .env
-  --output .cache/prompt-injection-smoke.json`. 기존 파일을 덮어쓰지 않으므로 새 출력
-  경로를 사용한다. 원자료는 로컬 `.cache/prompt-injection-hybrid-smoke-20260905.json`에
-  보존했다. 보고서에는 원시 provider 응답이나 인증정보가 없다.
+- 재현 자료: 당시 사용한 평가 실행기와 합성 질문셋은 PR 변경에서 제외하고 로컬
+  `.cache/excluded-evals/`에 보존했다. 저장소 배포물에는 실행기와 질문셋을 포함하지
+  않는다. 원자료는 로컬 `.cache/prompt-injection-hybrid-smoke-20260905.json`에 보존했다.
+  보고서에는 원시 provider 응답이나 인증정보가 없다.
 - 질문셋 SHA-256: `3dbd57f40bcf669805fd13ed4a91a488c6fae4d22548aafcb332d8a712a8df1f`.
 - 판별 프롬프트 SHA-256: `96ffa0e5cc0ec734bff3407aa5ea79bc9d82aa15831eb04f5b1160f9adc749bb`.
 - 결론: 이 고정 소규모 입력에서는 정규식이 통과시킨 공격 7개를 HCX가 추가 차단했다.

@@ -168,8 +168,9 @@ Domain Tool 결과에는 기존 System 정책과 데이터 경계만 적용한�
 범위 밖이다. 정상 질문도 추가 HCX 호출 지연을 부담한다.
 
 오프라인 테스트는 실행 순서·오류·시간 예산·원문 보존을 검증한다. 합성 입력의 실제
-HCX 비교는 `evals/harness/prompt_injection.py`로 수행하며, 고정 소규모 결과를 전체
-공격 성공률이나 연금 답변 품질로 일반화하지 않는다.
+HCX 비교 결과는 `docs/experiments.md`에 기록한다. 평가 실행기와 질문셋은 로컬 검증
+자료로 보존하며 제품 변경에 포함하지 않는다. 고정 소규모 결과를 전체 공격 성공률이나
+연금 답변 품질로 일반화하지 않는다.
 
 설계 참고: [OWASP 프롬프트 인젝션 방어 지침](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html),
 [LangChain 모델 호출 미들웨어](https://docs.langchain.com/oss/python/langchain/middleware/custom).
