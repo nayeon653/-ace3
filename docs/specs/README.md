@@ -22,6 +22,15 @@ Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 
 결과를 만든다. Product Catalog Query Planner는 독립 Domain Agent가 아니라 Product Agent의
 `lookup_product_codes` Tool 내부에서 한 번 호출되는 제한된 LLM 컴포넌트다.
 
+## 리뷰 중인 스펙 초안
+
+`drafts/`는 구현 전 제안을 리뷰하는 공간이다. 아래 문서는 현재 런타임의 보장 범위가 아니며,
+리뷰 후 구현하는 변경에서 관련 현재 스펙과 코드에 함께 반영한다.
+
+| 문서 | 상태 | 제안 범위 |
+|---|---|---|
+| [Product 상품 비교 도구](drafts/product-comparison.md) | 리뷰용 제안, 미구현 | 복수 상품 식별, 상품별 근거 검색, 부분 비교와 최종 응답 보존 |
+
 ## 공통 Agent 계약
 
 Main Supervisor는 사용자 질문을 하나의 판단 목표인 `objective`로 나누고 Domain Agent를
