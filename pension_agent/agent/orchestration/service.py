@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -154,15 +155,17 @@ class AnswerService:
                                 raise FinalAnswerMissingError(
                                     "Main Supervisor의 최종 자연어 답변이 없습니다."
                                 ) from None
-                            answer = _stabilize_catalog_answer(
-                                _stabilize_calculation_answer(
-                                    _stabilize_verified_numeric_answer(
-                                        answer,
+                            answer = _strip_pseudo_placeholder_syntax(
+                                _stabilize_catalog_answer(
+                                    _stabilize_calculation_answer(
+                                        _stabilize_verified_numeric_answer(
+                                            answer,
+                                            state["domain_results"],
+                                        ),
                                         state["domain_results"],
                                     ),
                                     state["domain_results"],
-                                ),
-                                state["domain_results"],
+                                )
                             )
                 except TimeoutError:
                     raise AnswerServiceTimeoutError(
@@ -381,15 +384,68 @@ def _stabilize_verified_numeric_answer(
 
 
 def _substitute_with_dedup(text: str, canonical_by_token: dict[str, str]) -> str:
-    """token 첫 등장만 canonical 문장으로 바꾸고, 반복 등장은 지운다."""
+    """token 첫 등장만 canonical 문장으로 바꾸고, 반복 등장은 지운다.
+
+    Main은 placeholder를 완결된 문장이 아니라 맨숫자 자리인 것처럼 다뤄
+    "...600만원입니다.만원까지..."처럼 canonical 문장 바로 뒤에 단위 잔여물을
+    이어 붙이기도 한다. canonical 문장이 이미 마침표로 끝나 있다면 그 잔여물만
+    제거한다 — 반복 등장(dedup으로 지워지는 자리)에는 적용하지 않는다.
+    """
 
     result = text
     for token, canonical_text in canonical_by_token.items():
         parts = result.split(token)
         if len(parts) <= 1:
             continue
-        result = parts[0] + canonical_text + "".join(parts[1:])
+        first_tail = _strip_trailing_unit_residue(parts[1], canonical_text)
+        result = parts[0] + canonical_text + first_tail + "".join(parts[2:])
     return result
+
+
+_UNIT_RESIDUE_WORDS = ("만원", "천원", "억원", "원", "퍼센트", "프로", "%")
+_TRAILING_UNIT_RESIDUE = re.compile(
+    "^(?:"
+    + "|".join(re.escape(word) for word in sorted(_UNIT_RESIDUE_WORDS, key=len, reverse=True))
+    + ")(?:까지|만|은|는|이|가|을|를|도)?"
+)
+
+
+def _strip_trailing_unit_residue(tail: str, canonical_text: str) -> str:
+    """치환된 문장이 이미 완결됐는데 바로 뒤에 붙은 단위 잔여물만 제거한다.
+
+    canonical_text가 마침표로 끝나지 않으면(완결된 문장이 아니면) 손대지 않는다.
+    특정 숫자가 아니라 단위 어휘(만원/원/%/퍼센트 등)만 인식하므로 다른 조사나
+    서술어로 자연스럽게 이어지는 문장은 건드리지 않는다.
+    """
+
+    if not canonical_text.rstrip().endswith("."):
+        return tail
+    match = _TRAILING_UNIT_RESIDUE.match(tail)
+    if match is None:
+        return tail
+    return tail[match.end() :]
+
+
+_PSEUDO_PLACEHOLDER = re.compile(r"\{\{([^{}\n]{1,60})\}\}")
+
+
+def _strip_pseudo_placeholder_syntax(answer: AgentAnswer) -> AgentAnswer:
+    """알려진 치환을 모두 마친 뒤에도 `{{...}}` 구문이 남아 있으면 정리한다.
+
+    `_stabilize_verified_numeric_answer`는 도메인 결과 중 하나라도
+    `verified_numeric_statements`를 가질 때만 개입한다. Policy/Product처럼
+    그 필드가 전혀 없는 답변에서 Main이 스스로 `{{1800}}` 같은 임의의
+    `{{...}}` 표기를 흉내 내면 어떤 stabilizer도 거치지 않고 그대로 노출될 수
+    있다 — 이 함수는 그 경로까지 포함해 최종 답변 전체에 적용하는 마지막
+    안전망이다. 특정 숫자를 하드코딩하지 않고 중괄호만 벗겨 안쪽 텍스트를
+    그대로 남긴다.
+    """
+
+    text = answer.answer
+    cleaned = _PSEUDO_PLACEHOLDER.sub(lambda match: match.group(1), text)
+    if cleaned == text:
+        return answer
+    return AgentAnswer(answer=cleaned)
 
 
 def _deterministic_numeric_fallback(domain_results: list[DomainResult]) -> str:

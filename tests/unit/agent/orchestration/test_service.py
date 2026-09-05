@@ -744,6 +744,96 @@ async def test_firewall_H_qualitative_only_answer_is_unaffected_backward_compati
     assert result.answer.answer == "연금저축과 IRP는 세제상 차이가 있습니다."
 
 
+# ---------------------------------------------------------------------------
+# UX regression 이식: pseudo-placeholder 노출 / 문장 꼬리 중복.
+# ---------------------------------------------------------------------------
+
+
+async def test_pseudo_placeholder_stripped_when_no_verified_numeric_statements_exist() -> None:
+    """Policy 단독 라우팅처럼 verified_numeric_statements가 전혀 없으면
+    `_stabilize_verified_numeric_answer`가 개입하지 않는다 — 그 경로에서 Main이
+    스스로 흉내 낸 `{{1800}}` 같은 표기가 최종 답변에 그대로 남으면 안 된다."""
+
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="연금계좌의 연간 납입 한도는 최대 {{1800}}만원입니다.")],
+            domain_results=[_completed_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "{{" not in result.answer.answer
+    assert "}}" not in result.answer.answer
+    assert "1800만원입니다" in result.answer.answer
+
+
+async def test_pseudo_placeholder_cleanup_is_noop_for_normal_text() -> None:
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="연금저축과 IRP는 세제상 차이가 있습니다.")],
+            domain_results=[_completed_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert result.answer.answer == "연금저축과 IRP는 세제상 차이가 있습니다."
+
+
+async def test_sentence_tail_unit_residue_is_stripped_after_substitution() -> None:
+    """치환된 canonical 문장 바로 뒤에 Main이 붙인 단위 잔여물
+    ("...600만원입니다.만원까지...")이 결정론적으로 제거된다."""
+
+    statement = _statement(
+        source_id="pension_savings_tax_credit_limit",
+        text="연금저축 단독 세액공제 대상 납입한도는 600만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "pension_savings_tax_credit_limit")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"연간 최대 {token}만원까지 세액공제가 가능합니다.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "입니다.만원" not in result.answer.answer
+    assert "연금저축 단독 세액공제 대상 납입한도는 600만원입니다." in result.answer.answer
+    assert "세액공제가 가능합니다." in result.answer.answer
+
+
+async def test_sentence_tail_non_unit_text_is_preserved() -> None:
+    """단위 잔여물이 아닌 평범한 이어지는 문장은 그대로 보존된다(과도한 제거 방지)."""
+
+    statement = _statement(
+        source_id="tax_credit_limit_combined",
+        text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
+    )
+    token = placeholder_token("tax_payout", "tax_credit_limit_combined")
+    domain_result = _verified_numeric_result(statements=[statement])
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content=f"{token} 이 점을 참고하세요.")],
+            domain_results=[domain_result],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "이 점을 참고하세요." in result.answer.answer
+
+
 async def test_firewall_I_policy_and_tax_mixed_domain_placeholders_do_not_collide() -> None:
     policy_statement = _statement(source_id="x", text="IRP 계좌 이전은 접수 절차가 필요합니다.")
     tax_statement = _statement(source_id="x", text="세액공제 한도는 연 900만원입니다.")
