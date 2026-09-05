@@ -1,4 +1,4 @@
-"""HCX의 구조화 의미 판별로 사용자 입력의 프롬프트 공격을 검사한다."""
+"""HCX의 구조화 의미 판별로 프롬프트 공격과 정보 유출 요구를 검사한다."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class _InjectionVerdict(BaseModel):
 
 @tool(INJECTION_VERDICT_TOOL_NAME, args_schema=_InjectionVerdict)
 def _return_prompt_injection_verdict(decision: InjectionDecision) -> str:
-    """입력의 프롬프트 공격 여부를 allow 또는 block으로만 반환한다."""
+    """입력의 프롬프트 공격·정보 유출 요구 여부를 allow 또는 block으로만 반환한다."""
 
     del decision
     return ""

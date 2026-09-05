@@ -18,7 +18,7 @@ from pension_agent.agent.injection_classifier import (
 logger = logging.getLogger(__name__)
 
 INJECTION_REFUSAL = (
-    "내부 지침 공개나 시스템 규칙 변경 요청은 처리할 수 없습니다. "
+    "개인정보·인증정보 유출이나 내부 지침 공개, 시스템 규칙 변경 요청은 처리할 수 없습니다. "
     "연금 제도·세금·상품에 관한 질문을 입력해 주세요."
 )
 INPUT_CHECK_UNAVAILABLE = (
