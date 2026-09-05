@@ -136,11 +136,11 @@ def test_tax_prompt_contains_eight_generic_contracts_and_controlled_fallback() -
 
     assert all(f"## {index}." in prompt for index in range(1, 9))
     assert "Calculation Tool 미사용 fallback" in prompt
-    assert "LLM이 최종 산출값까지 계산할 수 있다" in prompt
+    assert "LLM이 세액·공제액·\n  세후액·계산 한도 같은 새 숫자를 산출하지 않는다" in prompt
     assert "실제 사용자별 산출값을 요청하지 않은" in prompt
     assert "개인별 계산 입력이 없다는\n  이유만으로 `missing_conditions`" in prompt
-    assert "공식·입력·대입 과정·결과·단위" in prompt
-    assert "Tool 입력 validation이 실패한 경우에는 fallback으로\n  우회하지 않는다" in prompt
+    assert "Tool 입력 validation이 실패한 경우에도 계산을 우회하지" in prompt
+    assert "origin=calculation" in prompt
     assert "한 모델 응답에서는 Calculation Tool 하나만 호출한다" in prompt
     assert "typed calculation output" in prompt
     assert "calculate_" not in prompt

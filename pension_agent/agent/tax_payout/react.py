@@ -78,6 +78,7 @@ from pension_agent.agent.search import (
     SearchRunner,
     combine_search_objective,
 )
+from pension_agent.agent.tax_payout.numeric_claims import NumericClaim, validate_numeric_claims
 from pension_agent.config import DomainAgentConfig
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
@@ -522,6 +523,16 @@ def _create_tax_payout_result_tool() -> Any:
             list[str],
             Field(description="결론에 실제 사용한 SearchResult 청크 UUID 목록"),
         ],
+        numeric_claims: Annotated[
+            list[NumericClaim],
+            Field(
+                default_factory=list,
+                description=(
+                    "결론의 각 수치에 대한 value, unit, role, scope, condition_ids, "
+                    "origin과 source_ref. 수치가 없으면 빈 목록"
+                ),
+            ),
+        ],
         runtime: ToolRuntime[ExecutionContext, TaxPayoutAgentState],
     ) -> Command | str:
         if runtime.tool_call_id is None:
@@ -556,6 +567,7 @@ def _create_tax_payout_result_tool() -> Any:
                 missing_conditions=missing_conditions,
                 warnings=warnings,
                 evidence_chunk_ids=evidence_chunk_ids,
+                numeric_claims=numeric_claims,
             )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
@@ -605,8 +617,9 @@ def _build_tax_payout_result(
     missing_conditions: list[str],
     warnings: list[str],
     evidence_chunk_ids: list[str],
+    numeric_claims: list[NumericClaim] | None = None,
 ) -> DomainResult:
-    del question, objective
+    del objective
     if search_result.execution_status != "completed":
         return failed_domain_result(
             "tax_payout",
@@ -622,13 +635,27 @@ def _build_tax_payout_result(
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
     normalized_warnings.extend(search_result.limitations)
     normalized_conclusion = conclusion.strip()
+    numeric_claims = numeric_claims or []
     if calculations:
-        normalized_conclusion = (
-            "검증된 Python 계산 결과:\n"
-            + format_calculation_summary(calculations)
-            + "\n근거 기반 설명:\n"
-            + normalized_conclusion
+        explanation_is_valid = validate_numeric_claims(
+            conclusion=normalized_conclusion,
+            claims=numeric_claims,
+            question=question,
+            selected_chunks=selected_chunks,
+            calculations=calculations,
         )
+        calculation_summary = "검증된 Python 계산 결과:\n" + format_calculation_summary(
+            calculations
+        )
+        if explanation_is_valid:
+            normalized_conclusion = (
+                calculation_summary + "\n근거 기반 설명:\n" + normalized_conclusion
+            )
+        else:
+            normalized_conclusion = calculation_summary
+            normalized_warnings.append(
+                "검증되지 않은 수치가 포함된 근거 설명은 결과에서 제외했습니다."
+            )
         normalized_warnings.extend(
             warning for calculation in calculations for warning in calculation["warnings"]
         )
@@ -669,6 +696,23 @@ def _build_tax_payout_result(
                 status = "conditional"
             if _MEDICAL_CARE_EXCESS_MISSING_CONDITION not in normalized_missing:
                 normalized_missing.append(_MEDICAL_CARE_EXCESS_MISSING_CONDITION)
+    if (
+        not calculations
+        and status != "not_applicable"
+        and not validate_numeric_claims(
+            conclusion=normalized_conclusion,
+            claims=numeric_claims,
+            question=question,
+            selected_chunks=selected_chunks,
+            calculations=[],
+        )
+    ):
+        status = "conditional" if status != "undetermined" else status
+        normalized_conclusion = "확정 수치의 의미와 출처를 검증할 수 없어 판단할 수 없습니다."
+        normalized_missing = list(dict.fromkeys([*normalized_missing, "검증된 수치 의미와 출처"]))
+        normalized_warnings.append(
+            "결론의 수치가 법정 근거, 사용자 입력 또는 Python 계산 결과와 일치하지 않습니다."
+        )
     if not selected_chunks and status != "not_applicable":
         status = "undetermined"
         normalized_conclusion = _NO_EVIDENCE_CONCLUSION

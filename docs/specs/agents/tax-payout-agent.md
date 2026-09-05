@@ -208,6 +208,23 @@ warning이 `calculations`에 포함된다.
 않는다. Python은 청크 ID의 UUID 형식, 중복과 SearchResult 부분집합 여부를
 검증한다.
 
+계산 결과가 아닌 수치를 결론에 포함하면 각 수치를 내부 `NumericClaim`으로 함께
+제출한다. claim은 정규화한 값·단위, 의미 `role`, 적용 `scope`, `condition_ids`,
+`origin`과 `source_ref`를 포함한다. Python은 결론의 모든 수치 occurrence가 claim과
+일대일로 대응하는지 검사한다.
+
+- `origin=evidence`는 선택 evidence 청크에 값이 존재하고 evidence-backed statutory
+  fact registry의 값·단위·role·scope·조건·문서·locator·원문 구절이 모두 일치해야 한다.
+- `origin=user_input`은 질문의 실제 구절과 값이 일치해야 하고 `role=factual_input`,
+  `scope=user_input`만 허용한다.
+- `origin=calculation`은 `calculator_id.output_field`가 기존 `CalculationResult`에 실제로
+  존재하고 값과 단위가 일치해야 한다.
+- registry 누락이나 의미·출처 불일치는 fail-closed로 처리해 기존 안전 fallback을 유지한다.
+
+Registry record 추가는 Python 숫자 분기를 추가하는 작업이 아니다. 제공 문서에서 확인한
+`value + unit + role + scope + condition + source + effective period` 사실을 데이터로
+추가하는 작업이며, value-only lookup은 허용하지 않는다.
+
 ## 실행 흐름과 안전 규칙
 
 ```text
@@ -217,7 +234,7 @@ DomainRequest
        -> 검색 실패/timeout/빈 결과면 Python 안전 종료
        -> 질문과 입력에 맞는 Calculation Tool 1회
           (연금수령·연금외수령 비교만 #113 두 Tool을 각각 1회 허용)
-       -> submit_domain_result(계산 없이 conclusion에 확정 수치가 있으면 비수치 재제출 1회 요청)
+       -> submit_domain_result(결론의 수치 claim과 evidence/user/calculation 출처를 검증)
      )
   -> 검증된 DomainResult
 ```
@@ -233,32 +250,16 @@ DomainRequest
   보존한다.
 - 근거 ID가 없으면 `not_applicable` 이외의 판단을 `undetermined`로 보정한다.
 - 검색 제한사항은 `warnings`에 포함한다.
-- 숫자 차단 후처리는 결론·누락 조건·경고를 필드별로 각각 검사하며, 실제 숫자·%·퍼센트·
-  금액 단위가 포함된 필드만 대상으로 한다. `세율`·`한도`·`금액`·`공제액` 같은 화제어만으로는
-  적용하지 않는다.
-- 결론 자체에 확정 수치가 없다면 누락 조건이나 경고 중 일부에 숫자가 섞여 있어도 결론과
-  상태는 그대로 두고, 숫자가 포함된 누락 조건·경고 항목만 제거한다(비수치 항목은 보존).
-  이 경우 근거 없는 수치를 제거했다는 사실만 별도 경고로 남기며, 계산 Tool 필요 경고는
-  추가하지 않는다. `conditional`에서 이 필터링으로 누락 조건이 하나도 안 남으면
-  `결정론적 계산 Tool 결과`가 아니라 "판단에 필요한 사용자 조건"과 같은 일반 사용자
-  조건 fallback을 넣는다 — 나이·가입기간 같은 일반 조건 누락을 계산 문제로 왜곡하지
-  않기 위함이다.
-- 결론 자체에 확정 수치가 있을 때만 `determined`/`conditional`을 계산 Tool 필요
-  `conditional` 결과로 교체한다(결론·누락 조건·계산 Tool 필요 경고를 표준 문구로 통일).
-- `undetermined`(근거 부족)는 숫자 차단으로 어떤 경우에도 `conditional`로 승격하지
-  않는다 — "근거 부족"과 "계산 필요"는 의미가 다르다. 결론에 확정 수치가 있으면 비수치
-  근거 부족 문구로만 교체하고, 기존 비수치 누락 조건은 유지한다. 비수치 누락 조건이 하나도
-  남지 않을 때만 일반 근거 부족 조건을 넣는다. 계산 Tool 필요 누락 조건이나 경고는
-  추가하지 않고, 근거 없는 수치를 제거했다는 별도 경고만 남긴다.
-- `not_applicable` 제출은 숫자 차단 대상에서 제외한다. 결론·누락 조건·경고·evidence는
-  항상 빈 상태로 정규화된다.
-- 결론 자체에 확정 수치가 있으면 그 제출을 즉시 최종 결과로 확정하지 않고, 숫자 없이
-  다시 제출하라는 안내와 함께 정확히 1회 재제출 기회를 준다. 재제출된 결론에 수치가
-  없으면 그대로 받아들인다. 재제출도 수치를 포함하면 더 이상 기회를 주지 않고 위 숫자
-  차단 후처리(표준 계산기 문구 치환 또는 `undetermined` 비수치 보정)로 확정한다. 이
-  재제출 판단은 결론 필드만 대상으로 하며, 누락 조건·경고에만 숫자가 있는 경우는
-  필드별 제거만 적용하고 재제출을 요구하지 않는다. 재제출 1회는 기존 `제출 Tool 최대
-  2회` 한도 안에서 소비되며 별도 한도를 추가하지 않는다.
+- 계산이 없는 결론의 모든 수치가 승인된 `NumericClaim`과 일대일로 대응하면 정적 법정
+  사실 또는 사용자 입력의 재언급으로 허용한다.
+- claim이 없거나 registry의 role·scope·조건·source와 불일치하거나 결론에 미등록 수치가
+  하나라도 있으면 fail-closed로 처리한다. `undetermined`는 그대로 유지하고 그 밖의 상태는
+  `conditional`로 제한하며 수치가 없는 표준 결론으로 교체한다.
+- 계산 결과가 있으면 Python calculation summary는 그대로 보존한다. 모델이 함께 제출한
+  근거 설명에 별도 수치가 있으면 각 수치가 evidence·user input·해당 calculation output으로
+  검증될 때만 설명을 덧붙이고, 그렇지 않으면 설명만 제외한다.
+- `not_applicable` 제출은 수치 검증 대상에서 제외하며 결론·누락 조건·경고·evidence를 항상
+  빈 상태로 정규화한다.
 
 ## 실행 제한
 

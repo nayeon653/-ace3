@@ -241,6 +241,7 @@ def _model(
     missing_conditions: list[str] | None = None,
     warnings: list[str] | None = None,
     evidence_chunk_ids: list[str] | None = None,
+    numeric_claims: list[dict[str, Any]] | None = None,
     product_code: str | None = None,
 ) -> ToolCallingFakeModel:
     if missing_conditions is None:
@@ -268,6 +269,15 @@ def _model(
             )
         )
         search_args["product_code"] = product_code
+    submit_args: dict[str, Any] = {
+        "status": decision_status,
+        "conclusion": conclusion,
+        "missing_conditions": missing_conditions,
+        "warnings": warnings,
+        "evidence_chunk_ids": evidence_chunk_ids,
+    }
+    if numeric_claims is not None:
+        submit_args["numeric_claims"] = numeric_claims
     responses.extend(
         [
             AIMessage(
@@ -286,13 +296,7 @@ def _model(
                 tool_calls=[
                     {
                         "name": "submit_domain_result",
-                        "args": {
-                            "status": decision_status,
-                            "conclusion": conclusion,
-                            "missing_conditions": missing_conditions,
-                            "warnings": warnings,
-                            "evidence_chunk_ids": evidence_chunk_ids,
-                        },
+                        "args": submit_args,
                         "id": "submit-call",
                         "type": "tool_call",
                     }
@@ -1995,29 +1999,62 @@ async def test_model_generated_source_hint_is_rejected_before_search_service() -
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("evidence", "conclusion"),
+    ("conclusion", "numeric_claims"),
     [
         (
-            "ISA 만기자금은 만기일부터 60일 이내 연금계좌로 전환해야 합니다.",
-            "ISA 만기자금은 만기일부터 60일 이내 연금계좌로 전환해야 합니다.",
+            "연금저축과 IRP의 합산 납입한도는 연 1,800만원입니다.",
+            [
+                {
+                    "value": "18000000",
+                    "unit": "KRW",
+                    "role": "contribution_limit",
+                    "scope": "pension_savings_plus_irp",
+                    "condition_ids": ["annual", "all_financial_institutions_combined"],
+                    "origin": "evidence",
+                    "source_ref": "550e8400-e29b-41d4-a716-446655440000",
+                }
+            ],
         ),
         (
-            "연간 사적연금소득이 1,500만 원을 초과하면 16.5퍼센트 분리과세를 선택할 수 있습니다.",
-            "연간 사적연금소득이 1500만원을 초과하면 16.5% 분리과세를 선택할 수 있습니다.",
-        ),
-        (
-            "추가 세액공제 대상금액은 최대 900만원입니다.",
-            "추가 세액공제 대상금액은 최대 900만원입니다.",
+            "합산 세액공제 납입한도는 연 900만원이고 연금저축 단독은 600만원입니다.",
+            [
+                {
+                    "value": "9000000",
+                    "unit": "KRW",
+                    "role": "tax_credit_limit",
+                    "scope": "pension_savings_plus_irp",
+                    "condition_ids": ["annual"],
+                    "origin": "evidence",
+                    "source_ref": "550e8400-e29b-41d4-a716-446655440000",
+                },
+                {
+                    "value": "6000000",
+                    "unit": "KRW",
+                    "role": "tax_credit_limit",
+                    "scope": "pension_savings",
+                    "condition_ids": ["annual"],
+                    "origin": "evidence",
+                    "source_ref": "550e8400-e29b-41d4-a716-446655440000",
+                },
+            ],
         ),
     ],
 )
 async def test_tax_agent_preserves_numeric_facts_copied_from_selected_evidence(
-    evidence: str,
     conclusion: str,
+    numeric_claims: list[dict[str, Any]],
 ) -> None:
-    chunk = _chunk(DocumentType.PENSION_REFERENCE, content=evidence)
+    chunk = _chunk(
+        DocumentType.PENSION_REFERENCE,
+        source_file_name="doc41.docx",
+        content=(
+            "연금저축과 IRP는 합산해서 연1,800만원까지 입금이 가능하다. "
+            "연금저축은 연600만원, IRP는 연금저축 납입액을 포함해서 연900만원이다."
+        ),
+    )
+    chunk = chunk.model_copy(update={"locator": "문서 내 청크 1"})
     search = FakeSearchService(SearchResult(execution_status="completed", retrieved_chunks=[chunk]))
-    model = _model(conclusion=conclusion)
+    model = _model(conclusion=conclusion, numeric_claims=numeric_claims)
     agent = create_tax_payout_agent(
         model=model,
         search_service=cast(SearchRunner, search),
@@ -5355,8 +5392,9 @@ def test_domain_prompts_are_packaged_with_tool_and_evidence_contracts() -> None:
     assert "search_documents" in tax_prompt
     assert "Calculation Tool을 우선" in tax_prompt
     assert "Calculation Tool 미사용 fallback" in tax_prompt
-    assert "공식·입력·대입 과정·결과·단위" in tax_prompt
-    assert "validation이 실패" in tax_prompt
+    assert "파생 수치를 만들지 않는 정성 설명에만 허용" in tax_prompt
+    assert "Tool 입력 validation이 실패" in tax_prompt
+    assert "numeric_claims" in tax_prompt
     assert "submit_domain_result" in tax_prompt
     assert "evidence_chunk_ids" in tax_prompt
     assert "not_applicable" in tax_prompt

@@ -55,14 +55,12 @@
 
 ## 6. 제한적인 계산 fallback
 
-- 필요한 유형의 Calculation Tool이 구현되지 않았거나 현재 노출되지 않았거나,
-  provider가 Tool 호출 자체를 만들지 못한 경우에만 제한적인 LLM 계산 fallback을 허용한다.
-- 공식·세율·입력값이 질문 또는 선택 evidence에 모두 직접 있고 적용 범위도 일치하면
-  LLM이 최종 산출값까지 계산할 수 있다. 답변에는 공식·입력·대입 과정·결과·단위를
-  모두 보이고 `Calculation Tool 미사용 fallback`임을 명시한다.
-- 입력이나 공식이 부족하거나 Tool 입력 validation이 실패한 경우에는 fallback으로
-  우회하지 않는다. `conditional` 또는 `undetermined`로 제출하고 부족한 항목을
-  `missing_conditions`에 남긴다.
+- `Calculation Tool 미사용 fallback`은 파생 수치를 만들지 않는 정성 설명에만 허용한다.
+- 필요한 유형의 Calculation Tool이 없거나 Tool 호출을 만들지 못해도 LLM이 세액·공제액·
+  세후액·계산 한도 같은 새 숫자를 산출하지 않는다. 확인된 정적 사실만 설명하고 계산
+  결과는 `conditional` 또는 `undetermined`로 제출한다.
+- 입력이나 공식이 부족하거나 Tool 입력 validation이 실패한 경우에도 계산을 우회하지
+  않고 실제 부족한 항목을 `missing_conditions`에 남긴다.
 
 ## 7. 계산 순서와 완전성
 
@@ -87,3 +85,13 @@
   확인한 제한만 쓴다.
 - `evidence_chunk_ids`에는 결론과 계산 입력에 실제 사용한 검색 결과 UUID만 포함한다.
   검색된 청크 전체나 주제만 비슷한 청크를 넣지 않는다.
+- 결론에 수치가 있으면 각 수치마다 `numeric_claims`를 제출한다. `value`는 원·퍼센트·기간의
+  정규화된 값, `unit`은 `KRW`·`percent`·`year`·`month`·`day`·`count` 중 하나로 쓴다.
+- `role`과 `scope`는 수치 주변의 명칭·대상·행위에서 판단한다. 납입한도와 세액공제 한도,
+  단독 계좌와 합산 계좌, 과세 기준과 실제 세액을 서로 바꾸지 않는다.
+- evidence 수치는 `origin=evidence`, `source_ref`에는 그 수치를 직접 지지하는 선택 청크 UUID를
+  쓴다. 적용 조건은 짧고 안정적인 snake_case `condition_ids`로 분리한다.
+- 질문 숫자를 그대로 언급할 때만 `origin=user_input`, `role=factual_input`,
+  `scope=user_input`으로 제출하고 `source_ref`에는 숫자를 포함한 질문 원문 구절을 쓴다.
+- 계산 수치는 기존 Calculation Tool 결과만 사용한다. `origin=calculation`의 `source_ref`는
+  `calculator_id.output_field` 형식이며 Tool output에 없는 값은 제출하지 않는다.

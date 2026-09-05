@@ -1,0 +1,74 @@
+[
+  {
+    "fact_id": "annual_pension_account_contribution_limit",
+    "value": "18000000",
+    "unit": "KRW",
+    "role": "contribution_limit",
+    "scope": "pension_savings_plus_irp",
+    "condition_ids": ["annual", "all_financial_institutions_combined"],
+    "source_file_name": "doc41.docx",
+    "locator": "문서 내 청크 1",
+    "source_text": "연금저축과 IRP는 합산해서 연1,800만원까지 입금이 가능하다.",
+    "effective_period": "document_effective_period"
+  },
+  {
+    "fact_id": "combined_pension_tax_credit_limit",
+    "value": "9000000",
+    "unit": "KRW",
+    "role": "tax_credit_limit",
+    "scope": "pension_savings_plus_irp",
+    "condition_ids": ["annual"],
+    "source_file_name": "doc41.docx",
+    "locator": "문서 내 청크 1",
+    "source_text": "IRP는 연금저축 납입액을 포함해서 연900만원이다.",
+    "effective_period": "document_effective_period"
+  },
+  {
+    "fact_id": "pension_savings_tax_credit_limit",
+    "value": "6000000",
+    "unit": "KRW",
+    "role": "tax_credit_limit",
+    "scope": "pension_savings",
+    "condition_ids": ["annual"],
+    "source_file_name": "doc41.docx",
+    "locator": "문서 내 청크 1",
+    "source_text": "연금저축은 연600만원",
+    "effective_period": "document_effective_period"
+  },
+  {
+    "fact_id": "private_pension_taxable_income_threshold",
+    "value": "15000000",
+    "unit": "KRW",
+    "role": "taxable_income_threshold",
+    "scope": "private_pension_taxable_income",
+    "condition_ids": ["annual", "all_financial_institutions_combined", "excluded_resources_apply"],
+    "source_file_name": "doc21.pdf",
+    "locator": "1페이지",
+    "source_text": "연금소득은 연간 과세대상 연금소득 1,500 만원 초과시",
+    "effective_period": "document_effective_period"
+  },
+  {
+    "fact_id": "private_pension_taxable_income_threshold_with_filing_choice",
+    "value": "15000000",
+    "unit": "KRW",
+    "role": "taxable_income_threshold",
+    "scope": "private_pension_taxable_income",
+    "condition_ids": ["annual", "credited_contribution_and_earnings_only"],
+    "source_file_name": "doc38.docx",
+    "locator": "문서 내 청크 3",
+    "source_text": "연간 1,500만원 초과 수령 시 전액 다른 소득과 합산 종합과세 또는 16.5% 세율로 분리과세",
+    "effective_period": "document_effective_period"
+  },
+  {
+    "fact_id": "private_pension_separate_tax_option_rate",
+    "value": "16.5",
+    "unit": "percent",
+    "role": "tax_rate",
+    "scope": "private_pension_taxable_income",
+    "condition_ids": ["annual_threshold_exceeded", "filing_choice"],
+    "source_file_name": "doc38.docx",
+    "locator": "문서 내 청크 3",
+    "source_text": "연간 1,500만원 초과 수령 시 전액 다른 소득과 합산 종합과세 또는 16.5% 세율로 분리과세",
+    "effective_period": "document_effective_period"
+  }
+]
