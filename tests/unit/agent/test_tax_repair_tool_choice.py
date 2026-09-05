@@ -9,7 +9,9 @@ from pension_agent.agent.tax_payout.agent import load_tax_payout_agent_prompt
 from pension_agent.agent.tax_payout.react import (
     EnforceTaxPayoutToolSequence,
     RequireTaxPayoutTool,
+    TaxPayoutModelCallLimit,
     _build_tax_payout_result,
+    _safe_terminal_tax_payout_result,
 )
 from pension_agent.core import DocumentType
 
@@ -34,9 +36,11 @@ def _tool_message(*tool_names: str) -> AIMessage:
     )
 
 
-def _kept_tool_names(state: dict[str, Any], *tool_names: str) -> list[str]:
+def _kept_tool_names(
+    state: dict[str, Any], *tool_names: str, max_model_calls: int = 5
+) -> list[str]:
     message = _tool_message(*tool_names)
-    update = EnforceTaxPayoutToolSequence().after_model(
+    update = EnforceTaxPayoutToolSequence(max_model_calls=max_model_calls).after_model(
         {**state, "messages": [message]},
         None,
     )
@@ -448,3 +452,141 @@ def test_fact_regression_wrong_neighbor_selection_never_mislabels_the_number() -
     assert "1,800만원" in text
     assert "납입한도" in text
     assert "세액공제" not in text  # registry가 render하므로 role이 뒤섞이지 않는다
+
+
+# ---------------------------------------------------------------------------
+# #158 terminalization — static fact producer 위로 이식.
+# ---------------------------------------------------------------------------
+
+
+def test_tax_sequence_forces_submit_only_on_last_call_budget() -> None:
+    """마지막으로 허용된 모델 호출에서는 새 계산 시도 없이 submit만 허용한다 (#158)."""
+
+    assert _kept_tool_names(
+        {
+            "search_result": SearchResult(execution_status="completed"),
+            "run_model_call_count": 4,
+        },
+        _SECOND_CALCULATOR,
+        _SUBMIT_TOOL,
+        max_model_calls=5,
+    ) == [_SUBMIT_TOOL]
+
+
+def test_tax_sequence_still_allows_search_near_call_budget_exhaustion() -> None:
+    """검색을 아직 못했다면 예산이 임박해도 search_documents는 계속 허용한다 (#158)."""
+
+    assert _kept_tool_names(
+        {"run_model_call_count": 4},
+        _SEARCH_TOOL,
+        max_model_calls=5,
+    ) == [_SEARCH_TOOL]
+
+
+def test_call_limit_middleware_sets_safe_domain_result_on_exhaustion() -> None:
+    """모델 호출 한도에 도달하면 None 대신 안전한 terminal DomainResult를 state에 채운다 (#158)."""
+
+    update = TaxPayoutModelCallLimit(max_model_calls=2).before_model(
+        {
+            "run_model_call_count": 2,
+            "search_result": SearchResult(execution_status="completed"),
+        },
+        None,
+    )
+
+    assert update is not None
+    assert update["jump_to"] == "end"
+    domain_result = update["domain_result"]
+    assert domain_result["execution_status"] == "completed"
+    assert domain_result["decision"]["status"] == "undetermined"
+    assert domain_result["decision"]["missing_conditions"]
+
+
+def test_call_limit_middleware_does_not_intervene_before_limit() -> None:
+    assert (
+        TaxPayoutModelCallLimit(max_model_calls=5).before_model({"run_model_call_count": 3}, None)
+        is None
+    )
+
+
+def test_safe_terminal_result_fails_cleanly_without_search() -> None:
+    result = _safe_terminal_tax_payout_result({})
+
+    assert result["execution_status"] == "failed"
+    assert result["evidence"] == []
+    assert result["calculations"] == []
+    assert "error" in result
+
+
+def test_safe_terminal_result_is_undetermined_without_evidence() -> None:
+    result = _safe_terminal_tax_payout_result(
+        {"search_result": SearchResult(execution_status="completed")}
+    )
+
+    assert result["decision"]["status"] == "undetermined"
+
+
+def test_safe_terminal_result_preserves_calculations_and_linked_evidence() -> None:
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    chunk = SearchChunkPayload(
+        chunk_id=chunk_id,
+        source_file_name="guide.pdf",
+        document_type=DocumentType.PENSION_REFERENCE,
+        chunk_index=0,
+        title="부담금 안내",
+        locator="1페이지",
+        content="연간임금총액을 기준으로 사용자 부담금을 산정합니다.",
+    )
+    calculation = {
+        "calculator_id": "dc_minimum_employer_contribution",
+        "inputs": {"annual_total_wages_krw": "12000000"},
+        "input_sources": {
+            "annual_total_wages_krw": {
+                "origin": "evidence",
+                "text": "연간임금총액은 1,200만원",
+                "chunk_id": chunk_id,
+            }
+        },
+        "outputs": {
+            "annual_total_wages": "12000000",
+            "minimum_employer_contribution": "1000000",
+        },
+        "units": {
+            "annual_total_wages": "KRW",
+            "minimum_employer_contribution": "KRW",
+        },
+        "warnings": ["참고용 안내"],
+    }
+
+    result = _safe_terminal_tax_payout_result(
+        {
+            "search_result": SearchResult(execution_status="completed", retrieved_chunks=[chunk]),
+            "calculations": [calculation],
+        }
+    )
+
+    assert result["decision"]["status"] == "conditional"
+    assert result["decision"]["missing_conditions"]
+    assert "DC 최소 사용자 부담금" in result["decision"]["conclusion"]
+    assert [item["chunk_id"] for item in result["evidence"]] == [chunk_id]
+    assert result["calculations"] == [calculation]
+    assert "참고용 안내" in result["warnings"]
+
+
+def test_safe_terminal_result_never_fabricates_verified_numeric_statements() -> None:
+    """H: safe terminalization은 static fact를 새로 선택·검증하지 않는다.
+
+    domain_result는 successful submit_domain_result Command로만 채워지므로,
+    이 경로(예산 소진)에 도달했다는 것 자체가 그런 성공한 제출이 없었다는
+    뜻이다 — verified_numeric_statements 키가 아예 생기지 않아야 한다.
+    """
+
+    result = _safe_terminal_tax_payout_result(
+        {
+            "search_result": SearchResult(
+                execution_status="completed", retrieved_chunks=[_doc41_chunk()]
+            )
+        }
+    )
+
+    assert "verified_numeric_statements" not in result
