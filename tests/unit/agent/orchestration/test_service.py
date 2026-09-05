@@ -503,7 +503,7 @@ def _statement(*, source_id: str, text: str, source_type: str = "statutory_fact"
 # ---------------------------------------------------------------------------
 
 
-async def test_firewall_A_single_static_verified_number_is_substituted() -> None:
+async def test_firewall_A_single_static_verified_number_is_rendered_canonically() -> None:
     statement = _statement(
         source_id="tax_credit_limit_combined",
         text="연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.",
@@ -521,10 +521,7 @@ async def test_firewall_A_single_static_verified_number_is_substituted() -> None
         question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
     )
 
-    assert (
-        result.answer.answer
-        == "세액공제 한도는 연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다.입니다."
-    )
+    assert result.answer.answer == "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다."
     assert token not in result.answer.answer
 
 
@@ -810,6 +807,63 @@ async def test_determined_result_without_calculator_cannot_derive_new_number_fro
     assert "새로운 수치 결론을 제공할 수 없습니다" in result.answer.answer
 
 
+async def test_determined_unverified_static_number_is_blocked_without_question_number() -> None:
+    question = "연금저축과 IRP를 합산하면 세액공제 한도는 얼마인가요?"
+    domain_result: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "determined",
+            "conclusion": "합산 세액공제 한도는 1,500만원입니다.",
+            "missing_conditions": [],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
+    }
+    supervisor = FakeSupervisor(
+        result={
+            "messages": [AIMessage(content="합산 세액공제 한도는 1,500만원입니다.")],
+            "question_id": "Q-001",
+            "question": question,
+            "domain_results": [domain_result],
+        }
+    )
+
+    result = await AnswerService(supervisor).run(question_id="Q-001", question=question)
+
+    assert "1,500만원" not in result.answer.answer
+    assert "새로운 수치 결론을 제공할 수 없습니다" in result.answer.answer
+
+
+async def test_unverified_user_input_number_can_be_echoed_without_derivation() -> None:
+    question = "연금저축에 700만원을 납입했습니다."
+    domain_result: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "determined",
+            "conclusion": "연금저축에 700만원을 납입한 것으로 확인됩니다.",
+            "missing_conditions": [],
+        },
+        "evidence": [],
+        "calculations": [],
+        "warnings": [],
+    }
+    supervisor = FakeSupervisor(
+        result={
+            "messages": [AIMessage(content="연금저축에 700만원을 납입한 것으로 확인됩니다.")],
+            "question_id": "Q-001",
+            "question": question,
+            "domain_results": [domain_result],
+        }
+    )
+
+    result = await AnswerService(supervisor).run(question_id="Q-001", question=question)
+
+    assert result.answer.answer == "연금저축에 700만원을 납입한 것으로 확인됩니다."
+
+
 async def test_pseudo_placeholder_stripped_when_no_verified_numeric_statements_exist() -> None:
     """Policy 단독 라우팅처럼 verified_numeric_statements가 전혀 없으면
     `_stabilize_verified_numeric_answer`가 개입하지 않는다 — 그 경로에서 Main이
@@ -846,9 +900,24 @@ async def test_pseudo_placeholder_cleanup_is_noop_for_normal_text() -> None:
     assert result.answer.answer == "연금저축과 IRP는 세제상 차이가 있습니다."
 
 
-async def test_sentence_tail_unit_residue_is_stripped_after_substitution() -> None:
-    """치환된 canonical 문장 바로 뒤에 Main이 붙인 단위 잔여물
-    ("...600만원입니다.만원까지...")이 결정론적으로 제거된다."""
+async def test_pseudo_verified_numeric_marker_is_rejected() -> None:
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="합산 한도는 VERIFIED_NUMERIC:9000000원입니다.")],
+            domain_results=[_completed_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    assert "VERIFIED_NUMERIC" not in result.answer.answer
+    assert "9000000" not in result.answer.answer
+
+
+async def test_sentence_tail_unit_residue_uses_canonical_fallback() -> None:
+    """Main의 단위 잔여물을 버리고 canonical 문장만 결정론적으로 사용한다."""
 
     statement = _statement(
         source_id="pension_savings_tax_credit_limit",
@@ -869,11 +938,11 @@ async def test_sentence_tail_unit_residue_is_stripped_after_substitution() -> No
 
     assert "입니다.만원" not in result.answer.answer
     assert "연금저축 단독 세액공제 대상 납입한도는 600만원입니다." in result.answer.answer
-    assert "세액공제가 가능합니다." in result.answer.answer
+    assert result.answer.answer == "연금저축 단독 세액공제 대상 납입한도는 600만원입니다."
 
 
-async def test_sentence_tail_non_unit_text_is_preserved() -> None:
-    """단위 잔여물이 아닌 평범한 이어지는 문장은 그대로 보존된다(과도한 제거 방지)."""
+async def test_sentence_tail_non_unit_text_does_not_change_canonical_fact() -> None:
+    """Main의 자유 문구가 canonical fact의 표현을 바꾸지 않는다."""
 
     statement = _statement(
         source_id="tax_credit_limit_combined",
@@ -892,7 +961,7 @@ async def test_sentence_tail_non_unit_text_is_preserved() -> None:
         question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
     )
 
-    assert "이 점을 참고하세요." in result.answer.answer
+    assert result.answer.answer == "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다."
 
 
 async def test_firewall_I_policy_and_tax_mixed_domain_placeholders_do_not_collide() -> None:
@@ -1032,7 +1101,7 @@ async def test_firewall_N_unknown_placeholder_falls_back() -> None:
     assert "연금저축과 IRP를 합산한 세액공제 한도는 연 900만원입니다." in result.answer.answer
 
 
-async def test_firewall_O_reordered_placeholders_are_both_accepted() -> None:
+async def test_firewall_O_reordered_placeholders_use_canonical_order() -> None:
     contribution = _statement(
         source_id="contribution_limit_combined",
         text="연금저축과 IRP를 합산한 납입한도는 연 1,800만원입니다.",
@@ -1058,7 +1127,7 @@ async def test_firewall_O_reordered_placeholders_are_both_accepted() -> None:
 
     assert "900만원" in result.answer.answer
     assert "1,800만원" in result.answer.answer
-    assert result.answer.answer.index("900만원") < result.answer.answer.index("1,800만원")
+    assert result.answer.answer.index("1,800만원") < result.answer.answer.index("900만원")
 
 
 async def test_answer_service_normalizes_supervisor_execution_failure() -> None:
