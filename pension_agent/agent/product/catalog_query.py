@@ -5,16 +5,25 @@ from __future__ import annotations
 import asyncio
 import json
 from importlib import resources
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, Self
 
-from langchain.messages import AIMessage, HumanMessage, SystemMessage
+from langchain.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain.tools import tool
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 from langchain_core.runnables import Runnable
 from openai import OpenAIError
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from pension_agent.agent.execution import ModelConcurrencyMiddleware
+from pension_agent.agent.product.product_identity import resolve_mention_candidates
 from pension_agent.retrieval import (
     CatalogReturnMode,
     ProductCatalog,
@@ -66,6 +75,57 @@ UnresolvedProductQuery = NotFoundProductQuery | AmbiguousProductQuery
 ResolveProductQuery = SingleProductQuery | UnresolvedProductQuery
 
 
+class ComparisonProductTarget(_CatalogQueryBase):
+    """원문 표현과 확정 여부를 함께 보존하는 비교 대상."""
+
+    mention_parts: Annotated[
+        list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]],
+        Field(
+            min_length=1,
+            description=(
+                "각 원소는 question의 연속된 원문 그대로. 떨어진 공통 이름과 수식어는 "
+                "별도 원소로 분리하고 원문에 없는 결합 표현은 금지한다."
+            ),
+        ),
+    ]
+    resolution_status: ProductResolutionStatus
+    product_code: (
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, pattern=r"^KR[A-Z0-9]{10}$", to_upper=True),
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description="카탈로그 product_code의 KR로 시작하는 12자리 코드. 공식명이나 alias는 금지. single에서만 포함",
+    )
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> Self:
+        if self.resolution_status == "single":
+            if self.product_code is None:
+                raise ValueError("확정된 비교 대상에는 상품 코드가 필요합니다.")
+        elif "product_code" in self.model_fields_set:
+            raise ValueError("미식별 비교 대상에는 상품 코드를 넣을 수 없습니다.")
+        return self
+
+
+class MultipleProductsQuery(_CatalogQueryBase):
+    """하나의 계획 안에 명시적인 복수 비교 대상을 보존한다."""
+
+    route: Literal["resolve_products"]
+    targets: Annotated[list[ComparisonProductTarget], Field(min_length=2, max_length=5)]
+
+
+class _ComparisonCodeMismatch(ProductCatalogError):
+    """원문 후보는 하나지만 HCX가 다른 코드를 선택해 한 번 교정할 수 있는 오류."""
+
+    def __init__(self, query: MultipleProductsQuery, mismatches: list[dict[str, Any]]) -> None:
+        super().__init__("상품 식별 표현과 확정 코드가 일치하지 않습니다.")
+        self.query = query
+        self.mismatches = mismatches
+
+
 class BrowseAllCatalogQuery(_CatalogQueryBase):
     """운용사 조건 없이 전체 상품 개수·목록을 조회하는 계획."""
 
@@ -96,6 +156,7 @@ CatalogQueryPlan = Annotated[
     SingleProductQuery
     | NotFoundProductQuery
     | AmbiguousProductQuery
+    | MultipleProductsQuery
     | BrowseAllCatalogQuery
     | BrowseProviderCatalogQuery
     | UnregisteredProviderQuery,
@@ -154,6 +215,11 @@ class HCXProductCatalogQueryPlanner:
     ) -> None:
         self._catalog = catalog
         self._system_prompt = load_product_catalog_query_prompt(catalog)
+        self._repair_feedback = json.loads(
+            resources.files("pension_agent.prompts")
+            .joinpath("domain", "product-catalog-query-repair.json")
+            .read_text(encoding="utf-8")
+        )
         self._model: Runnable[Any, AIMessage] = model.bind_tools(
             (_return_product_catalog_query,),
             tool_choice=PRODUCT_CATALOG_QUERY_TOOL_NAME,
@@ -171,7 +237,7 @@ class HCXProductCatalogQueryPlanner:
 
         if deadline <= asyncio.get_running_loop().time():
             raise TimeoutError
-        messages = [
+        messages: list[BaseMessage] = [
             SystemMessage(content=self._system_prompt),
             HumanMessage(
                 content=json.dumps(
@@ -182,18 +248,54 @@ class HCXProductCatalogQueryPlanner:
             ),
         ]
 
+        model_call_count = 0
+
+        async def invoke_model() -> AIMessage:
+            nonlocal model_call_count
+            if model_call_count >= 2:
+                raise CatalogQueryPlanError("상품 카탈로그 계획의 모델 호출 상한에 도달했습니다.")
+            model_call_count += 1
+            return await self._model.ainvoke(messages)
+
         async def invoke() -> AIMessage:
             if self._model_concurrency is None:
-                return await self._model.ainvoke(messages)
+                return await invoke_model()
             return await self._model_concurrency.arun(
-                lambda: self._model.ainvoke(messages),
+                invoke_model,
                 deadline=deadline,
             )
 
         try:
             async with asyncio.timeout_at(deadline):
                 response = await invoke()
-                query = self._parse_and_validate_response(response)
+                try:
+                    query = self._parse_and_validate_response(response, question=question)
+                except _ComparisonCodeMismatch as mismatch:
+                    messages.extend(
+                        [
+                            response,
+                            ToolMessage(
+                                name=PRODUCT_CATALOG_QUERY_TOOL_NAME,
+                                tool_call_id=response.tool_calls[0]["id"],
+                                content=json.dumps(
+                                    {**self._repair_feedback, "mismatches": mismatch.mismatches},
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                ),
+                            ),
+                        ]
+                    )
+                    if deadline <= asyncio.get_running_loop().time():
+                        raise TimeoutError
+                    response = await invoke()
+                    query = self._parse_and_validate_response(response, question=question)
+                    if not isinstance(query, MultipleProductsQuery) or [
+                        (target.mention_parts, target.resolution_status) for target in query.targets
+                    ] != [
+                        (target.mention_parts, target.resolution_status)
+                        for target in mismatch.query.targets
+                    ]:
+                        raise ProductCatalogError("코드 교정 중 원래 비교 대상을 바꿀 수 없습니다.")
         except TimeoutError:
             raise
         except CatalogQueryPlanError:
@@ -214,6 +316,8 @@ class HCXProductCatalogQueryPlanner:
     def _parse_and_validate_response(
         self,
         response: AIMessage,
+        *,
+        question: str | None = None,
     ) -> CatalogQueryPlan:
         calls = [
             call for call in response.tool_calls if call["name"] == PRODUCT_CATALOG_QUERY_TOOL_NAME
@@ -221,9 +325,40 @@ class HCXProductCatalogQueryPlanner:
         if len(calls) != 1 or len(response.tool_calls) != 1:
             raise CatalogQueryPlanError("HCX 카탈로그 Query 응답이 올바르지 않습니다.")
         query = CatalogQueryEnvelope.model_validate(calls[0]["args"]).query
-        return self._validate_query(query)
+        return self._validate_query(query, question=question)
 
-    def _validate_query(self, query: CatalogQueryPlan) -> CatalogQueryPlan:
+    def _validate_query(
+        self,
+        query: CatalogQueryPlan,
+        *,
+        question: str | None = None,
+    ) -> CatalogQueryPlan:
+        if isinstance(query, MultipleProductsQuery):
+            if question is None:
+                raise ProductCatalogError("복수 상품 식별에는 질문 원문이 필요합니다.")
+            mismatches: list[dict[str, Any]] = []
+            for index, target in enumerate(query.targets):
+                candidates = resolve_mention_candidates(
+                    catalog=self._catalog,
+                    mention_parts=target.mention_parts,
+                    question=question,
+                )
+                if target.resolution_status != "single":
+                    continue
+                if len(candidates) != 1:
+                    raise ProductCatalogError("상품 식별 표현과 확정 코드가 일치하지 않습니다.")
+                if candidates[0].product_code != target.product_code:
+                    mismatches.append(
+                        {
+                            "target_index": index + 1,
+                            "mention_parts": list(target.mention_parts),
+                            "selected_product_code": target.product_code,
+                            "candidate": candidates[0].to_dict(),
+                        }
+                    )
+            if mismatches:
+                raise _ComparisonCodeMismatch(query, mismatches)
+            return query
         if isinstance(query, UnregisteredProviderQuery):
             if self._catalog.has_provider(query.provider):
                 raise ProductCatalogError("등록된 운용사를 미등록으로 처리할 수 없습니다.")

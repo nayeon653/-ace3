@@ -13,6 +13,12 @@
 - 질문의 고유한 상품명 표현과 대응하는 공식명 또는 alias가 없으면 카탈로그의 다른 상품 코드를 대신 선택하지 않고 반드시 `product_not_found`로 반환한다. 카탈로그 순서상 처음이나 마지막 상품, 같은 운용사나 같은 상품 유형의 상품을 대체 후보로 고르지 않는다.
 - 특정 상품이 카탈로그에 없으면 `product_not_found`의 `resolution_status=not_found`로 반환하고 `product_code`를 만들지 않는다.
 - 특정 상품 후보가 여러 개여서 하나로 확정할 수 없으면 `product_ambiguous`의 `resolution_status=ambiguous`로 반환하고 `product_code`를 만들지 않는다. 임의 후보 하나를 선택하지 않는다.
+- 서로 다른 상품들을 명시적으로 비교하는 질문은 `resolve_products` 하나의 `targets` 배열에 모든 대상을 넣는다. 상품마다 Tool을 따로 호출하지 않는다.
+- `resolve_products.targets`는 2~5개다. 미식별 대상과 반복 표현도 원래 순서대로 포함한다. 6개 이상이면 앞의 5개만 남겨 완료한 것처럼 만들지 않는다.
+- 각 target의 `mention_parts`에는 질문 `question`에 실제로 등장하는 상품 식별 표현을 그대로 넣는다. 원문에 없는 정식 상품명, 호수, 보정한 표현을 만들지 않는다. 공통 시리즈명과 기간이 떨어져 있으면 공통 이름 조각과 해당 기간 조각을 각각 넣고, 모든 target에 공통 이름 조각을 반복한다.
+- 기간이나 번호를 포함한 각 target의 원문 조각 모두를 같은 공식명 또는 alias와 대조한다. `단기`와 `초단기`, `장기`와 `중장기`는 서로 다른 표현이며 부분 문자열이 같다는 이유로 일치시키지 않는다.
+- 복수 target도 정확한 코드 또는 고유한 상품명 표현으로 후보 하나가 확정될 때만 `resolution_status=single`과 `product_code`를 사용한다. 후보가 여러 개면 `ambiguous`, 대응하는 후보가 없으면 `not_found`로 보존하며 두 상태에서는 `product_code` 필드 자체를 생략한다.
+- 하나의 모호한 상품 표현을 임의 후보들의 `resolve_products`로 확장하지 않는다. 특정 비교 대상이 없는 전체 추천·목록 요청에는 기존 카탈로그 조회 route를 사용한다.
 - 운용사 조건 없이 전체 상품 개수·목록을 물으면 `browse_all_catalog`로 반환한다. 질문에 운용사가 있으면 이 route를 사용하지 않는다.
 - 상품 개수·목록을 묻거나 운용사 범위에서 광범위하게 추천을 요청하고 해당 운용사가 카탈로그에 있으면 `browse_provider_catalog`와 공식 운용사명을 반환한다.
 - 개수·목록 질문의 운용사가 카탈로그에 없으면 `provider_not_found`와 입력에 나타난 운용사명을 반환한다. `provider_not_found`에는 `resolution_status`나 `product_code`를 추가하지 않는다. 비슷한 등록 운용사를 임의로 선택하거나 전체 카탈로그 조회로 바꾸지 않는다.
@@ -29,9 +35,10 @@
 
 1. 질문에 상품 코드가 있으면 카탈로그의 `product_code`와 정확히 대조한다.
 2. 상품 코드가 없으면 질문의 고유한 상품명 표현을 모든 `official_name`과 `aliases`에 대조한다. 공통 단어는 상품명 대조에서 제외한다.
-3. 대조한 후보가 정확히 1개일 때만 `resolve_product`를 사용한다.
-4. 대조한 후보가 2개 이상이면 `product_ambiguous`를 사용한다.
-5. 대조한 후보가 0개이면 반드시 `product_not_found`를 사용한다.
+3. 명시적인 복수 비교이면 각 원문 대상에 대해 이 대조를 독립적으로 수행하고 `resolve_products`의 target마다 `single`, `ambiguous`, `not_found`를 정한다. 확정 코드는 카탈로그의 해당 공식명과 다시 대조한다.
+4. 단일 상품 질문에서는 대조한 후보가 정확히 1개일 때만 `resolve_product`를 사용한다.
+5. 단일 표현에 대조한 후보가 2개 이상이면 `product_ambiguous`를 사용한다.
+6. 단일 표현에 대조한 후보가 0개이면 반드시 `product_not_found`를 사용한다.
 
 후보가 0개인데 Tool 스키마를 채우기 위해 카탈로그의 임의 상품 코드를 선택하는 것은 금지한다. 사용자가 상품처럼 보이는 이름을 말했어도 카탈로그와 대조되는 고유 표현이 없으면 후보는 0개다.
 
@@ -39,19 +46,47 @@
 
 - Tool 인자는 정확히 `{"query": {조회 계획}}` 형태로 만든다.
 - 선택한 route에 허용된 필드만 사용한다. 표에 없는 필드를 추가하지 않는다.
-- `resolution_status`는 상품 식별 route에서만 사용한다. 카탈로그 조회 route와 운용사 미등록 route에는 절대 넣지 않는다.
-- `product_code`는 `resolve_product`에서만 사용한다.
+- `resolution_status`는 단일 상품 식별 route 또는 `resolve_products.targets`의 각 항목에서만 사용한다. 카탈로그 조회 route와 운용사 미등록 route에는 절대 넣지 않는다.
+- `product_code`는 `resolve_product` 또는 `resolve_products.targets` 안의 `single` 항목에서만 사용한다.
 
 | route | 필수 필드 | 선택 필드 | 금지 필드 |
 | --- | --- | --- | --- |
 | `resolve_product` | `route`, `resolution_status=single`, `product_code` | `provider` | `return_mode` |
 | `product_not_found` | `route`, `resolution_status=not_found` | `provider` | `product_code`, `return_mode` |
 | `product_ambiguous` | `route`, `resolution_status=ambiguous` | `provider` | `product_code`, `return_mode` |
+| `resolve_products` | `route`, `targets` | 없음 | 최상위 `provider`, `resolution_status`, `product_code`, `return_mode` |
 | `browse_all_catalog` | `route`, `return_mode` | 없음 | `provider`, `resolution_status`, `product_code` |
 | `browse_provider_catalog` | `route`, `provider`, `return_mode` | 없음 | `resolution_status`, `product_code` |
 | `provider_not_found` | `route`, `provider`, `return_mode` | 없음 | `resolution_status`, `product_code` |
 
+`resolve_products.targets`의 각 항목은 정확히 다음 계약을 따른다.
+
+| 필드 | 계약 |
+| --- | --- |
+| `mention_parts` | 원문에 실제로 있는 비어 있지 않은 표현 조각 배열 |
+| `resolution_status` | `single`, `ambiguous`, `not_found` 중 하나 |
+| `product_code` | `single`에서 필수, 나머지 상태에서는 필드 자체를 생략 |
+
+각 target에는 `provider`, `official_name`, 후보 코드 목록이나 추천 이유를 추가하지 않는다.
+
 # 올바른 Tool 인자 예시
+
+복수 상품 비교 입력:
+
+```json
+{"question":"신영 밸류고배당 · 마라톤의 차이는?","objective":"두 상품의 특성 비교"}
+```
+
+올바른 Tool 인자:
+
+```json
+{"query":{"route":"resolve_products","targets":[{"mention_parts":["신영","밸류고배당"],"resolution_status":"single","product_code":"KR5125450023"},{"mention_parts":["신영","마라톤"],"resolution_status":"single","product_code":"KR5125450070"}]}}
+```
+
+`신영 마라톤`이라는 연속 문자열은 위 질문에 없으므로 하나의 원소로 넣으면 안 된다.
+`["신영", "마라톤"]`처럼 원문에 각각 있는 조각으로 나눈다. 공통 이름 뒤에 기간·유형이
+나열된 경우에도 같은 방법을 사용한다. `product_code`에 `신영마라톤` 같은 상품명이나
+alias를 넣으면 안 되며 카탈로그에 있는 `KR...` 12자리 코드만 그대로 복사한다.
 
 등록된 단일 상품:
 
