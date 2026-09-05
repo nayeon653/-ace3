@@ -15,7 +15,6 @@ from openai import OpenAIError
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from pension_agent.agent.execution import ModelConcurrencyMiddleware
-from pension_agent.agent.prompt_injection import protect_system_message
 from pension_agent.retrieval import (
     CatalogReturnMode,
     ProductCatalog,
@@ -173,7 +172,7 @@ class HCXProductCatalogQueryPlanner:
         if deadline <= asyncio.get_running_loop().time():
             raise TimeoutError
         messages = [
-            protect_system_message(SystemMessage(content=self._system_prompt)),
+            SystemMessage(content=self._system_prompt),
             HumanMessage(
                 content=json.dumps(
                     {"question": question, "objective": objective},

@@ -118,8 +118,8 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 
 ### 프롬프트 인젝션 방어
 
-`MainInputGuardMiddleware`의 `before_agent`에서 Main 실행 시작 시 사용자 입력을 한 번
-검사한다. 원문 `question`과 Human 메시지에서 알려진 한국어·영어 지침 무시, 내부
+`MainInputGuardMiddleware`의 `before_agent`에서 요청마다 Main 실행 시작 시 사용자
+입력을 한 번 검사한다. 원문 `question`과 Human 메시지에서 알려진 한국어·영어 지침 무시, 내부
 프롬프트 추출, 역할 사칭 표식을 발견하면 HCX·Domain Tool 호출 없이 고정된 자연어
 거절 응답을 반환한다. NFKC, 공백, 비표시 서식 문자 정규화는 검사 복사본에만 적용한다.
 
@@ -141,19 +141,17 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 
 거절과 안전성 확인 실패도 `GET /answer`의 기존 5개 필드와 HTTP 200을 유지하며,
 원문 질문을 변경하지 않는다. 이 경우 검색 근거와 Domain 실행 결과는 비어 있다.
-판별은 요청당 논리적으로 한 번 수행하고 Main의 Tool 왕복 때 반복하거나 공용 객체에
-판정을 캐시하지 않는다. 운영 runtime은 전용 판별기를 항상 주입한다.
+판별은 요청당 논리적으로 한 번 수행하고 Main의 Tool 왕복이나 Domain 실행 때
+반복하지 않는다. 판정을 공용 객체에 캐시하지 않으며 운영 runtime은 전용 판별기를
+항상 주입한다.
 `create_main_supervisor(injection_classifier=None)`은 오프라인 테스트·그래프 렌더링용
 정규식 단독 조립을 지원한다. 판별기가 주입된 graph는 native async 실행을 사용하며,
 동기 `invoke`는 의미 판별을 생략하지 않고 안전성 확인 실패로 종료한다.
 
-Main, Policy, Tax/Payout, Product의 모든 모델 호출에는 패키지 리소스
-`pension_agent/prompts/security/input-trust-boundary.md`를 같은 System 메시지에 추가한다.
-Tool 응답은 모델 요청 복사본에서만 `{"untrusted_tool_output": 원래 content}`로 감싼다.
-모델에는 원래 JSON 결과가 문자열로 포함되며, 그 안의 상태·근거·계산을 데이터로 읽는다.
-Tool 호출 ID, 메시지 메타데이터, 원본 state, 근거 본문·UUID와 계산 출처는 보존한다.
-정책은 매 호출에 적용되며 그래프 상태에 누적되지 않는다. `create_agent`를 우회하는
-카탈로그 planner와 matcher의 직접 HCX 호출에도 같은 System 정책을 적용한다.
+제공 문서는 신뢰할 수 있는 정보로 취급한다. 검색 문서와 Domain Tool 결과를 별도로
+검사하거나 재포장하지 않는다. Main의 후속 모델 호출, Policy, Tax/Payout, Product와
+카탈로그 planner·matcher에는 별도 인젝션 방어 미들웨어나 공통 보안 프롬프트를 추가하지
+않는다. 기존 업무 프롬프트와 Tool 결과 형식을 그대로 사용한다.
 
 의미 판별의 버전 관리 설정은 `INJECTION_GUARD_HCX_CONFIG`다. HCX-007 비추론,
 temperature 0, 최대 생성 1024토큰, timeout 10초, SDK retry 0회를 사용한다. 기존 HCX
@@ -163,9 +161,8 @@ temperature 0, 최대 생성 1024토큰, timeout 10초, SDK retry 0회를 사용
 
 정규식은 알려진 표현을 차단하는 보조 방어다. 공격을 그대로 인용한 질문도 정규식에서
 차단될 수 있으며, 뒤의 HCX가 이 차단을 번복하지 않는다. 의미 판별도 우회 표현·인코딩·
-다국어 공격을 모두 탐지하지는 못한다. 의미 판별 대상은 사용자 입력이며 검색 문서와
-Domain Tool 결과에는 기존 System 정책과 데이터 경계만 적용한다. 최종 출력 정제는
-범위 밖이다. 정상 질문도 추가 HCX 호출 지연을 부담한다.
+다국어 공격을 모두 탐지하지는 못한다. 판별 대상은 최초 사용자 입력이며 최종 출력
+정제는 범위 밖이다. 정상 질문도 추가 HCX 호출 지연을 부담한다.
 
 오프라인 테스트는 실행 순서·오류·시간 예산·원문 보존을 검증한다. 합성 입력의 실제
 HCX 비교 결과는 `docs/experiments.md`에 기록한다. 평가 실행기와 질문셋은 로컬 검증

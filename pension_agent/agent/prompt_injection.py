@@ -1,16 +1,13 @@
-"""직접 인젝션 차단과 모델 입력의 지시·데이터 경계 보강."""
+"""Main 실행 시작 시 사용자 입력의 프롬프트 인젝션을 한 번 검사한다."""
 
 import json
 import logging
 import re
 import unicodedata
-from collections.abc import Awaitable, Callable
-from functools import lru_cache
-from importlib import resources
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse, hook_config
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain.agents.middleware import AgentMiddleware, hook_config
+from langchain_core.messages import AIMessage, HumanMessage
 
 from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.injection_classifier import (
@@ -73,30 +70,6 @@ def is_direct_prompt_injection(text: str) -> bool:
     return any(pattern.search(normalized) for pattern in _DIRECT_INJECTION_PATTERNS)
 
 
-@lru_cache(maxsize=1)
-def _load_security_policy() -> str:
-    return (
-        resources.files("pension_agent.prompts")
-        .joinpath("security", "input-trust-boundary.md")
-        .read_text(encoding="utf-8")
-        .strip()
-    )
-
-
-def protect_system_message(message: SystemMessage | None) -> SystemMessage:
-    """단일 system 메시지에 공통 정책을 추가하고 기존 내용과 메타데이터를 보존한다."""
-
-    policy = _load_security_policy()
-    if message is None:
-        return SystemMessage(content=policy)
-    content = message.content
-    if isinstance(content, str):
-        protected_content: str | list[str | dict[str, Any]] = f"{content}\n\n{policy}"
-    else:
-        protected_content = [*content, {"type": "text", "text": policy}]
-    return message.model_copy(update={"content": protected_content})
-
-
 def _user_inputs(state: Any) -> list[str]:
     inputs: list[str] = [
         message.text for message in state.get("messages", []) if isinstance(message, HumanMessage)
@@ -152,59 +125,3 @@ class MainInputGuardMiddleware(AgentMiddleware[Any, ExecutionContext, Any]):
         if decision != "allow":
             return _end_with_message(INPUT_CHECK_UNAVAILABLE)
         return None
-
-
-class PromptInjectionMiddleware(AgentMiddleware[Any, Any, Any]):
-    """Main의 직접 공격을 차단하고 매 모델 호출에서 외부 Tool 텍스트를 격리한다."""
-
-    def __init__(self, *, block_user_input: bool = False) -> None:
-        self._block_user_input = block_user_input
-
-    def _should_block(self, request: ModelRequest[Any]) -> bool:
-        if not self._block_user_input:
-            return False
-        question = (request.state or {}).get("question", "")
-        inputs: list[str] = [
-            message.text for message in request.messages if isinstance(message, HumanMessage)
-        ]
-        if isinstance(question, str):
-            inputs.append(question)
-        return any(is_direct_prompt_injection(text) for text in inputs)
-
-    def _protect_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
-        # state를 변경하면 근거 원문과 Tool 호출 이력까지 변하므로 요청 복사본만 감싼다.
-        messages = [
-            message.model_copy(
-                update={
-                    "content": json.dumps(
-                        {"untrusted_tool_output": message.content},
-                        ensure_ascii=False,
-                    )
-                }
-            )
-            if isinstance(message, ToolMessage)
-            else message
-            for message in request.messages
-        ]
-        return request.override(
-            system_message=protect_system_message(request.system_message),
-            messages=messages,
-        )
-
-    def wrap_model_call(
-        self,
-        request: ModelRequest[Any],
-        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
-    ) -> ModelResponse[Any]:
-        if self._should_block(request):
-            return ModelResponse(result=[AIMessage(content=INJECTION_REFUSAL)])
-        return handler(self._protect_request(request))
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest[Any],
-        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
-    ) -> ModelResponse[Any]:
-        if self._should_block(request):
-            return ModelResponse(result=[AIMessage(content=INJECTION_REFUSAL)])
-        return await handler(self._protect_request(request))

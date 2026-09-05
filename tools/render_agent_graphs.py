@@ -98,7 +98,10 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
         '    question["GET /answer 질문"] --> regex_guard',
         "",
         '    subgraph main["Main Supervisor · CompiledStateGraph"]',
-        '        regex_guard{"정규식 공격 패턴"} -->|일치| guard_refusal["거절 응답"]',
+        (
+            '        regex_guard{"시작 시 1회<br/>정규식 공격 패턴"} '
+            '-->|일치| guard_refusal["거절 응답"]'
+        ),
         (
             '        regex_guard -->|통과| input_guard["의미 판별<br/>'
             f'{INJECTION_GUARD_HCX_CONFIG.model}"]'
