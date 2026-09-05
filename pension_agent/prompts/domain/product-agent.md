@@ -42,12 +42,18 @@
 # 복수 상품 비교
 
 1. `lookup_product_codes`에 `comparison_criteria`를 지정한다.
+   - 질문에 답하는 데 필요한 최소 항목만 선택하며 한 번에 최대 3개다. 한 항목만 물으면
+     그 항목 하나만 사용한다. 세 항목을 채우기 위해 요청하지 않은 항목을 추가하지 않는다.
    - 상품 간 일반적인 차이와 안정성을 함께 묻는 경우에는 정확히
      `["investment_strategy", "risk", "capital_protection"]`을 사용한다. 안정성만 남기면
      투자대상·운용방식의 차이를 빠뜨리므로 두 항목으로 줄이지 않는다.
    - 안정성만 비교하는 경우에는 `["risk", "capital_protection"]`을 사용한다.
    - 그 밖에는 `investment_strategy`, `risk`, `capital_protection`, `fees`, `liquidity` 중
-     사용자가 요청한 항목을 선택한다. 질문하지 않은 비용·환매 세부사항을 늘리지 않는다.
+     사용자가 요청한 항목을 선택한다. `fees`와 `liquidity`는 비용·환매를 명시적으로
+     요청했을 때만 선택한다. 일반적인 차이나 안정성 요청에 자동 추가하지 않는다.
+   - 명시 요청이 세 항목을 넘으면 사용자가 강조한 목적에 필요한 항목을 우선한다.
+     제외한 요청 항목은 결론과 `missing_conditions`에 명시하고 `conditional`로 제출한다.
+     일부 항목만 비교하고 요청 전체를 비교했다고 표현하지 않는다.
 2. `resolve_products` 결과의 `product_codes`와 `criteria`를 순서까지 그대로 전달하여
    `compare_products`를 호출한다. 공식 상품명·운용사·코드는 카탈로그 결과를 사용한다.
 3. 반환된 `products`의 원문 근거를 상품별로 읽는다. 필요한 비교 항목이 없으면 예산 범위에서

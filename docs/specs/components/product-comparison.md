@@ -104,7 +104,7 @@ Domain deadline 및 HCX 동시성 제한을 공유한다.
 | 필드 | 타입·검증 |
 |---|---|
 | `product_codes` | 중복 없는 코드 배열, 2~5개, state의 확정 코드 전체와 순서까지 일치 |
-| `criteria` | 중복 없는 아래 enum 배열, 1~5개, state의 `comparison_criteria`와 순서까지 일치 |
+| `criteria` | 중복 없는 아래 enum 배열, 1~3개, state의 `comparison_criteria`와 순서까지 일치 |
 | ToolRuntime | 질문 원문, 전체 targets, catalog version, 상위 deadline과 실행 상태 자동 주입 |
 
 | criterion | 비교 범위 |
@@ -115,10 +115,17 @@ Domain deadline 및 HCX 동시성 제한을 공유한다.
 | `fees` | 보수·비용·판매/환매수수료의 종류, 클래스와 적용 조건 |
 | `liquidity` | 환매 절차·지급 시점·제한, 보유기간 관련 조건 |
 
-`안정성` 요청은 프롬프트에서 최소한 `risk`와 `capital_protection`을 선택하도록 지시한다.
-이는 Python 키워드 라우팅이 아니므로 매핑 품질은 평가로 검증하며, 모든 질문에 비용·유동성을
-자동 추가하지 않는다. 검색 표현은 `prompts/domain/product-comparison-search.json`에서
-버전 관리한다.
+질문에 필요한 최소 항목을 선택한다. 안정성만 묻는 질문에는 `risk`와 `capital_protection`,
+일반적인 차이와 안정성을 함께 묻는 질문에는 `investment_strategy`까지 3개를 선택하도록
+지시한다. 특정 한 항목만 요청하면 하나만 비교하며, `fees`와 `liquidity`는 명시 요청에만
+선택한다. 세 항목을 채우기 위한 자동 확장은 하지 않는다.
+
+3개 상한은 두 Tool의 모델 노출 스키마, 카탈로그 입력, 검색 config와 최종 결과 검증이 함께
+강제한다. 항목의 의미 선택은 HCX가 담당하며 Python 키워드 라우팅으로 대신하지 않는다.
+명시 요청이 3개를 넘으면 핵심 항목을 우선하고 제외 항목을 결론·`missing_conditions`에
+남겨 `conditional`로 제출하도록 지시한다. 제외 항목의 식별·누락 방지는 프롬프트의 책임이며
+Python이 원문 요청 전체와 선택 항목의 의미 대응까지 검증하지는 않는다. 검색 표현은
+`prompts/domain/product-comparison-search.json`에서 버전 관리한다.
 
 모델은 파일명·문서 ID·검색 개수·정렬·timeout을 입력하지 않는다. 추가 필드는 금지한다.
 미등록 코드, 확정 대상의 임의 추가·누락, 중복 코드, 개수 초과, 잘못된 criterion은 검색 전에
@@ -213,7 +220,7 @@ schema를 남겼다고 재실행이 허용되지는 않으며 기존 순서·횟
 
 | 항목 | 기본값 |
 |---|---|
-| 전체 target / criteria / 셀 상한 | 5 / 5 / 25, 미식별·반복 target도 포함 |
+| 전체 target / criteria / 셀 상한 | 5 / 3 / 15, 미식별·반복 target도 포함 |
 | `lookup_product_codes` / `compare_products` | 요청당 각각 1회 |
 | Catalog Planner 모델 호출 | 기본 1회, 유일 후보와 코드 불일치 교정에만 최대 1회 추가 |
 | 최초 Search Service 호출 | 확정 상품 N개에 대해 N회 |
@@ -356,7 +363,8 @@ HTTP 200과 trace의 `error=null`만으로 비교 성공을 집계하지 않는�
 | 보완 검색 실패 | 기존 성공 근거 유지, 해당 상품 오류도 보존 |
 | 공유 문서 alias·상이한 클래스·기준일·변경 이력 | 타상품 사실 전용·최신성 단정·잘못된 직접 비교 금지 |
 | 검색 마감 / 부모 취소 | 남은 task 회수, 예약 시간·상위 deadline 준수, 취소 전파 |
-| 최대 5상품×5항목 | JSON 잘림·셀 누락 없음, 생성 토큰·총지연·동시성 예산 확인 |
+| 최대 5상품×3항목 | JSON 잘림·셀 누락 없음, 생성 토큰·총지연·동시성 예산 확인 |
+| 4개 이상 비교 항목 | 카탈로그·검색 실행 전 거절, 자동으로 앞의 일부를 자르지 않음 |
 | 일부 근거 또는 전부 근거 없음 | 제한 보존, 빈칸 추정·새 상품 추천 금지 |
 | 최종 Main/API | 구조화 비교와 실제 인용 근거 보존, API 필드는 정확히 5개 |
 
@@ -380,5 +388,8 @@ HTTP 200과 trace의 `error=null`만으로 비교 성공을 집계하지 않는�
 - `tests/unit/agent/test_comparison_contracts.py`: 대상×항목 셀·최종 근거·응답 보존
 - `tests/unit/agent/test_domain_agents.py`: Product 실행 경로와 기존 Tool 호환
 
-HCX 실호출에서는 상품 표현의 누락, 인용 의미, 25셀 출력의 잘림과 누락, 전체 지연을 별도로
+HCX 실호출에서는 상품 표현의 누락, 인용 의미, 15셀 출력의 잘림과 누락, 전체 지연을 별도로
 평가한다. 계약 테스트의 통과를 실제 문서 비교 품질의 통과로 집계하지 않는다.
+
+항목 상한 축소의 배경과 제한은
+[최소 비교 항목 결정](../../decisions/20260906-product-comparison-minimal-criteria.md)을 따른다.

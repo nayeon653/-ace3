@@ -65,6 +65,7 @@ from pension_agent.agent.product.comparison_submission import (
 )
 from pension_agent.agent.search import SearchRequest, SearchResult, SearchRunner
 from pension_agent.config import DomainAgentConfig
+from pension_agent.config.product_comparison import MAX_PRODUCT_COMPARISON_CRITERIA
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 COMPARE_PRODUCTS_TOOL_NAME = "compare_products"
@@ -600,7 +601,10 @@ def _create_compare_products_tool(comparison_service: ProductComparisonService) 
     )
     async def compare_products(
         product_codes: Annotated[list[str], Field(min_length=2, max_length=5)],
-        criteria: Annotated[list[ComparisonCriterion], Field(min_length=1, max_length=5)],
+        criteria: Annotated[
+            list[ComparisonCriterion],
+            Field(min_length=1, max_length=MAX_PRODUCT_COMPARISON_CRITERIA),
+        ],
         runtime: ToolRuntime[ExecutionContext, ProductAgentState],
     ) -> Command:
         if runtime.tool_call_id is None:

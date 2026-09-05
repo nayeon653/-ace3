@@ -44,6 +44,7 @@ from pension_agent.agent.product.comparison_submission import unresolved_compari
 from pension_agent.agent.product.react import ProductAgentState, create_product_react_agent
 from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
+from pension_agent.config.product_comparison import MAX_PRODUCT_COMPARISON_CRITERIA
 from pension_agent.retrieval import (
     ProductCatalog,
     ProductCatalogResult,
@@ -135,22 +136,26 @@ def _create_product_catalog_query_tool(
         comparison_criteria: Annotated[
             list[ComparisonCriterion] | None,
             Field(
+                min_length=1,
+                max_length=MAX_PRODUCT_COMPARISON_CRITERIA,
                 description=(
-                    "명시적 여러 상품 비교의 항목. 일반적인 차이는 investment_strategy 포함, "
-                    "안정성은 risk와 capital_protection 포함. 단일 상품·목록 조회는 생략"
-                )
+                    "질문에 답하는 데 필요한 최소 1~3개 항목만 선택. 차이와 안정성을 함께 "
+                    "물으면 investment_strategy, risk, capital_protection. 안정성만 물으면 "
+                    "risk, capital_protection. fees와 liquidity는 명시 요청에만 선택. "
+                    "단일 상품·목록 조회는 생략"
+                ),
             ),
         ] = None,
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("상품 카탈로그 조회 Tool 호출 ID가 없습니다.")
         if comparison_criteria is not None and (
-            not 1 <= len(comparison_criteria) <= 5
+            not 1 <= len(comparison_criteria) <= MAX_PRODUCT_COMPARISON_CRITERIA
             or len(comparison_criteria) != len(set(comparison_criteria))
         ):
             return _catalog_lookup_command(
                 runtime.tool_call_id,
-                result=_failed_product_result("비교 항목은 중복 없이 1~5개여야 합니다."),
+                result=_failed_product_result("비교 항목은 중복 없이 1~3개여야 합니다."),
             )
         try:
             query = await planner.plan(

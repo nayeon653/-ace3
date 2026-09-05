@@ -22,6 +22,7 @@ from pension_agent.agent.product import create_product_agent
 from pension_agent.agent.product.catalog_query import PRODUCT_CATALOG_QUERY_TOOL_NAME
 from pension_agent.agent.product.react import _product_model_tool_name
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult, SearchRunner
+from pension_agent.config import DomainAgentConfig
 from pension_agent.core import DocumentType
 from pension_agent.retrieval import load_product_catalog
 
@@ -95,7 +96,7 @@ def _chunk(index: int, *, unused: bool = False) -> SearchChunkPayload:
         content=(
             "운용사의 주소입니다."
             if unused
-            else f"테스트 상품 {index + 1}은 금리 변동 위험이 있고 원금이 보장되지 않습니다."
+            else f"테스트 상품 {index + 1}은 국공채에 투자하며 금리 변동 위험이 있고 원금이 보장되지 않습니다."
         ),
     )
 
@@ -139,14 +140,19 @@ def _planner(targets: list[dict[str, Any]] | None = None) -> ComparisonFakeModel
     )
 
 
-def _start_calls() -> list[AIMessage]:
+def _start_calls(*, criteria: list[str] | None = None) -> list[AIMessage]:
+    selected_criteria = _CRITERIA if criteria is None else criteria
     return [
-        _call("lookup_product_codes", {"comparison_criteria": _CRITERIA}, "lookup"),
-        _call("compare_products", {"product_codes": _CODES, "criteria": _CRITERIA}, "compare"),
+        _call("lookup_product_codes", {"comparison_criteria": selected_criteria}, "lookup"),
+        _call(
+            "compare_products", {"product_codes": _CODES, "criteria": selected_criteria}, "compare"
+        ),
     ]
 
 
-def _cells(*, failed_index: int | None = None) -> list[dict[str, Any]]:
+def _cells(
+    *, failed_index: int | None = None, criteria: list[str] | None = None
+) -> list[dict[str, Any]]:
     return [
         {
             "target_id": f"target_{index + 1}",
@@ -155,9 +161,11 @@ def _cells(*, failed_index: int | None = None) -> list[dict[str, Any]]:
             "finding": (
                 "검색 실패로 이 상품의 해당 항목을 확인하지 못했습니다."
                 if index == failed_index
-                else "금리 변동 위험이 있습니다."
-                if criterion == "risk"
-                else "원금이 보장되지 않습니다."
+                else {
+                    "investment_strategy": "국공채에 투자합니다.",
+                    "risk": "금리 변동 위험이 있습니다.",
+                    "capital_protection": "원금이 보장되지 않습니다.",
+                }[criterion]
             ),
             "evidence_refs": (
                 []
@@ -167,7 +175,7 @@ def _cells(*, failed_index: int | None = None) -> list[dict[str, Any]]:
             "limitations": ["해당 상품의 문서 검색 실패"] if index == failed_index else [],
         }
         for index, code in enumerate(_CODES)
-        for criterion in _CRITERIA
+        for criterion in (_CRITERIA if criteria is None else criteria)
     ]
 
 
@@ -197,8 +205,12 @@ def _tool_results(model: ComparisonFakeModel, name: str) -> list[dict[str, Any]]
 
 
 @pytest.mark.anyio
-async def test_product_graph_compares_three_products_and_keeps_only_cited_evidence() -> None:
-    model = ComparisonFakeModel(responses=[*_start_calls(), _submit(_cells())])
+@pytest.mark.parametrize("criteria", [_CRITERIA, ["investment_strategy", *_CRITERIA]])
+async def test_product_graph_compares_three_products_and_keeps_only_cited_evidence(
+    criteria: list[str],
+) -> None:
+    cells = _cells(criteria=criteria)
+    model = ComparisonFakeModel(responses=[*_start_calls(criteria=criteria), _submit(cells)])
     planner = _planner()
     search = _search_results()
     agent = create_product_agent(
@@ -212,9 +224,10 @@ async def test_product_graph_compares_three_products_and_keeps_only_cited_eviden
     assert result["decision"]["status"] == "determined"
     comparison = result["comparison_result"]
     assert comparison["coverage"] == "complete"
-    assert comparison["criteria"] == _CRITERIA
+    assert comparison["criteria"] == criteria
     assert [target["product_code"] for target in comparison["targets"]] == _CODES
-    assert comparison["cells"] == _cells()
+    assert comparison["cells"] == cells
+    assert len(comparison["cells"]) == 3 * len(criteria)
     assert [chunk["chunk_id"] for chunk in result["evidence"]] == [
         _chunk(index).chunk_id for index in range(3)
     ]
@@ -234,6 +247,93 @@ async def test_product_graph_compares_three_products_and_keeps_only_cited_eviden
         for attempt in product["attempts"]
     )
     assert "submit_domain_result" in collected["next_step"]
+
+
+@pytest.mark.anyio
+async def test_product_graph_rejects_four_criteria_before_planning_or_searching() -> None:
+    model = ComparisonFakeModel(
+        responses=[
+            _call(
+                "lookup_product_codes",
+                {
+                    "comparison_criteria": [
+                        "investment_strategy",
+                        "risk",
+                        "capital_protection",
+                        "fees",
+                    ]
+                },
+                "invalid-lookup",
+            ),
+        ]
+    )
+    planner = _planner()
+    search = _search_results()
+    agent = create_product_agent(
+        model=model, catalog_planner_model=planner, search_service=cast(SearchRunner, search)
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "세 상품 비교"})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "failed"
+    assert len(model.received_messages) == DomainAgentConfig().max_model_calls
+    assert planner.received_messages == []
+    assert search.calls == []
+    assert result["evidence"] == []
+
+
+@pytest.mark.anyio
+async def test_single_product_lookup_still_omits_comparison_criteria() -> None:
+    model = ComparisonFakeModel(
+        responses=[
+            _call("lookup_product_codes", {}, "lookup"),
+            _call(
+                "search_documents",
+                {"product_code": _CODES[0], "objective": "투자 위험과 원금보장 여부"},
+                "search",
+            ),
+            _call(
+                "submit_domain_result",
+                {
+                    "status": "determined",
+                    "conclusion": "금리 변동 위험이 있고 원금은 보장되지 않습니다.",
+                    "missing_conditions": [],
+                    "warnings": [],
+                    "evidence_chunk_ids": [_chunk(0).chunk_id],
+                },
+                "submit",
+            ),
+        ]
+    )
+    planner = ComparisonFakeModel(
+        responses=[
+            _call(
+                PRODUCT_CATALOG_QUERY_TOOL_NAME,
+                {
+                    "query": {
+                        "route": "resolve_product",
+                        "resolution_status": "single",
+                        "product_code": _CODES[0],
+                    }
+                },
+                "catalog-plan",
+            )
+        ]
+    )
+    search = _search_results()
+    agent = create_product_agent(
+        model=model, catalog_planner_model=planner, search_service=cast(SearchRunner, search)
+    )
+
+    result = await agent({"question": "솔로몬 단기국공채의 위험은?", "objective": "투자 위험 확인"})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "completed"
+    assert "comparison_result" not in result
+    assert len(planner.received_messages) == 1
+    assert len(search.calls) == 1
+    assert [chunk["chunk_id"] for chunk in result["evidence"]] == [_chunk(0).chunk_id]
 
 
 @pytest.mark.anyio

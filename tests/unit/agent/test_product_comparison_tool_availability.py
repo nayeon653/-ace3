@@ -139,7 +139,7 @@ async def test_comparison_after_search_uses_auto_and_keeps_history_schemas() -> 
     [
         (2, ["risk"]),
         (3, ["risk", "fees"]),
-        (5, ["investment_strategy", "risk", "capital_protection", "fees", "liquidity"]),
+        (5, ["investment_strategy", "risk", "capital_protection"]),
     ],
 )
 async def test_comparison_submit_schema_requires_every_cell_without_mutating_executor(
@@ -255,8 +255,17 @@ class BindingRecorderModel(FakeMessagesListChatModel):
     """실제 그래프가 모델에 전달한 Tool 선택과 schema 이름을 기록한다."""
 
     bindings: list[tuple[list[str], Any]] = Field(default_factory=list)
+    bound_tool_schemas: list[dict[str, dict[str, Any]]] = Field(default_factory=list)
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Runnable[Any, AIMessage]:
+        self.bound_tool_schemas.append(
+            {
+                cast(str, _product_model_tool_name(tool)): convert_to_openai_tool(tool)["function"][
+                    "parameters"
+                ]
+                for tool in tools
+            }
+        )
         self.bindings.append(
             (
                 [cast(str, _product_model_tool_name(tool)) for tool in tools],
@@ -359,3 +368,21 @@ async def test_product_graph_uses_supported_choices_and_recovers_free_text(
         ([_LOOKUP, _COMPARE, _SEARCH, _SUBMIT], None),
         *([([_LOOKUP, _COMPARE, _SEARCH, _SUBMIT], _SUBMIT)] if free_response else []),
     ]
+    lookup_schema = model.bound_tool_schemas[0][_LOOKUP]
+    assert "comparison_criteria" not in lookup_schema.get("required", [])
+    lookup_criteria = next(
+        branch
+        for branch in lookup_schema["properties"]["comparison_criteria"]["anyOf"]
+        if branch.get("type") == "array"
+    )
+    compare_criteria = model.bound_tool_schemas[1][_COMPARE]["properties"]["criteria"]
+    for criteria_schema in (lookup_criteria, compare_criteria):
+        assert criteria_schema["minItems"] == 1
+        assert criteria_schema["maxItems"] == 3
+        assert set(criteria_schema["items"]["enum"]) == {
+            "investment_strategy",
+            "risk",
+            "capital_protection",
+            "fees",
+            "liquidity",
+        }

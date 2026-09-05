@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Literal, NotRequired
 from pydantic import ConfigDict, TypeAdapter, with_config
 from typing_extensions import TypedDict
 
+from pension_agent.config.product_comparison import MAX_PRODUCT_COMPARISON_CRITERIA
+
 if TYPE_CHECKING:
     from pension_agent.agent.contracts.domain import EvidenceChunk
 
@@ -91,8 +93,8 @@ def validate_comparison_result(
     _require_text(result["catalog_version"])
     targets = result["targets"]
     criteria = result["criteria"]
-    if not 2 <= len(targets) <= 5 or not 1 <= len(criteria) <= 5:
-        raise ValueError("비교 대상은 2~5개, 비교 항목은 1~5개여야 합니다.")
+    if not 2 <= len(targets) <= 5 or not 1 <= len(criteria) <= MAX_PRODUCT_COMPARISON_CRITERIA:
+        raise ValueError("비교 대상은 2~5개, 비교 항목은 1~3개여야 합니다.")
     if len(criteria) != len(set(criteria)):
         raise ValueError("비교 항목은 중복될 수 없습니다.")
     _validate_targets(targets)

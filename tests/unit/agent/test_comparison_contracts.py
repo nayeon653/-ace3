@@ -382,7 +382,7 @@ async def test_mixed_comparison_preserves_other_domain_calculations_and_catalog(
     assert "999원" not in answer
 
 
-def test_twenty_five_cells_are_preserved_and_sixth_target_is_rejected() -> None:
+def test_fifteen_cells_are_preserved_and_sixth_target_is_rejected() -> None:
     result = comparison_domain()
     comparison = result["comparison_result"]
     template = comparison["targets"][0]
@@ -394,8 +394,6 @@ def test_twenty_five_cells_are_preserved_and_sixth_target_is_rejected() -> None:
         "investment_strategy",
         "risk",
         "capital_protection",
-        "fees",
-        "liquidity",
     ]
     comparison["cells"] = [
         {
@@ -411,7 +409,22 @@ def test_twenty_five_cells_are_preserved_and_sixth_target_is_rejected() -> None:
     ]
     result["evidence"] = [{**result["evidence"][0], "chunk_id": "shared"}]
     validate_domain_result(result)
-    assert len(build_domain_tool_result(result)["comparison_result"]["cells"]) == 25
+    assert len(build_domain_tool_result(result)["comparison_result"]["cells"]) == 15
     comparison["targets"].append({**template, "target_id": "sixth"})
     with pytest.raises(ValueError, match="2~5"):
+        validate_domain_result(result)
+
+
+def test_four_criteria_are_rejected_even_when_all_cells_have_valid_references() -> None:
+    result = comparison_domain()
+    comparison = result["comparison_result"]
+    comparison["criteria"] = ["investment_strategy", "risk", "capital_protection", "fees"]
+    comparison["cells"] = [
+        {**cell, "criterion": criterion}
+        for cell in comparison["cells"]
+        for criterion in comparison["criteria"]
+    ]
+
+    assert len(comparison["cells"]) == 8
+    with pytest.raises(ValueError, match="1~3"):
         validate_domain_result(result)

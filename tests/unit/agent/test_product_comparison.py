@@ -212,6 +212,41 @@ async def test_changed_criteria_and_catalog_identity_are_rejected_before_search(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "criteria, allowed",
+    [
+        ([], False),
+        (["risk"], True),
+        (["risk", "fees", "liquidity"], True),
+        (["investment_strategy", "risk", "capital_protection", "fees"], False),
+    ],
+)
+async def test_criterion_count_is_checked_before_search_even_when_plan_matches(
+    criteria: list[ComparisonCriterion], allowed: bool
+) -> None:
+    catalog = load_product_catalog()
+    search = RecordingSearch()
+    result = await ProductComparisonService(search, catalog).compare(
+        product_codes=_CODES,
+        criteria=criteria,
+        expected_criteria=criteria,
+        targets=_targets(catalog),
+        deadline=asyncio.get_running_loop().time() + 75,
+    )
+
+    assert result.execution_status == ("completed" if allowed else "failed")
+    assert len(search.calls) == (3 if allowed else 0)
+    if not allowed:
+        assert result.products == []
+
+
+def test_configuration_cannot_raise_criterion_limit_above_three() -> None:
+    assert ProductComparisonConfig().max_criteria == 3
+    with pytest.raises(ValidationError):
+        ProductComparisonConfig(max_criteria=4)
+
+
+@pytest.mark.anyio
 async def test_unresolved_and_repeated_targets_are_preserved_without_duplicate_search() -> None:
     catalog = load_product_catalog()
     search = RecordingSearch()
