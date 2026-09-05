@@ -27,6 +27,9 @@ Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 
 `drafts/`는 구현 전 제안을 리뷰하는 공간이다. 구현에 반영된 Product 상품 비교 초안은
 위의 현재 스펙으로 이동했으며, 이전 경로에는 이동 안내를 남긴다.
 
+후속 리뷰 제안: [Product 비교 작성 입력 재구성](drafts/product-comparison-model-context.md).
+현재 런타임에 아직 반영되지 않은 입력 정리 방안이다.
+
 ## 공통 Agent 계약
 
 Main Supervisor는 사용자 질문을 하나의 판단 목표인 `objective`로 나누고 Domain Agent를
