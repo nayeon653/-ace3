@@ -12,6 +12,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import TypeAdapter, ValidationError
 
 from pension_agent.agent.calculation import format_calculation_summary
+from pension_agent.agent.comparison_formatting import format_comparison_result
 from pension_agent.agent.contracts import (
     AgentAnswer,
     CatalogResult,
@@ -157,19 +158,8 @@ class AnswerService:
                                     "Main Supervisor의 최종 자연어 답변이 없습니다."
                                 ) from None
                             answer = _strip_pseudo_placeholder_syntax(
-                                _stabilize_catalog_answer(
-                                    _stabilize_calculation_answer(
-                                        _stabilize_verified_numeric_answer(
-                                            _stabilize_unverified_calculation_answer(
-                                                answer,
-                                                state["domain_results"],
-                                                question,
-                                            ),
-                                            state["domain_results"],
-                                        ),
-                                        state["domain_results"],
-                                    ),
-                                    state["domain_results"],
+                                _stabilize_verified_answer(
+                                    answer, state["domain_results"], question
                                 )
                             )
                 except TimeoutError:
@@ -287,6 +277,77 @@ def _validate_supervisor_state(
     normalized_state["messages"] = list(messages)
     normalized_state["domain_results"] = domain_results
     return cast(SupervisorState, normalized_state)
+
+
+def _stabilize_verified_answer(
+    answer: AgentAnswer, domain_results: list[DomainResult], question: str
+) -> AgentAnswer:
+    """비교 또는 실행 실패가 포함된 답변을 검증된 도메인 결과로 조립한다."""
+
+    if any(
+        "comparison_result" in result or result["execution_status"] != "completed"
+        for result in domain_results
+    ):
+        parts: list[str] = []
+        for result in domain_results:
+            if "comparison_result" in result:
+                parts.append(format_comparison_result(result))
+            elif "catalog_result" in result:
+                parts.append(_catalog_answer(result["catalog_result"]))
+            else:
+                parts.append(_format_other_domain_result(result, question))
+        return AgentAnswer(answer="\n\n".join(part for part in parts if part))
+    return _stabilize_catalog_answer(
+        _stabilize_calculation_answer(
+            _stabilize_verified_numeric_answer(
+                _stabilize_unverified_calculation_answer(answer, domain_results, question),
+                domain_results,
+            ),
+            domain_results,
+        ),
+        domain_results,
+    )
+
+
+def _format_other_domain_result(result: DomainResult, question: str) -> str:
+    """비교와 함께 요청된 다른 도메인의 검증된 결과를 그대로 보존한다."""
+
+    label = _domain_label(result["domain"])
+    if result["execution_status"] != "completed":
+        return f"{label} 분석을 완료하지 못했습니다: {result['error']}"
+    decision = result["decision"]
+    if decision["status"] == "not_applicable":
+        return ""
+    statements = result.get("verified_numeric_statements", [])
+    parts = list(dict.fromkeys(statement["text"] for statement in statements))
+    if not statements and not result["calculations"]:
+        conclusion = _stabilize_unverified_calculation_answer(
+            AgentAnswer(answer=decision["conclusion"]), [result], question
+        ).answer
+        parts.append(f"{label}: {conclusion}")
+    warnings = list(result["warnings"])
+    if result["calculations"]:
+        parts.append(
+            "검증된 Python 계산 결과:\n" + format_calculation_summary(result["calculations"])
+        )
+        warnings.extend(
+            warning for calculation in result["calculations"] for warning in calculation["warnings"]
+        )
+    for heading, values in (
+        (f"{label} 확인 조건", decision["missing_conditions"]),
+        (f"{label} 주의사항", list(dict.fromkeys(warnings))),
+    ):
+        if values:
+            parts.append(heading + ":\n" + "\n".join(f"- {value}" for value in values))
+    if result["evidence"]:
+        parts.append(
+            "근거 문서:\n"
+            + "\n".join(
+                f"- {chunk['source_file_name']}, {chunk['title']}, {chunk['locator']}"
+                for chunk in result["evidence"]
+            )
+        )
+    return "\n\n".join(parts)
 
 
 def _stabilize_catalog_answer(

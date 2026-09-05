@@ -5,6 +5,8 @@ from typing import Annotated, Any, Literal, NotRequired
 from pydantic import Field
 from typing_extensions import TypedDict
 
+from pension_agent.agent.contracts.comparison import ComparisonResult, validate_comparison_result
+
 DomainName = Literal["policy", "tax_payout", "product"]
 ExecutionStatus = Literal["completed", "failed", "timeout"]
 DecisionStatus = Literal[
@@ -116,6 +118,7 @@ class DomainResult(TypedDict):
     calculations: list[CalculationResult]
     warnings: list[str]
     catalog_result: NotRequired[CatalogResult]
+    comparison_result: NotRequired[ComparisonResult]
     error: NotRequired[str]
     verified_numeric_statements: NotRequired[list[VerifiedNumericStatement]]
 
@@ -129,6 +132,7 @@ class DomainToolResult(TypedDict):
     calculations: list[CalculationResult]
     warnings: list[str]
     catalog_result: NotRequired[CatalogResult]
+    comparison_result: NotRequired[ComparisonResult]
     error: NotRequired[str]
     verified_numeric_placeholders: NotRequired[list[VerifiedNumericPlaceholder]]
 
@@ -140,6 +144,7 @@ def validate_domain_result(result: DomainResult) -> None:
     has_decision = "decision" in result
     has_error = "error" in result
     has_catalog_result = "catalog_result" in result
+    has_comparison_result = "comparison_result" in result
 
     if execution_status == "completed":
         if not has_decision:
@@ -157,6 +162,8 @@ def validate_domain_result(result: DomainResult) -> None:
             raise ValueError("실패한 결과에는 카탈로그 조회 결과를 포함할 수 없습니다.")
         if result.get("verified_numeric_statements"):
             raise ValueError("실패한 결과에는 검증된 숫자 문장을 포함할 수 없습니다.")
+        if has_comparison_result:
+            raise ValueError("실패한 결과에는 비교 결과를 포함할 수 없습니다.")
 
     _validate_verified_numeric_statements(result)
 
@@ -175,6 +182,20 @@ def validate_domain_result(result: DomainResult) -> None:
 
     if has_catalog_result:
         _validate_catalog_result(result)
+    if has_comparison_result:
+        if result["domain"] != "product" or has_catalog_result or result["calculations"]:
+            raise ValueError("비교 결과는 계산·카탈로그 조회가 없는 product 결과에만 허용됩니다.")
+        comparison = result["comparison_result"]
+        validate_comparison_result(comparison, result["evidence"])
+        allowed_statuses = {
+            "complete": {"determined", "conditional"},
+            "partial": {"conditional"},
+            "none": {"undetermined"},
+        }
+        if decision["status"] not in allowed_statuses[comparison["coverage"]]:
+            raise ValueError("비교 범위와 도메인 판단 상태가 일치해야 합니다.")
+        if any(not condition.strip() for condition in missing_conditions):
+            raise ValueError("비교 누락 조건은 구체적인 내용이 필요합니다.")
 
 
 def _validate_verified_numeric_statements(result: DomainResult) -> None:

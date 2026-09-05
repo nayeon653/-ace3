@@ -47,6 +47,8 @@ def build_domain_tool_result(result: DomainResult) -> DomainToolResult:
         tool_result["decision"] = result["decision"]
     if "catalog_result" in result:
         tool_result["catalog_result"] = result["catalog_result"]
+    if "comparison_result" in result:
+        tool_result["comparison_result"] = result["comparison_result"]
     if "error" in result:
         tool_result["error"] = result["error"]
     statements = result.get("verified_numeric_statements")
