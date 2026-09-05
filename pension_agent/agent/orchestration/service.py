@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -17,6 +18,12 @@ from pension_agent.agent.contracts import (
     validate_domain_result,
 )
 from pension_agent.agent.execution import ExecutionContext
+from pension_agent.agent.orchestration.numeric_firewall import (
+    extract_numbers,
+    placeholder_token,
+    scan_placeholders,
+    strip_known_placeholders,
+)
 from pension_agent.agent.orchestration.state import SupervisorState
 from pension_agent.agent.orchestration.supervisor import build_agent_answer
 from pension_agent.config import DEFAULT_AGENT_RUNTIME_CONFIG, AgentRuntimeConfig
@@ -148,12 +155,17 @@ class AnswerService:
                                 raise FinalAnswerMissingError(
                                     "Main Supervisor의 최종 자연어 답변이 없습니다."
                                 ) from None
-                            answer = _stabilize_catalog_answer(
-                                _stabilize_calculation_answer(
-                                    answer,
+                            answer = _strip_pseudo_placeholder_syntax(
+                                _stabilize_catalog_answer(
+                                    _stabilize_calculation_answer(
+                                        _stabilize_verified_numeric_answer(
+                                            answer,
+                                            state["domain_results"],
+                                        ),
+                                        state["domain_results"],
+                                    ),
                                     state["domain_results"],
-                                ),
-                                state["domain_results"],
+                                )
                             )
                 except TimeoutError:
                     raise AnswerServiceTimeoutError(
@@ -334,6 +346,151 @@ def _stabilize_calculation_answer(
         warning_text = "\n".join(f"- {warning}" for warning in unique_warnings)
         answer_parts.append(f"주의사항:\n{warning_text}")
     return AgentAnswer(answer="\n\n".join(answer_parts))
+
+
+def _stabilize_verified_numeric_answer(
+    answer: AgentAnswer,
+    domain_results: list[DomainResult],
+) -> AgentAnswer:
+    """Main이 검증된 숫자 placeholder 밖에서 새 숫자를 만들지 못하게 막는다.
+
+    Main은 `VerifiedNumericStatement.text`를 직접 본 적이 없다 — Tool 결과에서는
+    placeholder token만 받았다. 따라서 최종 답변에서 그 token들이 정확히(같은
+    token 반복은 허용) 등장하고, token 밖 자유 생성 영역에 금액·세율 같은
+    검증되지 않은 숫자가 전혀 없을 때만 Main의 표현을 그대로 쓴다. 하나라도
+    어긋나면 Main 답변 전체를 버리고 결정론적으로 다시 조립한다 — 문장 일부만
+    지우면 문맥이 깨지므로 부분 삭제는 하지 않는다.
+    """
+
+    canonical_by_token: dict[str, str] = {
+        placeholder_token(result["domain"], statement["source_id"]): statement["text"]
+        for result in domain_results
+        for statement in result.get("verified_numeric_statements", [])
+    }
+    if not canonical_by_token:
+        return answer
+
+    expected_tokens = set(canonical_by_token)
+    text = answer.answer
+    scan = scan_placeholders(text, expected_tokens)
+    missing = expected_tokens - set(scan.counts)
+    free_text = strip_known_placeholders(text, expected_tokens)
+    leaked = extract_numbers(free_text)
+
+    if missing or scan.malformed or leaked:
+        return AgentAnswer(answer=_deterministic_numeric_fallback(domain_results))
+
+    return AgentAnswer(answer=_substitute_with_dedup(text, canonical_by_token))
+
+
+def _substitute_with_dedup(text: str, canonical_by_token: dict[str, str]) -> str:
+    """token 첫 등장만 canonical 문장으로 바꾸고, 반복 등장은 지운다.
+
+    Main은 placeholder를 완결된 문장이 아니라 맨숫자 자리인 것처럼 다뤄
+    "...600만원입니다.만원까지..."처럼 canonical 문장 바로 뒤에 단위 잔여물을
+    이어 붙이기도 한다. canonical 문장이 이미 마침표로 끝나 있다면 그 잔여물만
+    제거한다 — 반복 등장(dedup으로 지워지는 자리)에는 적용하지 않는다.
+    """
+
+    result = text
+    for token, canonical_text in canonical_by_token.items():
+        parts = result.split(token)
+        if len(parts) <= 1:
+            continue
+        first_tail = _strip_trailing_unit_residue(parts[1], canonical_text)
+        result = parts[0] + canonical_text + first_tail + "".join(parts[2:])
+    return result
+
+
+_UNIT_RESIDUE_WORDS = ("만원", "천원", "억원", "원", "퍼센트", "프로", "%")
+_TRAILING_UNIT_RESIDUE = re.compile(
+    "^(?:"
+    + "|".join(re.escape(word) for word in sorted(_UNIT_RESIDUE_WORDS, key=len, reverse=True))
+    + ")(?:까지|만|은|는|이|가|을|를|도)?"
+)
+
+
+def _strip_trailing_unit_residue(tail: str, canonical_text: str) -> str:
+    """치환된 문장이 이미 완결됐는데 바로 뒤에 붙은 단위 잔여물만 제거한다.
+
+    canonical_text가 마침표로 끝나지 않으면(완결된 문장이 아니면) 손대지 않는다.
+    특정 숫자가 아니라 단위 어휘(만원/원/%/퍼센트 등)만 인식하므로 다른 조사나
+    서술어로 자연스럽게 이어지는 문장은 건드리지 않는다.
+    """
+
+    if not canonical_text.rstrip().endswith("."):
+        return tail
+    match = _TRAILING_UNIT_RESIDUE.match(tail)
+    if match is None:
+        return tail
+    return tail[match.end() :]
+
+
+_PSEUDO_PLACEHOLDER = re.compile(r"\{\{([^{}\n]{1,60})\}\}")
+
+
+def _strip_pseudo_placeholder_syntax(answer: AgentAnswer) -> AgentAnswer:
+    """알려진 치환을 모두 마친 뒤에도 `{{...}}` 구문이 남아 있으면 정리한다.
+
+    `_stabilize_verified_numeric_answer`는 도메인 결과 중 하나라도
+    `verified_numeric_statements`를 가질 때만 개입한다. Policy/Product처럼
+    그 필드가 전혀 없는 답변에서 Main이 스스로 `{{1800}}` 같은 임의의
+    `{{...}}` 표기를 흉내 내면 어떤 stabilizer도 거치지 않고 그대로 노출될 수
+    있다 — 이 함수는 그 경로까지 포함해 최종 답변 전체에 적용하는 마지막
+    안전망이다. 특정 숫자를 하드코딩하지 않고 중괄호만 벗겨 안쪽 텍스트를
+    그대로 남긴다.
+    """
+
+    text = answer.answer
+    cleaned = _PSEUDO_PLACEHOLDER.sub(lambda match: match.group(1), text)
+    if cleaned == text:
+        return answer
+    return AgentAnswer(answer=cleaned)
+
+
+def _deterministic_numeric_fallback(domain_results: list[DomainResult]) -> str:
+    """LLM 호출 없이 검증된 텍스트만으로 안전한 답변을 다시 조립한다."""
+
+    conclusions: list[str] = []
+    conditions: list[str] = []
+    warnings: list[str] = []
+    for result in domain_results:
+        if "catalog_result" in result:
+            continue
+        warnings.extend(result["warnings"])
+        if result["execution_status"] != "completed":
+            conclusions.append(
+                f"{_domain_label(result['domain'])} 분석을 완료하지 못했습니다: {result['error']}"
+            )
+            continue
+        decision = result["decision"]
+        if decision["status"] == "not_applicable":
+            continue
+        statements = result.get("verified_numeric_statements", [])
+        if statements:
+            conclusions.extend(dict.fromkeys(statement["text"] for statement in statements))
+        elif result["calculations"]:
+            conclusions.append(
+                "검증된 Python 계산 결과:\n" + format_calculation_summary(result["calculations"])
+            )
+        else:
+            conclusions.append(decision["conclusion"])
+        if decision["missing_conditions"]:
+            condition_text = "\n".join(
+                f"- {condition}" for condition in decision["missing_conditions"]
+            )
+            conditions.append(f"{_domain_label(result['domain'])} 확인 조건:\n{condition_text}")
+        warnings.extend(
+            warning for calculation in result["calculations"] for warning in calculation["warnings"]
+        )
+    if not conclusions:
+        conclusions.append("검증된 근거만으로는 확인할 수 있는 결론이 없습니다.")
+    answer_parts = [*conclusions, *conditions]
+    unique_warnings = list(dict.fromkeys(warnings))
+    if unique_warnings:
+        warning_text = "\n".join(f"- {warning}" for warning in unique_warnings)
+        answer_parts.append(f"주의사항:\n{warning_text}")
+    return "\n\n".join(answer_parts)
 
 
 def _domain_label(domain: str) -> str:

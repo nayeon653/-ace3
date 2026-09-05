@@ -19,13 +19,22 @@ from pension_agent.agent.contracts import (
     validate_domain_result,
 )
 from pension_agent.agent.execution import ExecutionContext
+from pension_agent.agent.orchestration.numeric_firewall import (
+    build_verified_numeric_placeholders,
+)
 from pension_agent.agent.orchestration.state import SupervisorState
 
 logger = logging.getLogger(__name__)
 
 
 def build_domain_tool_result(result: DomainResult) -> DomainToolResult:
-    """전체 결과에서 Main LLM에 필요한 필드만 복사한다."""
+    """전체 결과에서 Main LLM에 필요한 필드만 복사한다.
+
+    ``verified_numeric_statements``의 실제 문장(``text``)은 절대 노출하지
+    않는다. Main은 placeholder token과 주제(``source_id``)만 받고, 실제
+    문장 치환은 최종 답변 조립 단계(``service._stabilize_verified_numeric_answer``)
+    에서만 일어난다.
+    """
 
     validate_domain_result(result)
     tool_result: DomainToolResult = {
@@ -40,6 +49,11 @@ def build_domain_tool_result(result: DomainResult) -> DomainToolResult:
         tool_result["catalog_result"] = result["catalog_result"]
     if "error" in result:
         tool_result["error"] = result["error"]
+    statements = result.get("verified_numeric_statements")
+    if statements:
+        tool_result["verified_numeric_placeholders"] = build_verified_numeric_placeholders(
+            result["domain"], statements
+        )
     return tool_result
 
 
