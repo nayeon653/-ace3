@@ -72,6 +72,7 @@ from pension_agent.agent.contracts import (
 )
 from pension_agent.agent.domain_runner import failed_domain_result
 from pension_agent.agent.execution import ExecutionContext, ModelConcurrencyMiddleware
+from pension_agent.agent.prompt_injection import PromptInjectionMiddleware
 from pension_agent.agent.search import (
     SearchRequest,
     SearchResult,
@@ -298,6 +299,7 @@ def create_tax_payout_react_agent(
         state_schema=TaxPayoutAgentState,
         context_schema=ExecutionContext,
         middleware=(
+            PromptInjectionMiddleware(),
             *((model_concurrency,) if model_concurrency is not None else ()),
             CompleteTaxPayoutResult(),
             RequireTaxPayoutTool(),

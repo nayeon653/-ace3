@@ -116,6 +116,39 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 
 ## 실행 제한과 실패 처리
 
+### 프롬프트 인젝션 방어
+
+`PromptInjectionMiddleware(block_user_input=True)`를 Main의 가장 바깥쪽 모델 호출
+미들웨어로 적용한다. 원문 `question`과 Human 메시지에서 알려진 한국어·영어 지침 무시,
+내부 프롬프트 추출, 역할 사칭 표식을 발견하면 모델·Domain Tool 호출 전에 고정된
+자연어 거절 응답을 반환한다. NFKC, 공백, 비표시 서식 문자 정규화는 검사 복사본에만
+적용한다. 원문 질문은 변경하지 않으며, `GET /answer`는 기존 5개 필드와 HTTP 200을
+유지한다. 이 경우 검색 근거와 Domain 실행 결과는 비어 있다.
+
+Main, Policy, Tax/Payout, Product의 모든 모델 호출에는 패키지 리소스
+`pension_agent/prompts/security/input-trust-boundary.md`를 같은 System 메시지에 추가한다.
+Tool 응답은 모델 요청 복사본에서만 `{"untrusted_tool_output": 원래 content}`로 감싼다.
+모델에는 원래 JSON 결과가 문자열로 포함되며, 그 안의 상태·근거·계산을 데이터로 읽는다.
+Tool 호출 ID, 메시지 메타데이터, 원본 state, 근거 본문·UUID와 계산 출처는 보존한다.
+정책은 매 호출에 적용되며 그래프 상태에 누적되지 않는다. `create_agent`를 우회하는
+카탈로그 planner와 matcher의 직접 HCX 호출에도 같은 System 정책을 적용한다.
+
+추가 분류 모델, 외부 서비스, 설정 옵션은 없다. 기존 HCX-007, 문서 권한, 계산 검증,
+도구 호출 상한과 실행 예산을 그대로 사용한다. 정상 연금 질문의 제외 조건·업무 지침
+문의와 일부 부정·설명형 문장은 회귀 테스트로 확인한다.
+
+정규식은 알려진 표현을 차단하는 보조 방어다. 공격을 그대로 인용한 질문도 차단될 수
+있으며, 우회 표현·인코딩·다국어 공격을 모두 탐지하지는 못한다. Tool 결과 경계와 System
+정책은 간접 인젝션에 대한 모델 지침이며 결정론적 차단이나 완전한 방어를 보장하지 않는다.
+Domain의 문자열이 응답 조립이나 `think_trace`로 전달되는 경로의 출력 정제도 범위 밖이다.
+오프라인 테스트는 차단 로직·배선·원문 보존을 검증하며 실제 HCX의 공격 성공률이나 정상
+답변 품질은 별도의 라이브 평가가 필요하다.
+
+설계 참고: [OWASP 프롬프트 인젝션 방어 지침](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html),
+[LangChain 모델 호출 미들웨어](https://docs.langchain.com/oss/python/langchain/middleware/custom).
+
+### 호출 제한
+
 | 제한 | 값 |
 |---|---:|
 | 한 요청의 Supervisor 모델 호출 | 최대 12회 |
@@ -139,4 +172,6 @@ Domain Tool Adapter는 Runner 예외, 잘못된 결과 또는 Domain 불일치�
 - `tests/unit/agent/orchestration/test_supervisor.py`
 - `tests/unit/agent/orchestration/test_service.py`
 - `tests/unit/agent/test_agent_contracts.py`
+- `tests/unit/agent/test_prompt_injection.py`
+- `tests/unit/agent/test_prompt_injection_integration.py`
 - `tests/test_agent_graph_document.py`
