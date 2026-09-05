@@ -154,10 +154,18 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
             '        catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]',
             '        catalog_query --> catalog_execute["Python 정확 조회"]',
             "        product_catalog --> catalog_execute",
-            '        catalog_execute --> catalog_result["CatalogResult"]',
+            '        catalog_execute --> catalog_result["CatalogResult · 단일/복수 식별"]',
             "    end",
             f"    {product_node} --> catalog_lookup",
             f"    catalog_result --> {product_node}",
+            "",
+            '    subgraph comparison["복수 상품 비교 · Python 근거 수집"]',
+            '        compare_tool["compare_products"] --> product_searches["상품별 병렬 검색"]',
+            '        product_searches --> comparison_evidence["상품별 근거 · 실행 상태"]',
+            "    end",
+            f"    {product_node} --> compare_tool",
+            f"    comparison_evidence --> {product_node}",
+            "    product_searches --> search_service",
         )
     )
     lines.extend(

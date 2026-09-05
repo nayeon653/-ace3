@@ -93,6 +93,7 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 - `decision`(완료 시)
 - `warnings`
 - `catalog_result`(상품 카탈로그 조회 시)
+- `comparison_result`(완료된 상품 비교 또는 비교 판단 불가의 대상·셀·제한)
 - `error`(실패 또는 timeout 시)
 
 전체 `DomainResult`는 `SupervisorState.domain_results`에 별도로 누적되며 API의
@@ -109,10 +110,20 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 - 조건이 부족해도 되묻지 않고 조건별 결론을 한 응답에 포함한다.
 - 실패하거나 timeout인 Domain의 결론을 추정하지 않고 가용 결과와 한계를 설명한다.
 - `catalog_result`의 개수, 공식 상품명, 운용사와 상품 코드를 변경하거나 추정하지 않는다.
+- `comparison_result`의 상품별 사실·출처·미확인 범위를 보존하고 새 우열이나 추천을 추가하지
+  않는다.
 - JSON과 Tool 호출 형식을 사용자 답변으로 출력하지 않는다.
 
 마지막 Tool 호출이 없는 자연어 `AIMessage`가 없으면 `AgentAnswer` 변환은 실패하며 API는
 정제된 서버 오류로 처리한다.
+
+자연어 메시지를 검증한 뒤 AnswerService는 상품 비교가 포함된 결과를 결정론적으로 다시
+조립한다. Product의 조건별 결론, 모든 대상×항목의 비교 표, 출처, 확인 조건과 경고를 보존한다.
+근거가 전혀 없는 비교의 자유 생성 결론과 미확인 셀의 finding은 채택하지 않는다. 복합 요청의
+다른 Domain 결과·계산도 각각 보존하며 새 수치나 적합성 판단을 합성하지 않는다.
+
+호출한 모든 Domain이 `failed` 또는 `timeout`이면 검증된 오류만으로 안내를 조립한다.
+따라서 도메인 실패 후 Main이 일반론을 생성했더라도 최종 응답에는 포함되지 않는다.
 
 ## 실행 제한과 실패 처리
 

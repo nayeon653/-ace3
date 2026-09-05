@@ -16,20 +16,16 @@
 | Domain Agent | [Product Agent](agents/product-agent.md) | `agent/product/` |
 | 보조 LLM 컴포넌트 | [Product Catalog Query Planner](agents/product-catalog-query-planner.md) | `agent/product/catalog_query.py` |
 | 결정론적 검색 컴포넌트 | [Search Service](components/search-service.md) | `agent/search/` |
+| 결정론적 비교 검색 | [Product 상품 비교 도구](components/product-comparison.md) | `agent/product/comparison.py`, `comparison_submission.py` |
 | 결정론적 계산 컴포넌트 | [Calculation Service](components/calculation-service.md) | `rules/` |
 
 Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 검증으로 검색 계획과
 결과를 만든다. Product Catalog Query Planner는 독립 Domain Agent가 아니라 Product Agent의
-`lookup_product_codes` Tool 내부에서 한 번 호출되는 제한된 LLM 컴포넌트다.
+`lookup_product_codes` Tool 내부에서 기본 한 번 호출되는 제한된 LLM 컴포넌트다.
+유일한 원문 후보와 비교 코드의 불일치에 한해 한 번의 Planner 교정을 허용한다.
 
-## 리뷰 중인 스펙 초안
-
-`drafts/`는 구현 전 제안을 리뷰하는 공간이다. 아래 문서는 현재 런타임의 보장 범위가 아니며,
-리뷰 후 구현하는 변경에서 관련 현재 스펙과 코드에 함께 반영한다.
-
-| 문서 | 상태 | 제안 범위 |
-|---|---|---|
-| [Product 상품 비교 도구](drafts/product-comparison.md) | 리뷰용 제안, 미구현 | 복수 상품 식별, 상품별 근거 검색, 부분 비교와 최종 응답 보존 |
+`drafts/`는 구현 전 제안을 리뷰하는 공간이다. 구현에 반영된 Product 상품 비교 초안은
+위의 현재 스펙으로 이동했으며, 이전 경로에는 이동 안내를 남긴다.
 
 ## 공통 Agent 계약
 
@@ -46,6 +42,7 @@ DomainRequest { question, objective }
          calculations,
          warnings,
          catalog_result?,
+         comparison_result?,
          error?
        }
 ```
@@ -59,6 +56,9 @@ DomainRequest { question, objective }
 - 확정 수치는 Python 계산 결과만 사용할 수 있다. 공용 Calculation Service의 active 함수와
   Agent 연결 상태는 [Calculation Service 스펙](components/calculation-service.md)에 명시한다.
 - 검색 결과 전체가 아니라 결론에 실제 사용한 청크만 `evidence`로 제출한다.
+- `comparison_result`는 완료된 Product 결과에만 허용하고 `catalog_result`와 함께 넣지
+  않는다. 모든 대상×항목 셀과 실제 인용 근거의 합집합을 검증하며, 부분 비교와 판단 불가의
+  누락 조건을 Main과 API까지 보존한다.
 
 실행 가능한 타입과 검증의 최종 기준은
 `pension_agent/agent/contracts/domain.py`이며, 스펙과 코드가 다르면 배포 전에 둘을 같은
@@ -80,6 +80,7 @@ DomainRequest { question, objective }
 | Domain별 동시 실행 | 3개 |
 | Search Service deadline | 45초 |
 | Search Service 동시 실행 | 4개 |
+| Product 비교 검색 / 최종 제출 예약 | 최대 30초 / 30초 |
 
 ## 변경 확인
 
