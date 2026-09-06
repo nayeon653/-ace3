@@ -434,6 +434,15 @@ def _stabilize_unverified_calculation_answer(
     if not answer_numbers:
         return answer
     question_numbers = set(extract_numbers(question))
+    has_incomplete_result = any(
+        result["execution_status"] != "completed"
+        or result["decision"]["status"] in {"conditional", "undetermined"}
+        for result in domain_results
+    )
+    if not has_incomplete_result and answer_numbers <= question_numbers:
+        return answer
+    if not has_incomplete_result and not question_numbers:
+        return answer
     if answer_numbers <= question_numbers:
         return answer
     return AgentAnswer(answer=_unverified_calculation_fallback(domain_results, question_numbers))
@@ -514,7 +523,7 @@ def _stabilize_verified_numeric_answer(
     if missing or scan.malformed or leaked:
         return AgentAnswer(answer=_deterministic_numeric_fallback(domain_results))
 
-    return AgentAnswer(answer=_deterministic_numeric_fallback(domain_results))
+    return AgentAnswer(answer=_substitute_with_dedup(text, canonical_by_token))
 
 
 def _substitute_with_dedup(text: str, canonical_by_token: dict[str, str]) -> str:
@@ -561,7 +570,6 @@ def _strip_trailing_unit_residue(tail: str, canonical_text: str) -> str:
 
 
 _PSEUDO_PLACEHOLDER = re.compile(r"\{\{([^{}\n]{1,60})\}\}")
-_PSEUDO_VERIFIED_NUMERIC = re.compile(r"\bVERIFIED_NUMERIC\s*:", re.IGNORECASE)
 
 
 def _strip_pseudo_placeholder_syntax(answer: AgentAnswer) -> AgentAnswer:
@@ -577,8 +585,6 @@ def _strip_pseudo_placeholder_syntax(answer: AgentAnswer) -> AgentAnswer:
     """
 
     text = answer.answer
-    if _PSEUDO_VERIFIED_NUMERIC.search(text):
-        return AgentAnswer(answer="근거가 확인된 숫자를 확정하지 못했습니다.")
     cleaned = _PSEUDO_PLACEHOLDER.sub(lambda match: match.group(1), text)
     if cleaned == text:
         return answer
