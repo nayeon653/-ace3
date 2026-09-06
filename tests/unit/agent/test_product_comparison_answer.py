@@ -106,17 +106,11 @@ def _comparison(*, with_evidence: bool = True, partial: bool = False) -> Compari
             official_name=target["official_name"],
             provider=target["provider"],
             source_file_name="비교상품설명서.pdf",
-            attempts=(
-                [
-                    SearchResult(execution_status="completed", retrieved_chunks=first),
-                    SearchResult(
-                        execution_status="completed",
-                        retrieved_chunks=[shared] if with_evidence else [],
-                    ),
-                ]
+            attempts=[
+                SearchResult(execution_status="completed", retrieved_chunks=first)
                 if index == 0
-                else [second_attempt]
-            ),
+                else second_attempt
+            ],
             evidence=first if index == 0 else second_attempt.retrieved_chunks,
         )
         for index, target in enumerate(targets)
@@ -124,12 +118,9 @@ def _comparison(*, with_evidence: bool = True, partial: bool = False) -> Compari
     return ComparisonEvidenceResult(
         execution_status="completed",
         catalog_version="catalog-test-version",
-        criteria=["risk", "capital_protection"],
+        comparison_query="환헤지 방식과 외화 노출, 분배금 지급 주기를 비교해 주세요.",
         targets=targets,
         products=products,
-        retrieval_coverage=(
-            "no_products" if not with_evidence else "some_products" if partial else "all_products"
-        ),
         limitations=["일부 상품 검색 시간 초과"] if partial else [],
     )
 
@@ -192,7 +183,7 @@ async def test_writer_builds_fresh_input_with_full_deduplicated_evidence() -> No
     assert context["question"] == "비교상품 단기와 장기는 어떻게 달라요? 안정적인 걸 원해요."
     assert context["objective"] == "확정된 두 상품의 위험과 원금보장 비교"
     assert context["targets"] == comparison.targets
-    assert context["criteria"] == comparison.criteria
+    assert context["comparison_query"] == comparison.comparison_query
     assert [chunk["chunk_id"] for chunk in context["evidence"]] == [
         "00000000-0000-0000-0000-000000000001",
         "00000000-0000-0000-0000-000000000002",
@@ -304,8 +295,7 @@ async def test_search_failure_returns_without_model(status: str) -> None:
             "execution_status": status,
             "catalog_version": "catalog-test-version",
             "targets": _comparison().targets,
-            "criteria": ["risk"],
-            "retrieval_coverage": "no_products",
+            "comparison_query": "환헤지 방식 비교",
             "error": "상품 비교 문서 검색에 실패했습니다.",
             "limitations": ["상품 문서 검색 제한"],
         }

@@ -42,7 +42,6 @@ from pension_agent.agent.calculation import (
 )
 from pension_agent.agent.contracts import (
     CalculationResult,
-    ComparisonCriterion,
     ComparisonTarget,
     DecisionStatus,
     DomainRequest,
@@ -63,7 +62,6 @@ from pension_agent.agent.product.comparison_submission import (
 )
 from pension_agent.agent.search import SearchRequest, SearchResult, SearchRunner
 from pension_agent.config import DomainAgentConfig
-from pension_agent.config.product_comparison import MAX_PRODUCT_COMPARISON_CRITERIA
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
 COMPARE_PRODUCTS_TOOL_NAME = "compare_products"
@@ -94,8 +92,6 @@ class ProductAgentState(AgentState):
     product_catalog_retry_count: NotRequired[int]
     search_result: NotRequired[SearchResult]
     comparison_targets: NotRequired[list[ComparisonTarget]]
-    comparison_criteria: NotRequired[list[ComparisonCriterion]]
-    comparison_catalog_version: NotRequired[str]
     comparison_evidence: NotRequired[ComparisonEvidenceResult]
     calculations: NotRequired[Annotated[list[CalculationResult], operator.add]]
     domain_result: NotRequired[DomainResult]
@@ -180,14 +176,15 @@ class ProductComparisonToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]
     ) -> ToolMessage | Command[Any]:
         response = await handler(request)
         if (
-            request.tool_call["name"] != self._lookup_tool_name
+            request.tool_call["name"] not in {self._lookup_tool_name, COMPARE_PRODUCTS_TOOL_NAME}
             or not isinstance(response, ToolMessage)
             or response.status != "error"
         ):
             return response
         error = (
-            "상품 카탈로그 조회 입력이 올바르지 않습니다. "
-            "비교 항목은 중복 없이 1~3개, 재조회 지시는 문자열이어야 합니다."
+            "상품 비교 도구 입력이 올바르지 않습니다."
+            if request.tool_call["name"] == COMPARE_PRODUCTS_TOOL_NAME
+            else "상품 카탈로그 조회 입력이 올바르지 않습니다. 재조회 지시는 문자열이어야 합니다."
         )
         return Command(
             update={
@@ -365,8 +362,6 @@ class ProductReactAgent:
         if result is None and state.get("comparison_targets"):
             return unresolved_comparison_result(
                 targets=state["comparison_targets"],
-                criteria=state["comparison_criteria"],
-                catalog_version=state["comparison_catalog_version"],
                 limitation="상품 비교 답안 생성을 완료하지 못했습니다.",
             )
         return cast(DomainResult, result)
@@ -559,15 +554,16 @@ def _create_compare_products_tool(
         COMPARE_PRODUCTS_TOOL_NAME,
         description=(
             "카탈로그에서 확정된 비교 대상의 문서 근거를 병렬 검색하고 비교 답안까지 작성한다. "
-            "상품 코드와 비교 항목은 lookup_product_codes 결과 그대로 전달한다. "
+            "상품 코드는 lookup_product_codes 결과를 사용하고, 사용자의 비교 목적과 조건을 "
+            "comparison_query에 담는다. 같은 쿼리를 검색과 답안 생성에 사용한다. "
             "완료되면 Product 분석이 종료된다."
         ),
     )
     async def compare_products(
         product_codes: Annotated[list[str], Field(min_length=2, max_length=5)],
-        criteria: Annotated[
-            list[ComparisonCriterion],
-            Field(min_length=1, max_length=MAX_PRODUCT_COMPARISON_CRITERIA),
+        comparison_query: Annotated[
+            str,
+            Field(min_length=1, description="사용자가 비교하려는 내용과 판단에 필요한 조건"),
         ],
         runtime: ToolRuntime[ExecutionContext, ProductAgentState],
     ) -> Command:
@@ -575,9 +571,8 @@ def _create_compare_products_tool(
             raise ValueError("상품 비교 Tool 호출 ID가 없습니다.")
         compared = await comparison_service.compare(
             product_codes=product_codes,
-            criteria=criteria,
+            comparison_query=comparison_query,
             targets=runtime.state.get("comparison_targets", []),
-            expected_criteria=runtime.state.get("comparison_criteria", []),
             deadline=runtime.context.deadline,
         )
         result = await answer_writer.write(
@@ -675,13 +670,7 @@ def _product_tool_call_is_allowed(
     if call["name"] not in allowed_tools:
         return False
     if state.get("comparison_targets"):
-        if call["name"] == COMPARE_PRODUCTS_TOOL_NAME:
-            return (
-                set(call["args"]) == {"product_codes", "criteria"}
-                and call["args"].get("product_codes") == state.get("product_candidate_codes")
-                and call["args"].get("criteria") == state.get("comparison_criteria")
-            )
-        return False
+        return call["name"] == COMPARE_PRODUCTS_TOOL_NAME
     if call["name"] == SUBMIT_DOMAIN_RESULT_TOOL_NAME and _is_initial_not_applicable_submit_call(
         call, state
     ):

@@ -3,24 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
-from functools import cache
-from importlib import resources
 from math import isfinite
-from typing import Literal
 
 from langsmith import traceable
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from pension_agent.agent.contracts import ExecutionStatus, Permission, document_types_for_permission
-from pension_agent.agent.contracts.comparison import ComparisonCriterion, ComparisonTarget
+from pension_agent.agent.contracts.comparison import ComparisonTarget
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult, SearchRunner
 from pension_agent.config import DEFAULT_PRODUCT_COMPARISON_CONFIG, ProductComparisonConfig
 from pension_agent.retrieval.product_catalog import ProductCatalog
 
-RetrievalCoverage = Literal["all_products", "some_products", "no_products"]
-_CRITERIA_ADAPTER = TypeAdapter(list[ComparisonCriterion])
 _TARGETS_ADAPTER = TypeAdapter(list[ComparisonTarget])
 
 
@@ -59,10 +53,9 @@ class ComparisonEvidenceResult(BaseModel):
 
     execution_status: ExecutionStatus
     catalog_version: str
-    criteria: list[ComparisonCriterion]
+    comparison_query: str
     targets: list[ComparisonTarget]
     products: list[ProductEvidence] = Field(default_factory=list)
-    retrieval_coverage: RetrievalCoverage
     limitations: list[str] = Field(default_factory=list)
     error: str | None = None
     search_deadline: float | None = Field(default=None, exclude=True, repr=False)
@@ -81,8 +74,6 @@ class ComparisonEvidenceResult(BaseModel):
                 raise ValueError("비교 검색 상품은 확정된 대상 전체와 순서까지 같아야 합니다.")
             if self.execution_status != _aggregate_status(self.products):
                 raise ValueError("전체 검색 상태가 상품별 시도와 일치하지 않습니다.")
-        if self.retrieval_coverage != _coverage(self.products):
-            raise ValueError("검색 근거 범위가 상품별 근거와 일치하지 않습니다.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,38 +88,34 @@ class ProductComparisonService:
     async def compare(
         self,
         product_codes: list[str],
-        criteria: list[ComparisonCriterion],
+        comparison_query: str,
         targets: list[ComparisonTarget],
-        expected_criteria: list[ComparisonCriterion],
         deadline: float,
     ) -> ComparisonEvidenceResult:
         """입력을 검증한 뒤 모든 확정 상품을 한 번씩 병렬 검색한다."""
 
         safe_targets: list[ComparisonTarget] = []
-        safe_criteria: list[ComparisonCriterion] = []
+        safe_query = comparison_query.strip() if isinstance(comparison_query, str) else ""
         try:
             safe_targets = _TARGETS_ADAPTER.validate_python(targets)
-            safe_criteria = _CRITERIA_ADAPTER.validate_python(expected_criteria)
-            self._validate_inputs(product_codes, criteria, safe_targets, safe_criteria, deadline)
+            self._validate_inputs(product_codes, safe_query, safe_targets, deadline)
         except (ValueError, TypeError, ValidationError):
             return ComparisonEvidenceResult(
                 execution_status="failed",
                 catalog_version=self.catalog.version,
-                criteria=safe_criteria,
+                comparison_query=safe_query,
                 targets=safe_targets,
-                retrieval_coverage="no_products",
-                error="상품 비교 입력이 확정된 대상 또는 비교 항목과 일치하지 않습니다.",
+                error="상품 비교 입력의 대상 또는 비교 쿼리가 올바르지 않습니다.",
             )
 
         search_deadline = min(
             asyncio.get_running_loop().time() + self.config.search_timeout_seconds,
             deadline - self.config.submission_reserve_seconds,
         )
-        query_terms = _load_search_terms()
         entries = self.catalog.select_products(product_codes)
         requests = [
             SearchRequest(
-                objective=" ".join([entry.official_name, *(query_terms[key] for key in criteria)]),
+                objective=safe_query,
                 source_file_name=self.catalog.resolve_source_file_name(entry.product_code),
             )
             for entry in entries
@@ -156,84 +143,13 @@ class ProductComparisonService:
             )
             for entry, attempt in zip(entries, attempts, strict=True)
         ]
-        return self._assemble(products, safe_targets, safe_criteria, search_deadline)
-
-    @traceable(name="product_comparison_supplement", run_type="chain")
-    async def supplement(
-        self,
-        previous: ComparisonEvidenceResult,
-        product_code: str,
-        objective: str,
-        deadline: float,
-        *,
-        expand_neighbors: bool = False,
-    ) -> ComparisonEvidenceResult:
-        """최초 검색 마감 안에서 상품별 누락 근거를 최대 한 번 보완한다."""
-
-        product = next(
-            (item for item in previous.products if item.product_code == product_code), None
-        )
-        supplement_count = sum(len(item.attempts) - 1 for item in previous.products)
-        reason = None
-        if product is None or previous.catalog_version != self.catalog.version:
-            reason = "확정된 비교 대상에 없는 상품의 보완 검색은 실행하지 않았습니다."
-        elif previous.search_deadline is None:
-            reason = "최초 비교 검색이 실행되지 않아 보완 검색을 실행하지 않았습니다."
-        elif not isinstance(objective, str) or not objective.strip() or not isfinite(deadline):
-            reason = "보완 검색의 목적 또는 마감이 올바르지 않습니다."
-        elif (
-            supplement_count >= self.config.max_supplement_calls
-            or len(product.attempts) - 1 >= self.config.max_supplements_per_product
-        ):
-            reason = "상품 비교 보완 검색 횟수의 상한에 도달했습니다."
-        elif min(previous.search_deadline, deadline) <= asyncio.get_running_loop().time():
-            reason = "상품 비교 검색 마감에 도달하여 보완 검색을 실행하지 않았습니다."
-        if reason is not None:
-            return previous.model_copy(
-                update={"limitations": list(dict.fromkeys([*previous.limitations, reason]))}
-            )
-
-        assert product is not None and previous.search_deadline is not None
-        attempt = await self._search(
-            SearchRequest(
-                objective=f"{product.official_name} {objective.strip()}",
-                source_file_name=product.source_file_name,
-                expand_neighbors=expand_neighbors,
-            ),
-            search_deadline=min(previous.search_deadline, deadline),
-        )
-        existing = {chunk.chunk_id: chunk for chunk in product.evidence}
-        if any(
-            chunk.chunk_id in existing and existing[chunk.chunk_id] != chunk
-            for chunk in attempt.retrieved_chunks
-        ):
-            attempt = SearchResult(
-                execution_status="failed", error="기존 상품 근거와 같은 ID의 내용이 변경됐습니다."
-            )
-        for chunk in attempt.retrieved_chunks:
-            existing.setdefault(chunk.chunk_id, chunk)
-        updated = ProductEvidence(
-            product_code=product.product_code,
-            official_name=product.official_name,
-            provider=product.provider,
-            source_file_name=product.source_file_name,
-            attempts=[*product.attempts, attempt],
-            evidence=list(existing.values()),
-        )
-        return self._assemble(
-            [updated if item.product_code == product_code else item for item in previous.products],
-            previous.targets,
-            previous.criteria,
-            previous.search_deadline,
-            previous.limitations,
-        )
+        return self._assemble(products, safe_targets, safe_query, search_deadline)
 
     def _validate_inputs(
         self,
         product_codes: list[str],
-        criteria: list[ComparisonCriterion],
+        comparison_query: str,
         targets: list[ComparisonTarget],
-        expected_criteria: list[ComparisonCriterion],
         deadline: float,
     ) -> None:
         if (
@@ -243,10 +159,8 @@ class ProductComparisonService:
             raise ValueError("비교 상품 수가 올바르지 않습니다.")
         if not 2 <= len(targets) <= self.config.max_targets:
             raise ValueError("비교 대상 수가 올바르지 않습니다.")
-        if not 1 <= len(expected_criteria) <= self.config.max_criteria:
-            raise ValueError("비교 항목 수가 올바르지 않습니다.")
-        if criteria != expected_criteria or len(set(criteria)) != len(criteria):
-            raise ValueError("비교 항목이 확정된 항목과 일치하지 않습니다.")
+        if not comparison_query:
+            raise ValueError("상품 비교 쿼리가 비어 있습니다.")
         if product_codes != _resolved_codes(targets):
             raise ValueError("상품 코드가 확정된 대상 전체와 일치하지 않습니다.")
         if len({target["target_id"] for target in targets}) != len(targets):
@@ -298,12 +212,11 @@ class ProductComparisonService:
         self,
         products: list[ProductEvidence],
         targets: list[ComparisonTarget],
-        criteria: list[ComparisonCriterion],
+        comparison_query: str,
         search_deadline: float,
-        prior_limitations: list[str] | None = None,
     ) -> ComparisonEvidenceResult:
         status = _aggregate_status(products)
-        limitations = list(prior_limitations or [])
+        limitations: list[str] = []
         for target in targets:
             if target["resolution_status"] != "single":
                 limitations.append(
@@ -319,10 +232,9 @@ class ProductComparisonService:
         return ComparisonEvidenceResult(
             execution_status=status,
             catalog_version=self.catalog.version,
-            criteria=criteria,
+            comparison_query=comparison_query,
             targets=targets,
             products=products,
-            retrieval_coverage=_coverage(products),
             limitations=list(dict.fromkeys(limitations)),
             error=(
                 None
@@ -355,13 +267,6 @@ def _aggregate_status(products: list[ProductEvidence]) -> ExecutionStatus:
     return "failed" if "failed" in statuses else "timeout"
 
 
-def _coverage(products: list[ProductEvidence]) -> RetrievalCoverage:
-    count = sum(bool(product.evidence) for product in products)
-    if not count:
-        return "no_products"
-    return "all_products" if count == len(products) else "some_products"
-
-
 def _authorized_chunk(chunk: SearchChunkPayload, source_file_name: str | None) -> bool:
     return (
         chunk.source_file_name == source_file_name
@@ -371,13 +276,3 @@ def _authorized_chunk(chunk: SearchChunkPayload, source_file_name: str | None) -
 
 def _timeout_result() -> SearchResult:
     return SearchResult(execution_status="timeout", error="상품 비교 검색 시간이 초과됐습니다.")
-
-
-@cache
-def _load_search_terms() -> dict[ComparisonCriterion, str]:
-    payload = json.loads(
-        resources.files("pension_agent.prompts")
-        .joinpath("domain", "product-comparison-search.json")
-        .read_text(encoding="utf-8")
-    )
-    return TypeAdapter(dict[ComparisonCriterion, str]).validate_python(payload)

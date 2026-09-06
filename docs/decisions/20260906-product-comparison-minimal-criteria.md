@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 date: 2026-09-06
 type: architecture
 related:
@@ -7,7 +7,8 @@ related:
   - 20260906-product-comparison-answer-ownership.md
 supersedes:
   - 20260905-product-comparison-execution-budget.md
-superseded-by: []
+superseded-by:
+  - 20260906-product-comparison-free-query.md
 ---
 
 # 상품 비교 항목을 필요한 최소 1~3개로 제한한다

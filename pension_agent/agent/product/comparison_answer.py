@@ -194,7 +194,7 @@ def _model_input(
         "objective": objective,
         "catalog_version": comparison.catalog_version,
         "targets": comparison.targets,
-        "criteria": comparison.criteria,
+        "comparison_query": comparison.comparison_query,
         "products": [
             {
                 "product_code": product.product_code,

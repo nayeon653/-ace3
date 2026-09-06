@@ -1,3 +1,3 @@
 {
-  "search": "lookup_product_codes가 반환한 product_codes와 criteria를 그대로 사용해 compare_products를 호출하세요. 후보를 추가하거나 생략하지 마세요. Tool이 비교 답안 생성까지 마치면 Product 분석이 종료됩니다."
+  "search": "lookup_product_codes가 반환한 product_codes와 사용자 질문·objective의 비교 목적과 조건을 담은 comparison_query로 compare_products를 호출하세요. 같은 쿼리가 상품별 검색과 비교 답안 생성에 사용됩니다. Tool이 답안 생성을 마치면 Product 분석이 종료됩니다."
 }

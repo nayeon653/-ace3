@@ -47,8 +47,6 @@ def build_domain_tool_result(result: DomainResult) -> DomainToolResult:
         tool_result["decision"] = result["decision"]
     if "catalog_result" in result:
         tool_result["catalog_result"] = result["catalog_result"]
-    if "comparison_result" in result:
-        tool_result["comparison_result"] = result["comparison_result"]
     if "comparison_answer" in result:
         tool_result["comparison_answer_ready"] = True
     if "error" in result:

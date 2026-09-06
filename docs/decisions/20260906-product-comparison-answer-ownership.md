@@ -10,6 +10,7 @@ supersedes:
   - 20260905-product-comparison-execution-budget.md
 superseded-by:
   - 20260906-product-catalog-selection-retry.md
+  - 20260906-product-comparison-free-query.md
 ---
 
 # 비교 답변 작성을 compare_products가 소유한다

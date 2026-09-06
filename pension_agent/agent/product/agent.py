@@ -15,7 +15,6 @@ from pydantic import Field
 from pension_agent.agent.contracts import (
     CatalogItem,
     CatalogResult,
-    ComparisonCriterion,
     ComparisonTarget,
     DomainResult,
     ExecutionStatus,
@@ -45,7 +44,6 @@ from pension_agent.agent.product.comparison_submission import unresolved_compari
 from pension_agent.agent.product.react import ProductAgentState, create_product_react_agent
 from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
-from pension_agent.config.product_comparison import MAX_PRODUCT_COMPARISON_CRITERIA
 from pension_agent.retrieval import (
     ProductCatalog,
     ProductCatalogResult,
@@ -133,25 +131,11 @@ def _create_product_catalog_query_tool(
         LOOKUP_PRODUCT_CODES_TOOL_NAME,
         description=(
             "사용자 질문을 전체 상품 카탈로그와 대조해 단일 상품 또는 비교할 여러 상품을 "
-            "식별하거나, 운용사별 상품 개수와 목록을 정확히 조회한다. "
-            "명시적인 여러 상품 비교에는 comparison_criteria를 지정한다."
+            "식별하거나, 운용사별 상품 개수와 목록을 정확히 조회한다."
         ),
     )
     async def query_product_catalog(
         runtime: ToolRuntime[ExecutionContext, ProductAgentState],
-        comparison_criteria: Annotated[
-            list[ComparisonCriterion] | None,
-            Field(
-                min_length=1,
-                max_length=MAX_PRODUCT_COMPARISON_CRITERIA,
-                description=(
-                    "질문에 답하는 데 필요한 최소 1~3개 항목만 선택. 차이와 안정성을 함께 "
-                    "물으면 investment_strategy, risk, capital_protection. 안정성만 물으면 "
-                    "risk, capital_protection. fees와 liquidity는 명시 요청에만 선택. "
-                    "단일 상품·목록 조회는 생략"
-                ),
-            ),
-        ] = None,
         retry_hint: Annotated[
             str | None,
             Field(
@@ -162,14 +146,6 @@ def _create_product_catalog_query_tool(
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("상품 카탈로그 조회 Tool 호출 ID가 없습니다.")
-        if comparison_criteria is not None and (
-            not 1 <= len(comparison_criteria) <= MAX_PRODUCT_COMPARISON_CRITERIA
-            or len(comparison_criteria) != len(set(comparison_criteria))
-        ):
-            return _catalog_lookup_command(
-                runtime.tool_call_id,
-                result=_failed_product_result("비교 항목은 중복 없이 1~3개여야 합니다."),
-            )
         try:
             retry_options = {"retry_hint": retry_hint} if retry_hint is not None else {}
             query = await planner.plan(
@@ -201,11 +177,6 @@ def _create_product_catalog_query_tool(
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
 
         if isinstance(query, MultipleProductsQuery):
-            if comparison_criteria is None:
-                return _catalog_lookup_command(
-                    runtime.tool_call_id,
-                    result=_failed_product_result("복수 상품 식별에는 비교 항목이 필요합니다."),
-                )
             targets: list[ComparisonTarget] = []
             for index, item in enumerate(query.targets):
                 target: ComparisonTarget = {
@@ -226,12 +197,10 @@ def _create_product_catalog_query_tool(
                     if target["resolution_status"] == "single"
                 )
             )
-            comparison_result: DomainResult | None = None
+            incomplete_result: DomainResult | None = None
             if len(codes) < 2:
-                comparison_result = unresolved_comparison_result(
+                incomplete_result = unresolved_comparison_result(
                     targets=targets,
-                    criteria=comparison_criteria,
-                    catalog_version=catalog.version,
                     limitation="서로 다른 상품을 2개 이상 식별하지 못해 비교를 실행하지 않았습니다.",
                 )
             return _catalog_lookup_command(
@@ -240,18 +209,10 @@ def _create_product_catalog_query_tool(
                     "route": "resolve_products",
                     "targets": targets,
                     "product_codes": codes,
-                    "criteria": comparison_criteria,
                 },
                 candidate_codes=codes,
-                result=comparison_result,
+                result=incomplete_result,
                 comparison_targets=targets,
-                comparison_criteria=comparison_criteria,
-                catalog_version=catalog.version,
-            )
-        if comparison_criteria is not None:
-            return _catalog_lookup_command(
-                runtime.tool_call_id,
-                result=_failed_product_result("비교 요청에 필요한 복수 상품 식별 계획이 없습니다."),
             )
         if isinstance(query, UnregisteredProviderQuery):
             result = _terminal_unregistered_provider_result(query)
@@ -340,8 +301,6 @@ def _catalog_lookup_command(
     result: DomainResult | None = None,
     pending_catalog_result: DomainResult | None = None,
     comparison_targets: list[ComparisonTarget] | None = None,
-    comparison_criteria: list[ComparisonCriterion] | None = None,
-    catalog_version: str | None = None,
     catalog_retry_count: int | None = None,
 ) -> Command:
     if payload is not None:
@@ -387,8 +346,6 @@ def _catalog_lookup_command(
         update["product_catalog_retry_count"] = catalog_retry_count
     if comparison_targets is not None:
         update["comparison_targets"] = comparison_targets
-        update["comparison_criteria"] = comparison_criteria
-        update["comparison_catalog_version"] = catalog_version
     if result is not None:
         validate_domain_result(result)
         update["domain_result"] = result

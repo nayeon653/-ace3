@@ -35,7 +35,6 @@ _CALCULATE = "calculate_fund_standard_price"
 _ALL_TOOLS = [_LOOKUP, _COMPARE, _SEARCH, _CALCULATE, _SUBMIT]
 _STATE = {
     "comparison_targets": [{"target_id": "target_1"}, {"target_id": "target_2"}],
-    "comparison_criteria": ["risk", "capital_protection"],
 }
 
 
@@ -107,21 +106,32 @@ async def test_comparison_before_search_forces_compare_and_preserves_lookup_sche
     assert original.tool_choice == "auto"
 
 
-def test_comparison_rejects_uncontracted_search_parameters() -> None:
+@pytest.mark.parametrize(
+    "args",
+    [
+        {
+            "product_codes": ["KR5153420063", "KR5153420105"],
+            "comparison_query": "환헤지 방식과 분배금 지급 주기를 비교해 주세요.",
+        },
+        {"product_codes": ["KR5153420063", "KR5153420105"], "comparison_query": ""},
+        {"product_codes": ["KR5153420105", "KR5153420063"]},
+    ],
+)
+def test_comparison_arguments_reach_the_tool_without_silent_model_response_filtering(
+    args: dict[str, Any],
+) -> None:
     codes = ["KR5153420063", "KR5153420105"]
-    criteria = ["risk"]
-    call = _call(_COMPARE, {"product_codes": codes, "criteria": criteria, "timeout": 120})
+    call = _call(_COMPARE, args)
     state = {
         **_STATE,
         "product_candidate_codes": codes,
-        "comparison_criteria": criteria,
         "messages": [*_history(_LOOKUP), call],
     }
     update = EnforceProductToolSequence(
         lookup_tool_name=_LOOKUP, max_search_calls=2, calculation_tool_names=()
     ).after_model(state, runtime=None)
-    assert update is not None
-    assert update["messages"][0].tool_calls == []
+    assert update is None
+    assert call.tool_calls[0]["args"] == args
 
 
 @pytest.mark.parametrize("name", [_LOOKUP, _SEARCH, _SUBMIT, _CALCULATE])
@@ -241,14 +251,19 @@ class ScopedSearch:
 @pytest.mark.anyio
 async def test_product_graph_binds_comparison_once_and_writer_owns_the_answer_schema() -> None:
     codes = ["KR5153420063", "KR5153420105"]
+    comparison_query = "두 상품의 금리 변동 위험을 비교해 주세요."
     targets = [
         {"mention_parts": ["솔로몬", duration], "resolution_status": "single", "product_code": code}
         for duration, code in zip(["단기", "장기"], codes, strict=True)
     ]
     model = BindingRecorderModel(
         responses=[
-            _call(_LOOKUP, {"comparison_criteria": ["risk"]}, call_id="lookup"),
-            _call(_COMPARE, {"product_codes": codes, "criteria": ["risk"]}, call_id="compare"),
+            _call(_LOOKUP, call_id="lookup"),
+            _call(
+                _COMPARE,
+                {"product_codes": codes, "comparison_query": comparison_query},
+                call_id="compare",
+            ),
             AIMessage(content="비교 Tool 실행 뒤 Product 모델 호출은 없어야 합니다."),
         ]
     )
@@ -302,20 +317,12 @@ async def test_product_graph_binds_comparison_once_and_writer_owns_the_answer_sc
     }
     assert "comparison_cells" not in model.bound_tool_schemas[0][_SUBMIT]["properties"]
     lookup_schema = model.bound_tool_schemas[0][_LOOKUP]
-    assert "comparison_criteria" not in lookup_schema.get("required", [])
-    lookup_criteria = next(
-        branch
-        for branch in lookup_schema["properties"]["comparison_criteria"]["anyOf"]
-        if branch.get("type") == "array"
-    )
-    compare_criteria = model.bound_tool_schemas[1][_COMPARE]["properties"]["criteria"]
-    for criteria_schema in (lookup_criteria, compare_criteria):
-        assert criteria_schema["minItems"] == 1
-        assert criteria_schema["maxItems"] == 3
-        assert set(criteria_schema["items"]["enum"]) == {
-            "investment_strategy",
-            "risk",
-            "capital_protection",
-            "fees",
-            "liquidity",
-        }
+    assert set(lookup_schema["properties"]) == {"retry_hint"}
+    assert not lookup_schema.get("required")
+    compare_schema = model.bound_tool_schemas[1][_COMPARE]
+    assert set(compare_schema["properties"]) == {"product_codes", "comparison_query"}
+    assert set(compare_schema["required"]) == {"product_codes", "comparison_query"}
+    query_schema = compare_schema["properties"]["comparison_query"]
+    assert query_schema["type"] == "string"
+    assert query_schema["minLength"] == 1
+    assert "enum" not in query_schema

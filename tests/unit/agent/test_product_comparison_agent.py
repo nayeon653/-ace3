@@ -30,7 +30,7 @@ from pension_agent.retrieval import load_product_catalog
 
 _QUESTION = "솔로몬 국공채 단기와 중장기, 장기 상품의 투자위험과 원금보장 여부를 비교해 주세요."
 _CODES = ["KR5153420063", "KR5153420079", "KR5153420105"]
-_CRITERIA = ["risk", "capital_protection"]
+_COMPARISON_QUERY = "투자위험과 원금보장 여부를 비교해 주세요."
 
 
 @pytest.fixture
@@ -142,12 +142,13 @@ def _planner(targets: list[dict[str, Any]] | None = None) -> ComparisonFakeModel
     )
 
 
-def _start_calls(*, criteria: list[str] | None = None) -> list[AIMessage]:
-    selected_criteria = _CRITERIA if criteria is None else criteria
+def _start_calls(*, comparison_query: str = _COMPARISON_QUERY) -> list[AIMessage]:
     return [
-        _call("lookup_product_codes", {"comparison_criteria": selected_criteria}, "lookup"),
+        _call("lookup_product_codes", {}, "lookup"),
         _call(
-            "compare_products", {"product_codes": _CODES, "criteria": selected_criteria}, "compare"
+            "compare_products",
+            {"product_codes": _CODES, "comparison_query": comparison_query},
+            "compare",
         ),
     ]
 
@@ -174,13 +175,16 @@ def _answer_call(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("criteria", [_CRITERIA, ["investment_strategy", *_CRITERIA]])
+@pytest.mark.parametrize(
+    "comparison_query",
+    [_COMPARISON_QUERY, "벤치마크, 환헤지 방식, 분배 주기와 클래스별 가입 자격을 비교해 주세요."],
+)
 async def test_product_graph_finishes_with_tool_written_answer_and_cited_evidence(
-    criteria: list[str],
+    comparison_query: str,
 ) -> None:
     model = ComparisonFakeModel(
         responses=[
-            *_start_calls(criteria=criteria),
+            *_start_calls(comparison_query=comparison_query),
             AIMessage(content="이 외부 모델의 재작성은 실행되면 안 됩니다."),
         ]
     )
@@ -222,8 +226,8 @@ async def test_product_graph_finishes_with_tool_written_answer_and_cited_evidenc
     assert "상품별 위험과 원금보장 비교" in writer_input
     for code in _CODES:
         assert code in writer_input
-    for criterion in criteria:
-        assert criterion in writer_input
+    assert json.loads(writer_input)["comparison_query"] == comparison_query
+    assert all(request.objective == comparison_query for request, _, _ in search.calls)
     for index in range(3):
         assert writer_input.count(_chunk(index).content) == 1
         assert writer_input.count(_chunk(index, unused=True).chunk_id) >= 1
@@ -256,27 +260,17 @@ async def test_product_graph_same_model_fallback_still_starts_fresh_comparison_c
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    "criteria",
-    [
-        [],
-        ["investment_strategy", "risk", "capital_protection", "fees"],
-        ["investment_strategy", "risk", "capital_protection", "fees", "liquidity"],
-        ["unknown_criterion"],
-        ["risk", 1],
-        ["risk", "risk"],
-        "risk",
-    ],
-)
-async def test_product_graph_finishes_on_invalid_criteria_without_repair_call(
-    criteria: Any,
+@pytest.mark.parametrize("comparison_query", ["", "   ", 7, ["위험"]])
+async def test_invalid_comparison_query_finishes_without_search_or_repair(
+    comparison_query: Any,
 ) -> None:
     model = ComparisonFakeModel(
         responses=[
+            _start_calls()[0],
             _call(
-                "lookup_product_codes",
-                {"comparison_criteria": criteria},
-                "invalid-lookup",
+                "compare_products",
+                {"product_codes": _CODES, "comparison_query": comparison_query},
+                "invalid-compare",
             ),
             *_start_calls(),
         ]
@@ -295,10 +289,9 @@ async def test_product_graph_finishes_on_invalid_criteria_without_repair_call(
 
     validate_domain_result(result)
     assert result["execution_status"] == "failed"
-    assert "비교 항목" in result["error"]
-    assert "1~3개" in result["error"]
-    assert len(model.received_messages) == 1
-    assert planner.received_messages == []
+    assert "상품 비교" in result["error"]
+    assert len(model.received_messages) == 2
+    assert len(planner.received_messages) == 1
     assert writer.received_messages == []
     assert search.calls == []
     assert result["evidence"] == []
@@ -365,7 +358,7 @@ async def test_single_lookup_invalid_retry_hint_finishes_and_keeps_raw_tool_erro
         (RuntimeError("예기치 않은 내부 오류"), "failed", "Domain Agent 실행에 실패했습니다."),
     ],
 )
-async def test_catalog_execution_errors_are_not_mislabeled_as_invalid_comparison_criteria(
+async def test_catalog_execution_errors_preserve_their_failure_reason(
     error: Exception, status: str, message: str
 ) -> None:
     class FailingPlanner:
@@ -414,7 +407,7 @@ async def test_catalog_code_failure_returns_to_product_for_one_explicit_retry(
             _start_calls()[0],
             _call(
                 "lookup_product_codes",
-                {"comparison_criteria": _CRITERIA, "retry_hint": retry_hint},
+                {"retry_hint": retry_hint},
                 "lookup-retry",
             ),
             _start_calls()[1],
@@ -491,7 +484,6 @@ async def test_second_catalog_code_failure_finishes_without_third_lookup_or_sear
             _call(
                 "lookup_product_codes",
                 {
-                    "comparison_criteria": _CRITERIA,
                     "retry_hint": "직전 제출 코드가 카탈로그에 없으므로 다시 확인하세요.",
                 },
                 "lookup-retry",
@@ -575,7 +567,7 @@ async def test_existing_catalog_codes_are_searched_without_product_name_reinterp
             _start_calls()[0],
             _call(
                 "compare_products",
-                {"product_codes": selected_codes, "criteria": _CRITERIA},
+                {"product_codes": selected_codes, "comparison_query": _COMPARISON_QUERY},
                 "compare",
             ),
         ]
@@ -609,7 +601,7 @@ async def test_existing_catalog_codes_are_searched_without_product_name_reinterp
 
 
 @pytest.mark.anyio
-async def test_single_product_lookup_still_omits_comparison_criteria() -> None:
+async def test_single_product_lookup_keeps_the_single_product_path() -> None:
     model = ComparisonFakeModel(
         responses=[
             _call("lookup_product_codes", {}, "lookup"),
@@ -756,16 +748,19 @@ async def test_product_graph_preserves_all_unresolved_targets_without_search(
     validate_domain_result(result)
     assert result["execution_status"] == "completed"
     assert result["decision"]["status"] == "undetermined"
-    assert result["comparison_result"]["coverage"] == "none"
-    assert [target["mention_parts"] for target in result["comparison_result"]["targets"]] == [
-        target["mention_parts"] for target in targets
-    ]
-    assert len(result["comparison_result"]["cells"]) == 6
-    assert all(cell["status"] == "not_verified" for cell in result["comparison_result"]["cells"])
+    assert "comparison_result" not in result
+    for target in targets:
+        label = (
+            load_product_catalog().select_products([target["product_code"]])[0].official_name
+            if target["resolution_status"] == "single"
+            else " ".join(target["mention_parts"])
+        )
+        assert label in result["comparison_answer"]
+    assert "|" not in result["comparison_answer"]
     assert result["evidence"] == []
     assert len(model.received_messages) == 1
     assert search.calls == []
-    assert "2개 이상 식별하지 못해" in result["decision"]["missing_conditions"][0]
+    assert "2개 이상 식별하지 못해" in result["comparison_answer"]
 
 
 @pytest.mark.anyio

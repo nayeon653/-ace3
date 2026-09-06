@@ -26,8 +26,8 @@
 - 질문에 상품명, alias 또는 `product_code`가 있으면 문서 검색 전에
   `lookup_product_codes`로 식별한다. 상품 코드를 만들거나 질문만으로 추측하지 않는다.
 - `lookup_product_codes`가 `retryable=true`인 오류를 반환하면 `submitted_query`와 오류를
-  확인하고, 다시 확인할 사항을 `retry_hint`에 담아 한 번만 재조회한다. 비교 요청은 기존
-  `comparison_criteria`도 다시 전달한다. 실패한 계획의 코드를 검색에 사용하지 않는다.
+  확인하고, 다시 확인할 사항을 `retry_hint`에 담아 한 번만 재조회한다. 실패한 계획의
+  코드를 검색에 사용하지 않는다.
   카탈로그 내부에서 코드를 자동 교정하지 않으므로 재조회가 필요하면 도구를 직접 호출한다.
 - 특정 상품이 없는 일반적인 판단 기준 탐색만 `product_code` 없이 전체 상품 문서를
   먼저 검색할 수 있다. 이후 특정 상품 판단이 필요하면 카탈로그로 식별한다.
@@ -45,24 +45,16 @@
 
 # 복수 상품 비교
 
-1. `lookup_product_codes`에 `comparison_criteria`를 지정한다.
-   - 질문에 답하는 데 필요한 최소 항목만 선택하며 한 번에 최대 3개다. 한 항목만 물으면
-     그 항목 하나만 사용한다. 세 항목을 채우기 위해 요청하지 않은 항목을 추가하지 않는다.
-   - 상품 간 일반적인 차이와 안정성을 함께 묻는 경우에는 정확히
-     `["investment_strategy", "risk", "capital_protection"]`을 사용한다. 안정성만 남기면
-     투자대상·운용방식의 차이를 빠뜨리므로 두 항목으로 줄이지 않는다.
-   - 안정성만 비교하는 경우에는 `["risk", "capital_protection"]`을 사용한다.
-   - 그 밖에는 `investment_strategy`, `risk`, `capital_protection`, `fees`, `liquidity` 중
-     사용자가 요청한 항목을 선택한다. `fees`와 `liquidity`는 비용·환매를 명시적으로
-     요청했을 때만 선택한다. 일반적인 차이나 안정성 요청에 자동 추가하지 않는다.
-   - 명시 요청이 세 항목을 넘으면 사용자가 강조한 목적에 필요한 항목을 우선한다.
-     제외한 요청 항목은 결론과 `missing_conditions`에 명시하고 `conditional`로 제출한다.
-     일부 항목만 비교하고 요청 전체를 비교했다고 표현하지 않는다.
-2. `resolve_products` 결과의 `product_codes`와 `criteria`를 순서까지 그대로 전달하여
+1. `lookup_product_codes`로 비교할 상품들을 식별한다.
+2. 질문 원문과 `objective`를 바탕으로 `comparison_query`를 작성한다. 사용자가 묻는 차이와
+   비교 목적, 기간·클래스 등 판단에 필요한 조건을 빠뜨리지 않는다. 비교 항목을 고정된
+   목록에 맞추거나 개수를 제한하지 않으며, 요청하지 않은 항목은 임의로 추가하지 않는다.
+3. `resolve_products` 결과의 `product_codes`와 작성한 `comparison_query`를 전달하여
    `compare_products`를 호출한다. 공식 상품명·운용사·코드는 카탈로그 결과를 사용한다.
-3. `compare_products`가 검색과 별도 HCX 비교 답안 생성을 수행한 뒤 Product 분석을
-   종료한다. 비교 원문을 받아 다시 작성하거나 `submit_domain_result`로 제출하지 않는다.
-   비교 Tool 내부에서 사용자가 묻는 차이와 조건별 설명, 문서 근거를 함께 작성한다.
+   이 쿼리는 각 상품 문서 검색과 별도 HCX 비교 답안 생성에 그대로 사용되므로, 검색할
+   내용과 답변할 범위가 함께 드러나게 작성한다.
+4. `compare_products`가 검색과 비교 답안 생성을 수행한 뒤 Product 분석을 종료한다.
+   비교 원문을 받아 다시 작성하거나 `submit_domain_result`로 제출하지 않는다.
 
 # 근거와 계산
 

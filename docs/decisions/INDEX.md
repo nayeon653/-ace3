@@ -23,14 +23,13 @@
 | 2026-08-26 | architecture | accepted | [계산 기반을 Domain Agent와 분리된 공용 Python 컴포넌트로 둔다](20260826-104-domain-neutral-calculation-service.md) |
 | 2026-09-05 | architecture | accepted | [모든 생성 LLM 역할을 HCX-007 비추론 모드로 통일](20260905-all-generation-hcx-007.md) |
 | 2026-09-05 | architecture | superseded | [상품 비교의 검색 예산과 Product 출력 상한을 분리](20260905-product-comparison-execution-budget.md) |
-| 2026-09-06 | architecture | accepted | [상품 비교 항목을 필요한 최소 1~3개로 제한](20260906-product-comparison-minimal-criteria.md) |
+| 2026-09-06 | architecture | superseded | [상품 비교 항목을 필요한 최소 1~3개로 제한](20260906-product-comparison-minimal-criteria.md) |
 | 2026-09-06 | architecture | accepted | [비교 답변 작성을 compare_products가 소유](20260906-product-comparison-answer-ownership.md) |
 | 2026-09-06 | architecture | accepted | [상품 해석은 모델이 맡고 실행 불가 선택은 Product가 재조회](20260906-product-catalog-selection-retry.md) |
+| 2026-09-06 | architecture | accepted | [자유 비교 쿼리로 상품별 검색과 답안 작성을 연결](20260906-product-comparison-free-query.md) |
 
-상품 비교의 기존 실행 예산 결정은 [최소 항목 결정](20260906-product-comparison-minimal-criteria.md)의
-1~3개 항목 정책과 [답변 소유권 결정](20260906-product-comparison-answer-ownership.md)의
-검색·생성·결과 처리 계약으로 대체했다. 기존 출력 상한과 공통 deadline은 새 소유권 결정에서
-유지하며, 현재 적용값은 [비교 도구 스펙](../specs/components/product-comparison.md)에 정리한다.
-최소 항목 결정의 선택 정책은 유효하지만, 당시 셀 수 설명은 현재 답변의 출력 계약이 아니다.
-이후 [카탈로그 선택·재조회 결정](20260906-product-catalog-selection-retry.md)은 이전 결정의
-상품명·코드 검사, 내부 교정과 조회 횟수만 대체한다. 비교 답변 소유권과 나머지 예산은 유지한다.
+상품 비교의 현재 입력·검색·결과 계약은 [자유 비교 쿼리 결정](20260906-product-comparison-free-query.md)을
+따른다. 기존 최소 항목 정책과 셀 결과는 대체했으며, 이전 결정의 관련 설명은 당시 기록이다.
+[답변 소유권](20260906-product-comparison-answer-ownership.md)의 독립 생성 책임·예산과
+[카탈로그 선택·재조회](20260906-product-catalog-selection-retry.md)의 의미 판단·실행 불가 선택
+재조회 정책은 유지한다. 구체적인 현재 계약은 [비교 도구 스펙](../specs/components/product-comparison.md)에 정리한다.

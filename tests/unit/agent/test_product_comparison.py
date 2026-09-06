@@ -2,13 +2,14 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from pension_agent.agent.contracts import Permission
-from pension_agent.agent.contracts.comparison import ComparisonCriterion, ComparisonTarget
+from pension_agent.agent.contracts.comparison import ComparisonTarget
 from pension_agent.agent.product.comparison import (
     ComparisonEvidenceResult,
     ProductComparisonService,
@@ -20,7 +21,7 @@ from pension_agent.core import DocumentType
 from pension_agent.retrieval import ProductCatalog, load_product_catalog
 
 _CODES = ["KR5153420063", "KR5153420079", "KR5153420105"]
-_CRITERIA: list[ComparisonCriterion] = ["risk", "capital_protection"]
+_COMPARISON_QUERY = "상품별 투자원금 손실 가능성과 안정성을 비교해 주세요."
 
 
 @pytest.fixture
@@ -85,14 +86,13 @@ async def _compare(
     *,
     codes: list[str] | None = None,
     targets: list[ComparisonTarget] | None = None,
-    criteria: list[ComparisonCriterion] | None = None,
+    comparison_query: str = _COMPARISON_QUERY,
     deadline: float | None = None,
 ) -> ComparisonEvidenceResult:
     return await service.compare(
         product_codes=_CODES if codes is None else codes,
-        criteria=_CRITERIA if criteria is None else criteria,
+        comparison_query=comparison_query,
         targets=_targets(service.catalog) if targets is None else targets,
-        expected_criteria=_CRITERIA,
         deadline=asyncio.get_running_loop().time() + 75 if deadline is None else deadline,
     )
 
@@ -119,7 +119,6 @@ async def test_comparison_parallel_searches_keep_order_scope_and_reserved_deadli
     result = await _compare(ProductComparisonService(search, catalog), deadline=parent_deadline)
 
     assert result.execution_status == "completed"
-    assert result.retrieval_coverage == "all_products"
     assert [product.product_code for product in result.products] == _CODES
     assert len(search.calls) == 3
     assert result.search_deadline == pytest.approx(parent_deadline - 30)
@@ -128,26 +127,24 @@ async def test_comparison_parallel_searches_keep_order_scope_and_reserved_deadli
         assert request.source_file_name == catalog.resolve_source_file_name(code)
         assert permission is Permission.PRODUCT
         assert deadline == result.search_deadline
-        assert "투자위험등급" in request.objective
-        assert "원금보장" in request.objective
-        assert "판매수수료" not in request.objective
+        assert request.objective == result.comparison_query == _COMPARISON_QUERY
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("statuses", "with_evidence", "expected_status", "coverage"),
+    ("statuses", "with_evidence", "expected_status"),
     [
-        (["completed", "completed", "completed"], True, "completed", "all_products"),
-        (["completed", "failed", "timeout"], True, "completed", "some_products"),
-        (["completed", "failed", "timeout"], False, "completed", "no_products"),
-        (["completed", "completed", "completed"], False, "completed", "no_products"),
-        (["timeout", "timeout", "timeout"], False, "timeout", "no_products"),
-        (["failed", "failed", "failed"], False, "failed", "no_products"),
-        (["failed", "timeout", "timeout"], False, "failed", "no_products"),
+        (["completed", "completed", "completed"], True, "completed"),
+        (["completed", "failed", "timeout"], True, "completed"),
+        (["completed", "failed", "timeout"], False, "completed"),
+        (["completed", "completed", "completed"], False, "completed"),
+        (["timeout", "timeout", "timeout"], False, "timeout"),
+        (["failed", "failed", "failed"], False, "failed"),
+        (["failed", "timeout", "timeout"], False, "failed"),
     ],
 )
 async def test_statuses_follow_success_attempts_even_when_they_find_no_chunks(
-    statuses: list[str], with_evidence: bool, expected_status: str, coverage: str
+    statuses: list[str], with_evidence: bool, expected_status: str
 ) -> None:
     catalog = load_product_catalog()
     by_source = dict(
@@ -167,7 +164,9 @@ async def test_statuses_follow_success_attempts_even_when_they_find_no_chunks(
     result = await _compare(ProductComparisonService(RecordingSearch(collect), catalog))
 
     assert result.execution_status == expected_status
-    assert result.retrieval_coverage == coverage
+    assert [bool(product.evidence) for product in result.products] == [
+        status == "completed" and with_evidence for status in statuses
+    ]
     assert len(result.products) == 3
     assert (result.error is None) == (expected_status == "completed")
     if "failed" in statuses:
@@ -198,52 +197,67 @@ async def test_invalid_changed_or_incomplete_target_set_never_searches(codes: li
 
 
 @pytest.mark.anyio
-async def test_changed_criteria_and_catalog_identity_are_rejected_before_search() -> None:
+async def test_changed_catalog_identity_is_rejected_before_search() -> None:
     catalog = load_product_catalog()
     search = RecordingSearch()
-    service = ProductComparisonService(search, catalog)
-    result = await _compare(service, criteria=["risk"])
-    assert result.execution_status == "failed"
     targets = _targets(catalog)
     targets[0]["official_name"] = "다른 상품명"
-    result = await _compare(service, targets=targets)
+
+    result = await _compare(ProductComparisonService(search, catalog), targets=targets)
+
     assert result.execution_status == "failed"
     assert not search.calls
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    "criteria, allowed",
+    "query",
     [
-        ([], False),
-        (["risk"], True),
-        (["risk", "fees", "liquidity"], True),
-        (["investment_strategy", "risk", "capital_protection", "fees"], False),
+        "환헤지 방식과 외화 노출을 비교해 주세요.",
+        "설정일과 최근 결산일, 분배금 지급 주기를 비교해 주세요.",
+        "운용 인력의 변경 내역과 운용 경험은 어떻게 다른가요?\n각 상품의 차이를 설명해 주세요.",
     ],
 )
-async def test_criterion_count_is_checked_before_search_even_when_plan_matches(
-    criteria: list[ComparisonCriterion], allowed: bool
-) -> None:
+async def test_free_comparison_query_is_shared_verbatim_by_all_product_searches(query: str) -> None:
     catalog = load_product_catalog()
     search = RecordingSearch()
-    result = await ProductComparisonService(search, catalog).compare(
-        product_codes=_CODES,
-        criteria=criteria,
-        expected_criteria=criteria,
-        targets=_targets(catalog),
-        deadline=asyncio.get_running_loop().time() + 75,
+
+    result = await _compare(ProductComparisonService(search, catalog), comparison_query=query)
+
+    assert result.execution_status == "completed"
+    assert result.comparison_query == query
+    assert len(search.calls) == len(_CODES)
+    assert [request.objective for request, _, _ in search.calls] == [query] * len(_CODES)
+    assert [request.source_file_name for request, _, _ in search.calls] == [
+        catalog.resolve_source_file_name(code) for code in _CODES
+    ]
+
+
+@pytest.mark.anyio
+async def test_query_outer_whitespace_is_normalized_once_for_search_and_writer_input() -> None:
+    search = RecordingSearch()
+    query = "  환헤지 방식과 외화 노출 비교\n조건과 예외도 설명해 주세요.  "
+
+    result = await _compare(
+        ProductComparisonService(search, load_product_catalog()), comparison_query=query
     )
 
-    assert result.execution_status == ("completed" if allowed else "failed")
-    assert len(search.calls) == (3 if allowed else 0)
-    if not allowed:
-        assert result.products == []
+    assert result.comparison_query == query.strip()
+    assert all(request.objective == result.comparison_query for request, _, _ in search.calls)
 
 
-def test_configuration_cannot_raise_criterion_limit_above_three() -> None:
-    assert ProductComparisonConfig().max_criteria == 3
-    with pytest.raises(ValidationError):
-        ProductComparisonConfig(max_criteria=4)
+@pytest.mark.anyio
+@pytest.mark.parametrize("query", ["", " \n ", None, 123, ["환헤지 비교"]])
+async def test_empty_or_nontext_comparison_query_never_searches(query: Any) -> None:
+    search = RecordingSearch()
+
+    result = await _compare(
+        ProductComparisonService(search, load_product_catalog()), comparison_query=query
+    )
+
+    assert result.execution_status == "failed"
+    assert result.products == []
+    assert search.calls == []
 
 
 @pytest.mark.anyio
@@ -263,7 +277,6 @@ async def test_unresolved_and_repeated_targets_are_preserved_without_duplicate_s
     )
     result = await _compare(ProductComparisonService(search, catalog), targets=targets)
     assert result.targets == targets
-    assert result.retrieval_coverage == "all_products"
     assert len(search.calls) == 3
     assert any("미식별" in text for text in result.limitations)
     targets.append({**targets[0], "target_id": "target-6"})
@@ -332,95 +345,6 @@ async def test_parent_cancellation_propagates_after_draining_child_searches() ->
 
 
 @pytest.mark.anyio
-async def test_failed_supplements_keep_prior_evidence_and_consume_actual_budget() -> None:
-    search = RecordingSearch()
-    service = ProductComparisonService(search, load_product_catalog())
-    result = await _compare(service)
-    original_chunks = [product.evidence for product in result.products]
-    original_deadline = result.search_deadline
-
-    async def fail(request: SearchRequest) -> SearchResult:
-        del request
-        raise RuntimeError("private-provider-error")
-
-    search.callback = fail
-    for code in _CODES[:2]:
-        result = await service.supplement(result, code, "금리변동 위험", original_deadline + 100)
-    assert result.execution_status == "completed"
-    assert result.retrieval_coverage == "all_products"
-    assert result.search_deadline == original_deadline
-    assert [product.evidence for product in result.products] == original_chunks
-    assert [len(product.attempts) for product in result.products] == [2, 2, 1]
-    assert len(search.calls) == 5
-    for code in _CODES:
-        result = await service.supplement(result, code, "위험등급", original_deadline + 100)
-    assert len(search.calls) == 5
-    assert all(call[2] == original_deadline for call in search.calls)
-    assert "private-provider-error" not in result.model_dump_json()
-
-
-@pytest.mark.anyio
-async def test_supplement_deduplicates_success_and_rejects_other_products() -> None:
-    search = RecordingSearch()
-    service = ProductComparisonService(search, load_product_catalog())
-    result = await _compare(service)
-    original = result.products[0].evidence[0]
-    additional = _chunk(original.source_file_name)
-
-    async def collect(request: SearchRequest) -> SearchResult:
-        del request
-        return SearchResult(execution_status="completed", retrieved_chunks=[original, additional])
-
-    search.callback = collect
-    assert result.search_deadline is not None
-    result = await service.supplement(result, _CODES[0], "금리 위험", result.search_deadline)
-    assert result.products[0].evidence == [original, additional]
-    result = await service.supplement(result, "KR5153420022", "금리 위험", result.search_deadline)
-    result = await service.supplement(result, _CODES[0], "금리 위험", result.search_deadline)
-    assert len(search.calls) == 4
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("expand_neighbors", [False, True])
-async def test_supplement_preserves_neighbor_expansion_with_original_scope_and_deadline(
-    expand_neighbors: bool,
-) -> None:
-    search = RecordingSearch()
-    service = ProductComparisonService(search, load_product_catalog())
-    result = await _compare(service)
-    assert result.search_deadline is not None
-
-    await service.supplement(
-        result,
-        _CODES[0],
-        "위험등급 앞뒤 문맥 확인",
-        result.search_deadline + 100,
-        expand_neighbors=expand_neighbors,
-    )
-
-    request, permission, deadline = search.calls[-1]
-    assert request.expand_neighbors is expand_neighbors
-    assert request.source_file_name == result.products[0].source_file_name
-    assert permission is Permission.PRODUCT
-    assert deadline == result.search_deadline
-    assert len(search.calls) == 4
-
-
-@pytest.mark.anyio
-async def test_supplement_cannot_extend_original_search_deadline() -> None:
-    search = RecordingSearch()
-    service = ProductComparisonService(search, load_product_catalog())
-    result = await _compare(service)
-    result = result.model_copy(update={"search_deadline": asyncio.get_running_loop().time() - 1})
-    updated = await service.supplement(
-        result, _CODES[0], "위험", asyncio.get_running_loop().time() + 75
-    )
-    assert len(search.calls) == 3
-    assert updated.products == result.products
-    assert updated.search_deadline == result.search_deadline
-
-
-@pytest.mark.anyio
 async def test_other_product_source_cannot_be_injected_into_search_result() -> None:
     async def wrong_source(request: SearchRequest) -> SearchResult:
         del request
@@ -432,7 +356,6 @@ async def test_other_product_source_cannot_be_injected_into_search_result() -> N
         ProductComparisonService(RecordingSearch(wrong_source), load_product_catalog())
     )
     assert result.execution_status == "failed"
-    assert result.retrieval_coverage == "no_products"
     assert all(not product.evidence for product in result.products)
 
 
@@ -455,7 +378,6 @@ async def test_shared_document_alias_preserves_separate_product_associations() -
         return SearchResult(execution_status="completed", retrieved_chunks=[chunk])
 
     result = await _compare(ProductComparisonService(RecordingSearch(collect), catalog))
-    assert result.retrieval_coverage == "all_products"
     assert result.products[0].evidence == result.products[1].evidence == [shared]
     assert result.products[0].product_code != result.products[1].product_code
 

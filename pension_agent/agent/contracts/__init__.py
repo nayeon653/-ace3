@@ -1,16 +1,7 @@
 """Main, Domain Agent와 API가 공유하는 실행 계약."""
 
 from pension_agent.agent.contracts.answer import AgentAnswer
-from pension_agent.agent.contracts.comparison import (
-    ComparisonCell,
-    ComparisonCoverage,
-    ComparisonCriterion,
-    ComparisonEvidenceRef,
-    ComparisonResult,
-    ComparisonTarget,
-    comparison_coverage,
-    validate_comparison_result,
-)
+from pension_agent.agent.contracts.comparison import ComparisonTarget
 from pension_agent.agent.contracts.domain import (
     CalculationInputSource,
     CalculationResult,
@@ -44,11 +35,6 @@ __all__ = [
     "CatalogItem",
     "CatalogResult",
     "CatalogReturnMode",
-    "ComparisonCell",
-    "ComparisonCoverage",
-    "ComparisonCriterion",
-    "ComparisonEvidenceRef",
-    "ComparisonResult",
     "ComparisonTarget",
     "DecisionStatus",
     "DomainDecision",
@@ -63,9 +49,7 @@ __all__ = [
     "Permission",
     "VerifiedNumericPlaceholder",
     "VerifiedNumericStatement",
-    "comparison_coverage",
     "document_types_for_permission",
-    "validate_comparison_result",
     "validate_domain_result",
     "validate_permission",
 ]

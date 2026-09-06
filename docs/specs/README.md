@@ -25,7 +25,8 @@ Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 
 Python은 응답 형식과 카탈로그 선택의 실행 가능 여부를 확인하며, 이름과 코드의 의미 대응은
 모델이 판단한다. 실행할 수 없는 카탈로그 선택은 Product에 오류로 전달하고 Product가
 `retry_hint`를 넣어 최대 한 번 재조회할 수 있다. Planner 내부의 자동 코드 교정은 하지 않는다.
-`compare_products`는 상품별 검색 뒤 별도 HCX가 비교 답변을 완료하는 도구다.
+`compare_products`는 Product가 작성한 자유 비교 쿼리로 상품별 문서를 검색한 뒤 별도 HCX가
+답변을 완료하는 도구다. 비교 내용을 고정 항목으로 분류하거나 항목 수를 제한하지 않는다.
 
 `drafts/`는 구현 전 제안을 리뷰하는 공간이다. 구현에 반영된 Product 상품 비교 초안은
 위의 현재 스펙으로 이동했으며, 이전 경로에는 이동 안내를 남긴다.
@@ -49,7 +50,6 @@ DomainRequest { question, objective }
          calculations,
          warnings,
          catalog_result?,
-         comparison_result?,
          comparison_answer?,
          error?
        }
@@ -61,15 +61,14 @@ DomainRequest { question, objective }
 - `failed`와 `timeout`에는 정제된 `error`가 필요하며 `decision`, 근거와 계산을 포함하지 않는다.
 - 일반 결과의 `determined`와 `not_applicable`에는 누락 조건을 포함하지 않는다.
 - 일반 결과의 `conditional`과 `undetermined`에는 하나 이상의 구체적인 누락 조건이 필요하다.
-  도구가 작성한 `comparison_answer`에는 이 판단 상태·조건 조합 검사를 적용하지 않는다.
+  Product가 준비한 `comparison_answer`에는 이 판단 상태·조건 조합 검사를 적용하지 않는다.
 - 확정 수치는 Python 계산 결과만 사용할 수 있다. 공용 Calculation Service의 active 함수와
   Agent 연결 상태는 [Calculation Service 스펙](components/calculation-service.md)에 명시한다.
 - 검색 결과 전체가 아니라 결론에 실제 사용한 청크만 `evidence`로 제출한다.
-- `comparison_answer`는 `compare_products`가 완료한 답변이다. 완료된 Product 결과에만
-  허용하며 판단·선택 근거·조건·경고와 함께 보존한다. 답변 내용·인용 의미의 자동 검증이나
-  Product 재작성은 수행하지 않는다.
-- 기존 `comparison_result`는 식별 부족의 결정론적 비교 안내에 남는다. 두 비교
-  필드와 `catalog_result`를 함께 넣지 않는다. 생성된 답변에는 셀 제출 계약을 적용하지 않는다.
+- `comparison_answer`는 비교 도구의 완성 답변이나 Python의 식별·근거 부족 안내다.
+  완료된 Product 결과에만 허용하며 판단·선택 근거·조건·경고와 함께 보존한다.
+  `catalog_result`와 함께 넣지 않는다. 답변 내용·인용 의미를 자동 검증하거나 Product가
+  재작성하지 않는다. 별도 셀 결과나 비교 완성도 계약은 사용하지 않는다.
 
 실행 가능한 타입과 검증의 최종 기준은
 `pension_agent/agent/contracts/domain.py`이며, 스펙과 코드가 다르면 배포 전에 둘을 같은

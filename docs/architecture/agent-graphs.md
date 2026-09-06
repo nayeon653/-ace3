@@ -53,8 +53,8 @@ flowchart TB
     catalog_result --> domain_product
 
     subgraph comparison["복수 상품 비교 · 검색과 답안 생성"]
-        compare_tool["compare_products"] --> product_searches["상품별 병렬 검색"]
-        product_searches --> comparison_evidence["중복 제거한 원문 · 새 모델 입력"]
+        compare_tool["compare_products · 상품 코드 + 비교 쿼리"] --> product_searches["같은 쿼리로 상품별 병렬 검색"]
+        product_searches --> comparison_evidence["질문·비교 쿼리·상품별 원문 · 새 모델 입력"]
         comparison_evidence --> comparison_writer["HCX-007 비교 답안 작성"]
         comparison_writer --> comparison_answer["완성 답안 · 실제 인용 근거"]
     end

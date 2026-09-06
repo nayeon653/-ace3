@@ -64,16 +64,7 @@ def build_think_trace(domain_results: list[DomainResult]) -> str:
                 f"catalog_version={catalog_result['catalog_version']})"
             )
         elif "comparison_answer" in result:
-            conclusion = "compare_products에서 비교 답안 생성 완료"
-        elif "comparison_result" in result:
-            comparison = result["comparison_result"]
-            supported_count = sum(cell["status"] == "supported" for cell in comparison["cells"])
-            conclusion = (
-                f"검증된 상품 비교(coverage={comparison['coverage']}, "
-                f"targets={len(comparison['targets'])}, "
-                f"supported_cells={supported_count}/{len(comparison['cells'])}, "
-                f"catalog_version={comparison['catalog_version']})"
-            )
+            conclusion = "상품 비교 응답 준비 완료"
         decisions.append(f"{domain}={_DECISION_LABELS[decision['status']]}: {conclusion}")
         missing_conditions.extend(
             f"{domain}={condition}"

@@ -4,7 +4,9 @@
 ## 입력과 범위
 
 `question`과 `objective`가 답할 목적이고, `targets`는 원문 표현과 공식 상품명의 대응입니다.
-`criteria`는 이번 비교 항목입니다. `products[].evidence_ids`와 `evidence`는 상품별 검색 후보입니다.
+`comparison_query`는 Product가 작성한 이번 비교 요청이며 상품별 검색에도 같은 문장을 사용했습니다.
+쿼리에 담긴 비교 목적과 조건을 따라 답안을 작성합니다. `products[].evidence_ids`와 `evidence`는
+상품별 검색 후보입니다.
 검색 후보 전체를 요약하지 말고, 질문에 답하는 데 필요한 사실과 판단 조건만 설명합니다.
 요청 중 미비교 항목이나 수행하지 못한 계산은 본문과 `missing_conditions`에 밝힙니다.
 상품별 검색 상태와 `limitations`도 반영합니다.
@@ -31,7 +33,7 @@
 `submit_comparison_answer`를 한 번 호출합니다. 추가 검색이나 별도 검증·재작성 단계는 없습니다.
 
 - `answer`: 질문에 직접 답하는 간결한 한국어 완성 답안. 필요한 공통점·차이와 판단 조건을 설명하며
-  각 설명에 짧은 출처를 포함합니다. 비교 셀 JSON이나 사고 과정은 출력하지 않습니다.
+  각 설명에 짧은 출처를 포함합니다. 사고 과정은 출력하지 않습니다.
 - `status`: 요청 범위를 판단할 수 있으면 `determined`, 조건이 필요하거나 일부만 확인되면
   `conditional`, 판단 근거가 없으면 `undetermined`, 질문에 해당하지 않으면 `not_applicable`.
 - `missing_conditions`: 미비교 범위나 판단에 필요한 정보. 없으면 빈 배열.

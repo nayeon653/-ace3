@@ -7,7 +7,8 @@ related:
 supersedes:
   - 20260905-product-comparison-execution-budget.md
   - 20260906-product-comparison-answer-ownership.md
-superseded-by: []
+superseded-by:
+  - 20260906-product-comparison-free-query.md
 ---
 
 # 상품 해석은 모델이 맡고 실행 불가 선택은 Product가 재조회한다

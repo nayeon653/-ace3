@@ -93,8 +93,7 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 - `decision`(완료 시)
 - `warnings`
 - `catalog_result`(상품 카탈로그 조회 시)
-- `comparison_answer_ready`(비교 도구가 답변을 완료한 경우 true, 본문은 decision에 포함)
-- `comparison_result`(상품 식별 부족으로 비교하지 못한 대상·셀·제한)
+- `comparison_answer_ready`(비교 답변 또는 Python의 비교 불가 안내를 준비한 경우 true, 본문은 decision에 포함)
 - `error`(실패 또는 timeout 시)
 
 전체 `DomainResult`는 `SupervisorState.domain_results`에 별도로 누적되며 API의
@@ -112,7 +111,7 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 - 실패하거나 timeout인 Domain의 결론을 추정하지 않고 가용 결과와 한계를 설명한다.
 - `catalog_result`의 개수, 공식 상품명, 운용사와 상품 코드를 변경하거나 추정하지 않는다.
 - `comparison_answer_ready`가 있는 비교 답변을 재작성하지 않으며 도구가 작성한 결론과
-  조건을 보존한다. 기존 `comparison_result`는 식별 부족 안내로 취급한다.
+  조건 또는 Python이 작성한 비교 불가 안내를 보존한다.
 - JSON과 Tool 호출 형식을 사용자 답변으로 출력하지 않는다.
 
 마지막 Tool 호출이 없는 자연어 `AIMessage`가 없으면 `AgentAnswer` 변환은 실패하며 API는
@@ -125,8 +124,8 @@ Main 모델에는 전체 근거나 계산 내역을 제외한 `DomainToolResult`
 `DomainResult.comparison_answer`의 완료 본문과 확인 조건·경고를
 보존하며 Main이 새로 쓴 비교 문장은 채택하지 않는다. 선택 근거는 `retrieved_context`에
 남기고, 청크별 출처 목록을 답변 끝에 자동 추가하지 않는다. 비교 답변의
-내용·인용 의미를 검증하거나 셀 표로 재구성하지 않는다. 검색 근거 부재는 정해진 안내를
-표시하고, 식별 부족의 기존 `comparison_result`는 미확인 대상 안내로 표시한다. 복합 요청의
+내용·인용 의미를 검증하거나 셀 표로 재구성하지 않는다. 검색 근거나 식별 대상이 부족하면
+같은 `comparison_answer`에 담긴 대상·부족 이유의 간단한 안내를 표시한다. 복합 요청의
 다른 Domain 결과·계산과 기존 숫자 처리도 각각 보존하며 새 수치나 적합성 판단을 합성하지 않는다.
 
 다른 Domain의 계산은 Python 계산 요약을 사용한다. 계산 없이 검증된 수치 문장이 있는
