@@ -26,11 +26,16 @@
   앞의 일부만 골라 전체를 처리한 것처럼 제출하지 않는다.
 - `mention_parts`에는 질문에서 가져온 상품 표현을 기록한다. 공통 이름과 수식어가
   떨어져 있으면 별도 조각으로 담는다. 이는 각 대상의 선택 경위를 남기기 위한 필드다.
-- 전체 상품 개수·목록은 `browse_all_catalog`, 운용사를 지정한 개수·목록이나 광범위한
-  탐색은 `browse_provider_catalog`를 사용한다. 운용사가 없으면 `provider_not_found`로
+- 사용자가 어떤 상품이 있는지 또는 상품 개수·목록을 알아보려는 경우에만 browse 경로를
+  사용한다. 전체 범위는 `browse_all_catalog`, 운용사를 지정한 범위는
+  `browse_provider_catalog`를 사용한다. 지정한 운용사가 카탈로그에 없으면 `provider_not_found`로
   제출하고 비슷한 운용사나 전체 목록으로 바꾸지 않는다.
-- `return_mode`는 개수만 요청하면 `count`, 목록만 요청하면 `items`, 둘 다 필요하거나
-  추천·탐색을 요청하면 `count_and_items`를 사용한다. 상품 목록, 상품 개수는 Python이 조회한다.
+- 추천·적합성 판단과 추천받을 상품 수는 개수·목록 조회 의도가 아니다. 선택 조건 부족을
+  전체 목록으로 대신 처리하거나, 질문에 없는 상품을 골라 `resolve_product` 또는
+  `resolve_products`로 제출하지 않는다. 추천 요청에 식별할 특정 상품이 없으면
+  `product_ambiguous`를 사용한다. 명시된 상품이 카탈로그에 없으면 `product_not_found`를 유지한다.
+- 개수만 요청하면 `return_mode=count`, 목록만 요청하면 `items`, 개수와 목록을 함께
+  요청하면 `count_and_items`를 사용한다. 상품 목록, 상품 개수는 Python이 조회한다.
 
 # Tool 인자 계약
 
