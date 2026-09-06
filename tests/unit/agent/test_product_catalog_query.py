@@ -32,8 +32,10 @@ from pension_agent.agent.product import (
 from pension_agent.agent.product.catalog_query import (
     MultipleProductsQuery,
     _return_product_catalog_query,
+    _return_product_catalog_row_query,
 )
-from pension_agent.retrieval import ProductCatalogError, load_product_catalog
+from pension_agent.agent.product.catalog_selection import CatalogSelectionMode
+from pension_agent.retrieval import ProductCatalog, ProductCatalogError, load_product_catalog
 
 
 @pytest.fixture
@@ -747,3 +749,236 @@ async def test_planner_preserves_infrastructure_rate_limit_retry() -> None:
     assert model.attempt_count == 2
     assert len(model.received_messages) == 1
     assert concurrency.deadlines == [deadline]
+
+
+def test_row_selection_schema_accepts_only_selection_ids() -> None:
+    schema = _return_product_catalog_row_query.tool_call_schema.model_json_schema()
+    definitions = schema["$defs"]
+
+    assert "selected_row_id" in definitions["_SelectedRowProductQuery"]["required"]
+    for definition in ["_SelectedRowProductQuery", "_SelectedRowComparisonTarget"]:
+        assert "product_code" not in definitions[definition]["properties"]
+        assert definitions[definition]["additionalProperties"] is False
+
+
+@pytest.mark.anyio
+async def test_row_selection_maps_single_product_to_original_internal_contract() -> None:
+    catalog = load_product_catalog()
+    model = BindingFakeModel(
+        responses=[
+            _query_response(
+                {
+                    "route": "resolve_product",
+                    "resolution_status": "single",
+                    "selected_row_id": "P002",
+                }
+            )
+        ]
+    )
+    planner = HCXProductCatalogQueryPlanner(model=model, catalog=catalog, selection_mode="row_ids")
+
+    result = await planner.plan(
+        question=catalog.products[1].product_code,
+        objective="명시적인 코드의 상품 조회",
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+
+    assert result == SingleProductQuery(
+        route="resolve_product",
+        resolution_status="single",
+        provider=catalog.products[1].provider,
+        product_code=catalog.products[1].product_code,
+    )
+    assert len(model.received_messages) == 1
+
+
+@pytest.mark.anyio
+async def test_row_selection_keeps_mentions_unresolved_targets_and_model_choice() -> None:
+    targets = [
+        {
+            "mention_parts": ["다른 상품 표현"],
+            "resolution_status": "single",
+            "selected_row_id": "P001",
+        },
+        {"mention_parts": ["모호한 상품"], "resolution_status": "ambiguous"},
+        {"mention_parts": ["없는 상품"], "resolution_status": "not_found"},
+        {"mention_parts": ["같은 상품"], "resolution_status": "single", "selected_row_id": "P001"},
+    ]
+    catalog = load_product_catalog()
+    model = BindingFakeModel(
+        responses=[_query_response({"route": "resolve_products", "targets": targets})]
+    )
+    planner = HCXProductCatalogQueryPlanner(model=model, catalog=catalog, selection_mode="row_ids")
+
+    result = await planner.plan(
+        question="상품 표현을 잘못 해석한 모델 선택도 그대로 보존",
+        objective="비교 상품 선택",
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+
+    assert isinstance(result, MultipleProductsQuery)
+    assert [target.mention_parts for target in result.targets] == [
+        t["mention_parts"] for t in targets
+    ]
+    assert [target.product_code for target in result.targets] == [
+        catalog.products[0].product_code,
+        None,
+        None,
+        catalog.products[0].product_code,
+    ]
+    assert len(model.received_messages) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("selection_mode", ["row_codes", "row_ids"])
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"route": "product_not_found", "resolution_status": "not_found"},
+        {"route": "product_ambiguous", "resolution_status": "ambiguous"},
+        {"route": "browse_all_catalog", "return_mode": "items"},
+        {"route": "browse_provider_catalog", "provider": "미래에셋", "return_mode": "count"},
+        {"route": "provider_not_found", "provider": "없는 운용사", "return_mode": "count"},
+    ],
+)
+async def test_selection_variants_preserve_non_selection_routes(
+    selection_mode: CatalogSelectionMode,
+    query: dict[str, Any],
+) -> None:
+    planner = HCXProductCatalogQueryPlanner(
+        model=BindingFakeModel(responses=[_query_response(query)]),
+        catalog=load_product_catalog(),
+        selection_mode=selection_mode,
+    )
+
+    result = await planner.plan(
+        question="카탈로그 조회",
+        objective="조회 경로 보존",
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+
+    assert result.model_dump(exclude_none=True) == query
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("as_comparison", [False, True])
+async def test_unknown_row_selection_returns_retryable_original_submission(
+    as_comparison: bool,
+) -> None:
+    query: dict[str, Any] = {
+        "route": "resolve_product",
+        "resolution_status": "single",
+        "selected_row_id": "P999",
+    }
+    if as_comparison:
+        query = {
+            "route": "resolve_products",
+            "targets": [
+                {
+                    "mention_parts": ["첫 상품"],
+                    "resolution_status": "single",
+                    "selected_row_id": "P001",
+                },
+                {
+                    "mention_parts": ["다른 상품"],
+                    "resolution_status": "single",
+                    "selected_row_id": "P999",
+                },
+            ],
+        }
+    model = BindingFakeModel(responses=[_query_response(query)])
+    planner = HCXProductCatalogQueryPlanner(
+        model=model, catalog=load_product_catalog(), selection_mode="row_ids"
+    )
+
+    with pytest.raises(CatalogQueryPlanError) as raised:
+        await planner.plan(
+            question="상품 조회",
+            objective="실행 불가능한 행 선택",
+            deadline=asyncio.get_running_loop().time() + 5,
+        )
+
+    assert raised.value.retryable is True
+    assert raised.value.submitted_query == query
+    assert isinstance(raised.value.__cause__, ProductCatalogError)
+    assert len(model.received_messages) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "selection",
+    [
+        {},
+        {"selected_row_id": ""},
+        {"selected_row_id": 1},
+        {"product_code": "KR5153420063"},
+        {"selected_row_id": "P001", "product_code": "KR5153420063"},
+    ],
+)
+async def test_row_schema_errors_do_not_trigger_selection_retry(selection: dict[str, Any]) -> None:
+    model = BindingFakeModel(
+        responses=[
+            _query_response(
+                {"route": "resolve_product", "resolution_status": "single", **selection}
+            )
+        ]
+    )
+    planner = HCXProductCatalogQueryPlanner(
+        model=model, catalog=load_product_catalog(), selection_mode="row_ids"
+    )
+
+    with pytest.raises(CatalogQueryPlanError) as raised:
+        await planner.plan(
+            question="상품 조회",
+            objective="잘못된 응답 형식",
+            deadline=asyncio.get_running_loop().time() + 5,
+        )
+
+    assert raised.value.retryable is False
+    assert isinstance(raised.value.__cause__, ValidationError)
+    assert len(model.received_messages) == 1
+
+
+@pytest.mark.anyio
+async def test_concurrent_planners_resolve_against_their_own_display_order() -> None:
+    original = load_product_catalog()
+    reversed_catalog = ProductCatalog.from_payloads(
+        {"products": [product.to_dict() for product in reversed(original.products)]},
+        {"aliases": {}},
+    )
+    response = _query_response(
+        {"route": "resolve_product", "resolution_status": "single", "selected_row_id": "P001"}
+    )
+    models = [BindingFakeModel(responses=[response]), BindingFakeModel(responses=[response])]
+    planners = [
+        HCXProductCatalogQueryPlanner(model=model, catalog=catalog, selection_mode="row_ids")
+        for model, catalog in zip(models, [original, reversed_catalog], strict=True)
+    ]
+
+    results = await asyncio.gather(
+        *[
+            planner.plan(
+                question="첫 번째 행",
+                objective="스냅샷별 상품 선택",
+                deadline=asyncio.get_running_loop().time() + 5,
+            )
+            for planner in [planners[0], planners[1], planners[0], planners[1]]
+        ]
+    )
+
+    assert [
+        result.product_code for result in results if isinstance(result, SingleProductQuery)
+    ] == [
+        original.products[0].product_code,
+        original.products[-1].product_code,
+        original.products[0].product_code,
+        original.products[-1].product_code,
+    ]
+    for model, expected_code in zip(
+        models, [original.products[0].product_code, original.products[-1].product_code], strict=True
+    ):
+        assert len(model.received_messages) == 2
+        assert all(
+            f'"row_id":"P001","product_code":"{expected_code}"' in str(messages[0].content)
+            for messages in model.received_messages
+        )

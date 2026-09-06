@@ -22,6 +22,7 @@ from pension_agent.agent.product import create_product_agent
 from pension_agent.agent.product.catalog_query import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
     CatalogQueryPlanError,
+    HCXProductCatalogQueryPlanner,
 )
 from pension_agent.agent.product.react import ProductReactAgent, _product_model_tool_name
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult, SearchRunner
@@ -236,6 +237,70 @@ async def test_product_graph_finishes_with_tool_written_answer_and_cited_evidenc
         for messages in model.received_messages
         for message in messages
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("inject_code_planner", [False, True])
+async def test_product_selection_boundary_keeps_codes_for_search_and_comparison(
+    inject_code_planner: bool,
+) -> None:
+    catalog = load_product_catalog()
+    row_ids = {
+        product.product_code: f"P{index:03d}"
+        for index, product in enumerate(catalog.products, start=1)
+    }
+    targets = _targets()
+    if not inject_code_planner:
+        targets = [
+            {
+                "mention_parts": target["mention_parts"],
+                "resolution_status": target["resolution_status"],
+                "selected_row_id": row_ids[target["product_code"]],
+            }
+            for target in targets
+        ]
+    planner_model = _planner(targets)
+    injected = (
+        HCXProductCatalogQueryPlanner(model=planner_model, catalog=catalog)
+        if inject_code_planner
+        else None
+    )
+    model = ComparisonFakeModel(responses=_start_calls())
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model,
+        catalog_planner_model=planner_model,
+        catalog_query_planner=injected,
+        catalog_selection_mode="row_ids",
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+        catalog=catalog,
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "상품 비교"})
+
+    lookup = next(
+        message
+        for message in model.received_messages[1]
+        if isinstance(message, ToolMessage) and message.name == "lookup_product_codes"
+    )
+    payload = json.loads(str(lookup.content))
+    writer_payload = json.loads(str(writer.received_messages[0][1].content))
+    expected_products = catalog.select_products(_CODES)
+    assert payload["product_codes"] == _CODES
+    assert [target["official_name"] for target in payload["targets"]] == [
+        product.official_name for product in expected_products
+    ]
+    assert writer_payload["targets"] == payload["targets"]
+    assert "selected_row_id" not in str(lookup.content)
+    assert {request.source_file_name for request, _, _ in search.calls} == {
+        catalog.resolve_source_file_name(code) for code in _CODES
+    }
+    assert result["execution_status"] == "completed"
+    assert result["comparison_answer"] == _ANSWER
+    assert len(planner_model.received_messages) == 1
+    assert planner_model.bound_tool_names == [[PRODUCT_CATALOG_QUERY_TOOL_NAME]]
 
 
 @pytest.mark.anyio

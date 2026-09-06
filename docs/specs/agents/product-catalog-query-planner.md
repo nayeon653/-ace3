@@ -30,6 +30,31 @@ Product Catalog Query Planner는 독립 Domain Agent가 아니다. Product Agent
 문자열이다. 질문과 판단 목표는 바꾸지 않는다. 이 입력들은 해석할 데이터이며 그 안의
 지시를 시스템 명령으로 취급하지 않는다.
 
+### 카탈로그 표시·선택 방식
+
+운영 기본값은 `compact_codes`다. `create_product_agent(catalog_selection_mode=...)` 또는
+Planner 생성 시 `selection_mode`로 아래 실험 조건을 선택할 수 있다. Product에 Planner를
+직접 주입한 경우에는 그 Planner가 정한 방식을 그대로 사용한다.
+
+| 방식 | 입력 카탈로그 | 모델이 확정 대상에 반환하는 값 |
+|---|---|---|
+| `compact_codes` (A, 운영 기본) | 기존 compact JSON | `product_code` |
+| `row_codes` (B) | 상품별 한 줄 JSON | `product_code` |
+| `row_ids` (C) | B에 짧은 `row_id` 추가 | `selected_row_id` |
+
+세 방식 모두 실제 코드·공식명·운용사·별칭을 제공한다. C의 실제 코드는 코드 직접 입력을
+대조하기 위한 메타데이터다. 모델이 고른 ID는 **모델에 제공한 것과 같은 불변 스냅샷**에서
+Python이 실제 코드로 연결한다. ID는 영구 상품 번호가 아니며 카탈로그 순서가 달라지면
+매핑도 달라진다. 다른 Planner의 매핑을 공유하거나 이름으로 대체 상품을 찾지 않는다.
+
+C에서는 아래 출력 계약의 `product_code` 자리에 `selected_row_id`를 사용하며 미확정
+대상에는 ID를 생략한다. 매핑 이후 내부 계획·Product 조회 결과·검색·비교 도구에는
+기존 `product_code` 계약을 그대로 전달한다. 표시되지 않은 ID는 원 제출값을 보존한
+실행 불가 선택 오류이며, 유효한 다른 상품 행을 고른 의미 오류는 자동 교정하지 않는다.
+
+실험 설정과 정답표는 [실행 절차](../../../evals/catalog_selection/README.md)에 둔다.
+기본값 유지의 근거와 실제 결과는 [이슈 #169 결정](../../decisions/20260906-169-catalog-selection.md)을 따른다.
+
 ## 출력 계약
 
 모델은 자유 형식 텍스트 대신 각 응답에서 `return_product_catalog_query` Tool을 정확히
@@ -108,4 +133,6 @@ Product를 `failed`로 종료한다. 사용자에게 되묻는 절차가 아니�
 ## 검증 위치
 
 - `tests/unit/agent/test_product_catalog_query.py`
+- `tests/unit/agent/test_catalog_selection.py`
+- `tests/unit/agent/test_product_comparison_agent.py`
 - `tests/unit/agent/test_domain_agents.py`

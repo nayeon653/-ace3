@@ -22,6 +22,10 @@ from pydantic import (
 )
 
 from pension_agent.agent.execution import ModelConcurrencyMiddleware
+from pension_agent.agent.product.catalog_selection import (
+    CatalogSelectionMode,
+    CatalogSelectionSnapshot,
+)
 from pension_agent.retrieval import (
     CatalogReturnMode,
     ProductCatalog,
@@ -170,8 +174,54 @@ class CatalogQueryEnvelope(_CatalogQueryBase):
     query: CatalogQueryPlan
 
 
+class _SelectedRowProductQuery(SingleProductQuery):
+    """카탈로그의 단일 상품 행 ID로 식별한 조회."""
+
+    product_code: Annotated[str, StringConstraints(min_length=1)] = Field(alias="selected_row_id")
+
+
+class _SelectedRowComparisonTarget(ComparisonProductTarget):
+    """원문 표현과 확정 여부를 함께 보존하는 비교 대상."""
+
+    product_code: Annotated[str, StringConstraints(min_length=1)] | None = Field(
+        default=None,
+        alias="selected_row_id",
+        description="카탈로그에서 선택한 row_id. single에서만 포함",
+    )
+
+
+class _SelectedRowsProductsQuery(_CatalogQueryBase):
+    """하나의 계획 안에 명시적인 복수 비교 대상을 보존한다."""
+
+    route: Literal["resolve_products"]
+    targets: Annotated[list[_SelectedRowComparisonTarget], Field(min_length=2, max_length=5)]
+
+
+class _SelectedRowQueryEnvelope(_CatalogQueryBase):
+    """단일 Tool의 discriminator 필드 아래에 Query union을 보관한다."""
+
+    query: Annotated[
+        _SelectedRowProductQuery
+        | NotFoundProductQuery
+        | AmbiguousProductQuery
+        | _SelectedRowsProductsQuery
+        | BrowseAllCatalogQuery
+        | BrowseProviderCatalogQuery
+        | UnregisteredProviderQuery,
+        Field(discriminator="route"),
+    ]
+
+
 @tool(PRODUCT_CATALOG_QUERY_TOOL_NAME, args_schema=CatalogQueryEnvelope)
 def _return_product_catalog_query(query: CatalogQueryPlan) -> str:
+    """상품 카탈로그 조회 계획을 구조화해 반환한다."""
+
+    del query
+    return ""
+
+
+@tool(PRODUCT_CATALOG_QUERY_TOOL_NAME, args_schema=_SelectedRowQueryEnvelope)
+def _return_product_catalog_row_query(query: Any) -> str:
     """상품 카탈로그 조회 계획을 구조화해 반환한다."""
 
     del query
@@ -191,17 +241,33 @@ class ProductCatalogQueryPlanner(Protocol):
     ) -> CatalogQueryPlan: ...
 
 
-def load_product_catalog_query_prompt(catalog: ProductCatalog) -> str:
+def load_product_catalog_query_prompt(
+    catalog: ProductCatalog,
+    *,
+    selection_mode: CatalogSelectionMode = "compact_codes",
+) -> str:
     """전용 Planner 프롬프트에 검증된 전체 카탈로그를 삽입한다."""
 
-    prompt = (
-        resources.files("pension_agent.prompts")
-        .joinpath("domain", "product-catalog-query-planner.md")
-        .read_text(encoding="utf-8")
+    return _load_snapshot_prompt(
+        CatalogSelectionSnapshot.from_catalog(catalog, mode=selection_mode)
     )
+
+
+def _load_snapshot_prompt(snapshot: CatalogSelectionSnapshot) -> str:
+    prompt_root = resources.files("pension_agent.prompts").joinpath("domain")
+    prompt = prompt_root.joinpath("product-catalog-query-planner.md").read_text(encoding="utf-8")
+    policies = json.loads(
+        prompt_root.joinpath("product-catalog-selection.json").read_text(encoding="utf-8")
+    )
+    policy = policies["row_ids" if snapshot.mode == "row_ids" else "codes"]
+    for name, value in policy.items():
+        marker = "{{" + name + "}}"
+        if prompt.count(marker) != 1:
+            raise ValueError("상품 카탈로그 선택 프롬프트 marker가 올바르지 않습니다.")
+        prompt = prompt.replace(marker, value)
     if prompt.count(_PRODUCT_CATALOG_MARKER) != 1:
         raise ValueError("상품 카탈로그 Query 프롬프트 marker가 올바르지 않습니다.")
-    return prompt.replace(_PRODUCT_CATALOG_MARKER, catalog.to_prompt_json())
+    return prompt.replace(_PRODUCT_CATALOG_MARKER, snapshot.catalog_text)
 
 
 class HCXProductCatalogQueryPlanner:
@@ -213,11 +279,18 @@ class HCXProductCatalogQueryPlanner:
         model: BaseChatModel,
         catalog: ProductCatalog,
         model_concurrency: ModelConcurrencyMiddleware | None = None,
+        selection_mode: CatalogSelectionMode = "compact_codes",
     ) -> None:
         self._catalog = catalog
-        self._system_prompt = load_product_catalog_query_prompt(catalog)
+        self._selection = CatalogSelectionSnapshot.from_catalog(catalog, mode=selection_mode)
+        self._system_prompt = _load_snapshot_prompt(self._selection)
+        query_tool = (
+            _return_product_catalog_row_query
+            if selection_mode == "row_ids"
+            else _return_product_catalog_query
+        )
         self._model: Runnable[Any, AIMessage] = model.bind_tools(
-            (_return_product_catalog_query,),
+            (query_tool,),
             tool_choice=PRODUCT_CATALOG_QUERY_TOOL_NAME,
         )
         self._model_concurrency = model_concurrency
@@ -275,27 +348,54 @@ class HCXProductCatalogQueryPlanner:
             raise CatalogQueryPlanError("HCX 카탈로그 모델 호출에 실패했습니다.") from exc
 
         try:
-            query = self._parse_response(response)
+            submitted = self._parse_response(response)
         except (AttributeError, KeyError, TypeError, ValidationError, ValueError) as exc:
             raise CatalogQueryPlanError(
                 "HCX 카탈로그 조회 계획의 응답 형식이 올바르지 않습니다."
             ) from exc
         try:
+            query = self._resolve_selection(submitted)
             return self._validate_query(query)
         except ProductCatalogError as exc:
             raise CatalogQueryPlanError(
-                "HCX 카탈로그 조회 계획의 상품 코드 또는 운용사 정보가 카탈로그와 일치하지 않습니다.",
+                "HCX 카탈로그 조회 계획의 상품 선택 또는 운용사 정보가 카탈로그와 일치하지 않습니다.",
                 retryable=True,
-                submitted_query=query.model_dump(exclude_none=True),
+                submitted_query=submitted.model_dump(exclude_none=True, by_alias=True),
             ) from exc
 
-    def _parse_response(self, response: AIMessage) -> CatalogQueryPlan:
+    def _parse_response(
+        self,
+        response: AIMessage,
+    ) -> CatalogQueryPlan | _SelectedRowsProductsQuery:
         calls = [
             call for call in response.tool_calls if call["name"] == PRODUCT_CATALOG_QUERY_TOOL_NAME
         ]
         if len(calls) != 1 or len(response.tool_calls) != 1:
             raise ValueError("카탈로그 조회 계획은 지정된 Tool 호출 하나로 반환해야 합니다.")
+        if self._selection.mode == "row_ids":
+            return _SelectedRowQueryEnvelope.model_validate(calls[0]["args"]).query
         return CatalogQueryEnvelope.model_validate(calls[0]["args"]).query
+
+    def _resolve_selection(
+        self,
+        query: CatalogQueryPlan | _SelectedRowsProductsQuery,
+    ) -> CatalogQueryPlan:
+        if isinstance(query, _SelectedRowProductQuery):
+            return SingleProductQuery.model_validate(
+                {
+                    **query.model_dump(exclude_none=True),
+                    "product_code": self._selection.resolve_row_id(query.product_code),
+                }
+            )
+        if isinstance(query, _SelectedRowsProductsQuery):
+            targets = []
+            for target in query.targets:
+                payload = target.model_dump(exclude_none=True)
+                if target.product_code is not None:
+                    payload["product_code"] = self._selection.resolve_row_id(target.product_code)
+                targets.append(payload)
+            return MultipleProductsQuery.model_validate({"route": query.route, "targets": targets})
+        return query
 
     def _validate_query(self, query: CatalogQueryPlan) -> CatalogQueryPlan:
         if isinstance(query, MultipleProductsQuery):

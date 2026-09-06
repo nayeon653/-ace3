@@ -38,6 +38,7 @@ from pension_agent.agent.product.catalog_query import (
     UnregisteredProviderQuery,
     UnresolvedProductQuery,
 )
+from pension_agent.agent.product.catalog_selection import CatalogSelectionMode
 from pension_agent.agent.product.comparison import ProductComparisonService
 from pension_agent.agent.product.comparison_answer import HCXProductComparisonAnswerWriter
 from pension_agent.agent.product.comparison_submission import unresolved_comparison_result
@@ -80,6 +81,7 @@ def create_product_agent(
     catalog: ProductCatalog | None = None,
     catalog_matcher: ProductCatalogMatcher | None = None,
     catalog_query_planner: ProductCatalogQueryPlanner | None = None,
+    catalog_selection_mode: CatalogSelectionMode = "compact_codes",
 ) -> GuardedDomainRunner:
     """ReAct와 카탈로그 계획 모델을 분리해 상품 근거와 계산 결과를 만든다."""
 
@@ -93,6 +95,7 @@ def create_product_agent(
             model=catalog_planner_model or model,
             catalog=selected_catalog,
             model_concurrency=model_concurrency,
+            selection_mode=catalog_selection_mode,
         )
         catalog_tool = _create_product_catalog_query_tool(
             selected_planner,

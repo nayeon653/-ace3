@@ -1,0 +1,281 @@
+[
+  {
+    "id": "c01",
+    "category": "official_name",
+    "question": "미래에셋장기성장포커스증권자투자신탁1호(주식)의 투자전략을 확인할 자료를 찾아주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_product",
+      "targets": [{"status": "single", "acceptable_codes": ["KR510902511M"]}]
+    },
+    "rationale": "공식명 전체가 일치하는 상품은 KR510902511M 하나다."
+  },
+  {
+    "id": "c02",
+    "category": "official_name",
+    "question": "NH-Amundi USD 초단기채권 증권자투자신탁(UH)[채권]과 신영마라톤증권자투자신탁(주식)의 투자대상을 비교해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5144420081"]},
+        {"status": "single", "acceptable_codes": ["KR5125450070"]}
+      ]
+    },
+    "rationale": "서로 다른 운용사의 두 공식명이 각각 한 행에만 대응한다."
+  },
+  {
+    "id": "c03",
+    "category": "alias",
+    "question": "에셋플러스 코리아 리치투게더 연금 1호가 어떤 펀드인지 설명해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_product",
+      "targets": [{"status": "single", "acceptable_codes": ["KR516702010M"]}]
+    },
+    "rationale": "상품의 등록 별칭에서 주식 유형만 생략한 표현이며 동일 계열의 다른 행이 없다."
+  },
+  {
+    "id": "c04",
+    "category": "alias",
+    "question": "신한 초단기채와 유진 챔피언단기채의 환매 조건 차이가 궁금해요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5117420097"]},
+        {"status": "single", "acceptable_codes": ["KR5122420005"]}
+      ]
+    },
+    "rationale": "신한 초단기채와 유진 챔피언단기채는 각각 고유한 등록 별칭에 대응한다."
+  },
+  {
+    "id": "c05",
+    "category": "typo",
+    "question": "트러스톤 칭기즈칸 주식 펀드의 운용방식을 알고 싶어요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_product",
+      "targets": [{"status": "single", "acceptable_codes": ["KR5172450019"]}]
+    },
+    "rationale": "칭기즈칸은 등록명 칭기스칸의 한 음절 오타이며 운용사와 주식 유형이 일치한다."
+  },
+  {
+    "id": "c06",
+    "category": "typo",
+    "question": "하나 파워 e 단기체랑 미래에셋 프리미엄크레딧알바의 채권 편입 차이를 비교해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5111420047"]},
+        {"status": "single", "acceptable_codes": ["KR5110501016"]}
+      ]
+    },
+    "rationale": "단기체와 알바는 각각 단기채와 알파의 한 음절 오타다. 운용사와 나머지 고유 이름이 일치한다."
+  },
+  {
+    "id": "c07",
+    "category": "spacing",
+    "question": "NHAmundi국채10년인덱스 펀드가 추종하는 지수를 알려주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_product",
+      "targets": [{"status": "single", "acceptable_codes": ["KR5144420020"]}]
+    },
+    "rationale": "공백과 하이픈을 제외하면 NH-Amundi 국채 10년 인덱스의 등록 별칭에 대응한다."
+  },
+  {
+    "id": "c08",
+    "category": "spacing",
+    "question": "마이다스거북이90 과 코레이트 셀렉트 단기채 펀드는 자산구성이 어떻게 달라요?",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5157450090"]},
+        {"status": "single", "acceptable_codes": ["KR5160420009"]}
+      ]
+    },
+    "rationale": "거북이 90의 공백 생략과 셀렉트단기채의 공백 추가에도 각 고유 이름이 한 행에 대응한다."
+  },
+  {
+    "id": "c09",
+    "category": "shared_name",
+    "question": "미래에셋 솔로몬 국공채 펀드에서 단기형, 중장기형, 장기형의 투자전략을 비교해 주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5153420063"]},
+        {"status": "single", "acceptable_codes": ["KR5153420079"]},
+        {"status": "single", "acceptable_codes": ["KR5153420105"]}
+      ]
+    },
+    "rationale": "공통 표현 솔로몬 국공채와 각 만기 수식어를 결합한다. 초단기 2호는 요청하지 않았다."
+  },
+  {
+    "id": "c10",
+    "category": "shared_name",
+    "question": "삼성 클래식연금 제1호의 채권형과 주식형은 투자대상이 어떻게 달라요?",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5114420022"]},
+        {"status": "single", "acceptable_codes": ["KR5114450222"]}
+      ]
+    },
+    "rationale": "삼성 클래식연금 제1호는 채권과 주식 유형이 별도 행으로 등록돼 있다."
+  },
+  {
+    "id": "c11",
+    "category": "similar_name",
+    "question": "베어링 고배당 자투자신탁과 베어링 고배당 투자회사를 비교해서 설명해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5156450026"]},
+        {"status": "single", "acceptable_codes": ["KR555202013M"]}
+      ]
+    },
+    "rationale": "고배당이라는 공통 이름 외에 자투자신탁과 투자회사 구분이 명시돼 각 행을 확정할 수 있다."
+  },
+  {
+    "id": "c12",
+    "category": "similar_name",
+    "question": "미래에셋 코어밸류연금저축 1호와 퇴직연금코어밸류 1호의 운용전략을 비교해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR510902777M"]},
+        {"status": "single", "acceptable_codes": ["KR5153450209"]}
+      ]
+    },
+    "rationale": "코어밸류라는 공통 이름에 연금저축과 퇴직연금이 명시돼 서로 다른 두 행으로 구별된다."
+  },
+  {
+    "id": "c13",
+    "category": "share_class",
+    "question": "삼성 ABF코리아장기채권인덱스의 클래스별 보수가 궁금해요. 클래스 정보를 확인할 펀드 문서를 찾아주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_product",
+      "targets": [{"status": "single", "acceptable_codes": ["KR5114420016"]}]
+    },
+    "rationale": "카탈로그에는 펀드 단위 한 행이 있고 클래스별 행은 없다. 클래스의 존재나 보수는 여기서 채점하지 않는다."
+  },
+  {
+    "id": "c14",
+    "category": "ambiguous",
+    "question": "한국투자 골드플랜 연금 1호 채권 펀드의 투자대상을 알려주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "product_ambiguous",
+      "targets": [{"status": "ambiguous", "acceptable_codes": []}]
+    },
+    "rationale": "KR5113420013과 KR5113420015의 공식명과 별칭이 같고 질문에는 둘을 구별할 코드가 없다."
+  },
+  {
+    "id": "c15",
+    "category": "ambiguous",
+    "question": "KB스타 중기 국공채 펀드의 문서를 찾아주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "product_ambiguous",
+      "targets": [{"status": "ambiguous", "acceptable_codes": []}]
+    },
+    "rationale": "KR5127420034와 KR5127420039의 공식명과 별칭이 같아 카탈로그만으로 한 코드를 고를 수 없다."
+  },
+  {
+    "id": "c16",
+    "category": "not_found",
+    "question": "삼성 유럽친환경인프라 7호 펀드의 투자설명서를 찾아주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "product_not_found",
+      "targets": [{"status": "not_found", "acceptable_codes": []}]
+    },
+    "rationale": "합성한 상품명이다. 제공된 카탈로그의 삼성 상품 중 유럽친환경인프라 7호에 대응하는 행은 없다."
+  },
+  {
+    "id": "c17",
+    "category": "not_found",
+    "question": "신영 글로벌우주산업채권 9호의 운용전략을 확인해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "product_not_found",
+      "targets": [{"status": "not_found", "acceptable_codes": []}]
+    },
+    "rationale": "합성한 상품명이다. 카탈로그의 신영 상품은 밸류고배당과 마라톤이며 지정한 이름에 대응하는 행은 없다."
+  },
+  {
+    "id": "c18",
+    "category": "explicit_code",
+    "question": "상품코드 KR514X450008의 펀드 문서를 확인하고 싶어요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_product",
+      "targets": [{"status": "single", "acceptable_codes": ["KR514X450008"]}]
+    },
+    "rationale": "영문 X가 중간에 있는 실제 코드로 VIP한국형가치투자 펀드 하나를 지목한다."
+  },
+  {
+    "id": "c19",
+    "category": "explicit_code",
+    "question": "KR510902511M과 KR5111420047의 투자대상을 비교해주세요. 이름 대신 상품코드로 적었습니다.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR510902511M"]},
+        {"status": "single", "acceptable_codes": ["KR5111420047"]}
+      ]
+    },
+    "rationale": "영문 M으로 끝나는 코드와 숫자로 끝나는 코드 모두 카탈로그에 그대로 존재한다."
+  },
+  {
+    "id": "c20",
+    "category": "mixed_not_found",
+    "question": "하나 파워 e 단기채와 삼성 유럽친환경인프라 7호의 투자대상을 비교해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR5111420047"]},
+        {"status": "not_found", "acceptable_codes": []}
+      ]
+    },
+    "rationale": "첫 대상은 고유한 등록 상품이고 두 번째 합성 상품명은 없다. 미등록 대상을 다른 삼성 펀드로 대체하지 않는다."
+  },
+  {
+    "id": "c21",
+    "category": "mixed_ambiguous",
+    "question": "KB스타 중기 국공채와 삼성 퇴직연금 KOSPI200 제1호의 운용전략을 비교해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "ambiguous", "acceptable_codes": []},
+        {"status": "single", "acceptable_codes": ["KR5114450270"]}
+      ]
+    },
+    "rationale": "KB 대상은 동일명 두 코드로 구별 불가하지만 삼성 퇴직연금 KOSPI200 제1호는 한 행이다."
+  },
+  {
+    "id": "c22",
+    "category": "provider_variant",
+    "question": "브이아이피 한국형가치투자와 브이아이 퇴직연금 1호 채권의 차이를 설명해주세요.",
+    "objective": "질문에 명시된 상품을 카탈로그에서 식별하고, 여러 대상이 있으면 질문 순서를 유지한다.",
+    "expected": {
+      "route": "resolve_products",
+      "targets": [
+        {"status": "single", "acceptable_codes": ["KR514X450008"]},
+        {"status": "single", "acceptable_codes": ["KR5116501001"]}
+      ]
+    },
+    "rationale": "VIP의 한글 운용사명 브이아이피와 별도 운용사 브이아이가 구별되며 각 고유 펀드 이름도 다르다."
+  }
+]
