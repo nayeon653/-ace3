@@ -244,23 +244,32 @@ async def test_mixed_comparison_preserves_other_domain_calculations_and_catalog(
 
 
 @pytest.mark.anyio
-async def test_mixed_comparison_keeps_answer_with_unverified_tax_calculation() -> None:
+async def test_mixed_comparison_preserves_document_numeric_conclusion_and_conditions() -> None:
+    conclusion = "테스트 문서의 연간 납입 한도는 1800만원입니다."
     tax: DomainResult = {
         "domain": "tax_payout",
         "execution_status": "completed",
         "decision": {
             "status": "conditional",
-            "conclusion": "연금수령한도는 999만원입니다.",
-            "missing_conditions": ["연금수령연차 확인 필요"],
+            "conclusion": conclusion,
+            "missing_conditions": ["올해 납입액 확인 필요"],
         },
-        "evidence": [],
+        "evidence": [
+            {
+                "chunk_id": "tax-limit",
+                "source_file_name": "tax.pdf",
+                "title": "납입 한도",
+                "locator": "1쪽",
+                "content": conclusion,
+            }
+        ],
         "calculations": [],
-        "warnings": ["검증된 계산 결과 없음"],
+        "warnings": ["계좌 합산 기준 확인 필요"],
     }
 
     result = await AnswerService(ComparisonSupervisor([comparison_domain(), tax])).run(
-        question_id="Q-comparison-unverified",
-        question="평가액 1천만원인 계좌의 수령한도와 솔로몬 단기·장기를 비교해주세요.",
+        question_id="Q-comparison-tax-limit",
+        question="솔로몬 단기·장기를 비교하고 연간 납입 한도를 알려주세요.",
     )
 
     answer = result.answer.answer
@@ -268,9 +277,12 @@ async def test_mixed_comparison_keeps_answer_with_unverified_tax_calculation() -
         "솔로몬 단기국공채",
         "솔로몬 장기국공채",
         "가격이 10% 하락할 수 있습니다.",
-        "새로운 수치 결론을 제공할 수 없습니다",
-        "연금수령연차 확인 필요",
-        "검증된 계산 결과 없음",
+        conclusion,
+        "올해 납입액 확인 필요",
+        "계좌 합산 기준 확인 필요",
+        "tax.pdf",
     ):
         assert expected in answer
-    assert "999만원" not in answer
+    assert answer.count(conclusion) == 1
+    assert "무조건 추천" not in answer
+    assert result.state["domain_results"][1] == tax

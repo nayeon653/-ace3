@@ -78,11 +78,6 @@ from pension_agent.agent.search import (
     SearchRunner,
     combine_search_objective,
 )
-from pension_agent.agent.tax_payout.statutory_facts import (
-    ResourceType,
-    candidate_fact_hints,
-    resolve_statutory_facts,
-)
 from pension_agent.config import DomainAgentConfig
 
 SEARCH_DOCUMENTS_TOOL_NAME = "search_documents"
@@ -96,11 +91,6 @@ _PENSION_INCOME_TAX_CALCULATOR_ID = "pension_income_tax"
 _PENSION_WITHDRAWAL_TAX_BREAKDOWN_CALCULATOR_ID = "pension_withdrawal_tax_breakdown"
 _MEDICAL_CARE_TAX_BREAKDOWN_CALCULATOR_ID = "medical_care_withdrawal_tax_breakdown"
 _MEDICAL_CARE_EXCESS_MISSING_CONDITION = "초과액의 재원 및 연금수령·연금외수령 구분 확인 필요"
-_CALL_BUDGET_EXHAUSTED_CONCLUSION = "모델 호출 한도 내에 최종 결론을 확정하지 못했습니다."
-_CALL_BUDGET_MISSING_CONDITION = "모델 호출 한도 내 최종 결론 확정"
-_CALL_BUDGET_EXHAUSTED_WARNING = (
-    "모델 호출 한도 내에 최종 판단을 제출하지 못해 안전한 결과로 종료했습니다."
-)
 
 _CALCULATION_TOOL_NAMES = (
     CALCULATE_PENSION_WITHDRAWAL_LIMIT_TOOL_NAME,
@@ -209,11 +199,7 @@ class RequireTaxPayoutTool(AgentMiddleware[Any, Any, Any]):
 
 
 class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
-    """질문 문구를 해석하지 않고 검색·계산·제출 단계와 남은 호출 예산만으로 다음 Tool을 제한한다."""
-
-    def __init__(self, *, max_model_calls: int) -> None:
-        super().__init__()
-        self._max_model_calls = max_model_calls
+    """질문 문구를 해석하지 않고 검색·계산·제출 단계만 강제한다."""
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
@@ -223,10 +209,6 @@ class EnforceTaxPayoutToolSequence(AgentMiddleware[Any, Any, Any]):
         allowed_tools: tuple[str, ...]
         if state.get("search_result") is None:
             allowed_tools = (SEARCH_DOCUMENTS_TOOL_NAME, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
-        elif state.get("run_model_call_count", 0) >= self._max_model_calls - 1:
-            # 마지막으로 허용된 모델 호출이다. 추가 계산 시도로 예산을 낭비하지 않고
-            # 반드시 submit_domain_result로 수렴하도록 좁힌다.
-            allowed_tools = (SUBMIT_DOMAIN_RESULT_TOOL_NAME,)
         else:
             allowed_tools = (*_CALCULATION_TOOL_NAMES, SUBMIT_DOMAIN_RESULT_TOOL_NAME)
         allowed_calls = [call for call in last_message.tool_calls if call["name"] in allowed_tools]
@@ -254,7 +236,6 @@ class TaxPayoutModelCallLimit(ModelCallLimitMiddleware):
             return None
         return {
             "jump_to": "end",
-            "domain_result": _safe_terminal_tax_payout_result(state),
             "messages": [AIMessage(content="TaxPayout Agent 호출 한도에 도달했습니다.")],
         }
 
@@ -416,7 +397,7 @@ def create_tax_payout_react_agent(
                 run_limit=config.max_submit_calls,
                 exit_behavior="continue",
             ),
-            EnforceTaxPayoutToolSequence(max_model_calls=config.max_model_calls),
+            EnforceTaxPayoutToolSequence(),
         ),
         name="tax_payout_agent",
     )
@@ -494,7 +475,7 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
             "search_result": result,
             "messages": [
                 ToolMessage(
-                    content=_search_result_message_content(result),
+                    content=result.model_dump_json(),
                     tool_call_id=runtime.tool_call_id,
                     name=SEARCH_DOCUMENTS_TOOL_NAME,
                 )
@@ -506,25 +487,6 @@ def _create_tax_payout_search_tool(search_service: SearchRunner) -> Any:
         return Command(update=update)
 
     return search_documents
-
-
-def _search_result_message_content(result: SearchResult) -> str:
-    """검색 결과 JSON 뒤에, 검색된 청크와 같은 출처의 법정 수치 fact_id 후보를 덧붙인다.
-
-    fact_id와 원문 발췌만 보여준다 — value·role·scope·canonical 문장은 절대
-    포함하지 않는다. registry 전체가 아니라 이번 검색으로 실제로 찾은 청크와
-    연결된 fact만 후보로 좁힌다.
-    """
-
-    payload = result.model_dump_json()
-    candidates = candidate_fact_hints(result.retrieved_chunks)
-    if not candidates:
-        return payload
-    candidate_lines = "\n".join(
-        f'- fact_id={candidate["fact_id"]}\n  원문 발췌: "{candidate["source_excerpt"]}"'
-        for candidate in candidates
-    )
-    return f"{payload}\n\n[검색된 근거와 연결된 법정 수치 fact_id 후보]\n{candidate_lines}"
 
 
 def _create_tax_payout_result_tool() -> Any:
@@ -560,31 +522,6 @@ def _create_tax_payout_result_tool() -> Any:
             list[str],
             Field(description="결론에 실제 사용한 SearchResult 청크 UUID 목록"),
         ],
-        selected_fact_ids: Annotated[
-            list[str],
-            Field(
-                default_factory=list,
-                description=(
-                    "결론에 인용한 법정 수치가 있으면, search_documents 결과에 제시된 "
-                    "fact_id candidate 중 실제로 필요한 것만 선택한다. 값·단위·세율· "
-                    "한도 숫자는 여기에도 conclusion에도 직접 쓰지 않는다 — fact_id만 "
-                    "고르면 실제 문장은 시스템이 채운다. 후보에 없는 fact_id는 만들지 "
-                    "않는다. 법정 수치를 인용하지 않으면 빈 목록으로 둔다."
-                ),
-            ),
-        ],
-        fact_resource_types: Annotated[
-            dict[str, list[ResourceType]],
-            Field(
-                default_factory=dict,
-                description=(
-                    "selected_fact_ids의 각 fact_id를 그 fact가 적용될 재원 목록에 연결한다. "
-                    "재원은 tax_credit_contribution, investment_earnings, "
-                    "retirement_income_principal, non_tax_credit_principal 중에서 선택한다. "
-                    "법정 수치 fact를 선택하지 않으면 빈 객체로 둔다."
-                ),
-            ),
-        ],
         runtime: ToolRuntime[ExecutionContext, TaxPayoutAgentState],
     ) -> Command | str:
         if runtime.tool_call_id is None:
@@ -619,8 +556,6 @@ def _create_tax_payout_result_tool() -> Any:
                 missing_conditions=missing_conditions,
                 warnings=warnings,
                 evidence_chunk_ids=evidence_chunk_ids,
-                selected_fact_ids=selected_fact_ids,
-                fact_resource_types=fact_resource_types,
             )
             validate_domain_result(result)
         except (KeyError, TypeError, ValueError):
@@ -670,8 +605,6 @@ def _build_tax_payout_result(
     missing_conditions: list[str],
     warnings: list[str],
     evidence_chunk_ids: list[str],
-    selected_fact_ids: list[str] | None = None,
-    fact_resource_types: dict[str, list[ResourceType]] | None = None,
 ) -> DomainResult:
     del question, objective
     if search_result.execution_status != "completed":
@@ -684,9 +617,6 @@ def _build_tax_payout_result(
     selected_chunks = _select_evidence(
         search_result,
         list(dict.fromkeys([*evidence_chunk_ids, *required_evidence_ids])),
-    )
-    verified_numeric_statements = resolve_statutory_facts(
-        selected_fact_ids or [], selected_chunks, fact_resource_types
     )
     normalized_missing = [value.strip() for value in missing_conditions if value.strip()]
     normalized_warnings = [value.strip() for value in warnings if value.strip()]
@@ -745,15 +675,13 @@ def _build_tax_payout_result(
         normalized_missing = ["제공 문서의 관련 근거"]
         normalized_warnings.append("검색된 원문 청크 중 결론에 사용한 근거가 제출되지 않았습니다.")
         calculations = []
-        verified_numeric_statements = []
     if status == "not_applicable":
         normalized_conclusion = _NOT_APPLICABLE_CONCLUSION
         normalized_missing = []
         normalized_warnings = []
         selected_chunks = []
         calculations = []
-        verified_numeric_statements = []
-    result: DomainResult = {
+    return {
         "domain": "tax_payout",
         "execution_status": "completed",
         "decision": {
@@ -765,9 +693,6 @@ def _build_tax_payout_result(
         "calculations": calculations,
         "warnings": list(dict.fromkeys(normalized_warnings)),
     }
-    if verified_numeric_statements:
-        result["verified_numeric_statements"] = verified_numeric_statements
-    return result
 
 
 def _has_unconditioned_pension_tax_credit_rate_scenarios(
@@ -884,58 +809,6 @@ def _terminal_result_from_search(search_result: SearchResult) -> DomainResult | 
                 [*search_result.limitations, "제공 문서에서 관련 근거를 확인하지 못했습니다."]
             )
         ),
-    }
-
-
-def _safe_terminal_tax_payout_result(state: Any) -> DomainResult:
-    """모델 호출 한도 도달 시 현재 state만으로 안전한 terminal DomainResult를 만든다.
-
-    모델이 스스로 conclusion을 완결하지 못했으므로 새 서술이나 수치를 만들지 않고,
-    이미 검증된 search_result·calculations만 그대로 보존해 conditional/undetermined로
-    제출한다. `verified_numeric_statements`는 여기서 새로 만들지 않는다 —
-    submit_domain_result가 성공해야만 fact가 검증되므로, 이 경로에 도달했다는
-    것은 그런 성공한 제출이 없었다는 뜻이다(있었다면 CompleteTaxPayoutResult가
-    이미 종료했다).
-    """
-
-    search_result = state.get("search_result")
-    if search_result is None:
-        return failed_domain_result(
-            "tax_payout", "TaxPayout Agent가 모델 호출 한도 내에 검색을 완료하지 못했습니다."
-        )
-    no_evidence_result = _terminal_result_from_search(search_result)
-    if no_evidence_result is not None:
-        return no_evidence_result
-    calculations = list(state.get("calculations", []))
-    try:
-        selected_chunks = _select_evidence(
-            search_result, calculation_evidence_chunk_ids(calculations)
-        )
-    except ValueError:
-        selected_chunks = []
-        calculations = []
-    warnings = [*search_result.limitations, _CALL_BUDGET_EXHAUSTED_WARNING]
-    status: DecisionStatus
-    if calculations:
-        conclusion = "검증된 Python 계산 결과:\n" + format_calculation_summary(calculations)
-        warnings.extend(
-            warning for calculation in calculations for warning in calculation["warnings"]
-        )
-        status = "conditional"
-    else:
-        conclusion = _CALL_BUDGET_EXHAUSTED_CONCLUSION
-        status = "undetermined"
-    return {
-        "domain": "tax_payout",
-        "execution_status": "completed",
-        "decision": {
-            "status": status,
-            "conclusion": conclusion,
-            "missing_conditions": [_CALL_BUDGET_MISSING_CONDITION],
-        },
-        "evidence": [_evidence_from_chunk(chunk) for chunk in selected_chunks],
-        "calculations": calculations,
-        "warnings": list(dict.fromkeys(warnings)),
     }
 
 

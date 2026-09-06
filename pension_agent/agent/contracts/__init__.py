@@ -16,9 +16,6 @@ from pension_agent.agent.contracts.domain import (
     DomainToolResult,
     EvidenceChunk,
     ExecutionStatus,
-    NumericStatementSourceType,
-    VerifiedNumericPlaceholder,
-    VerifiedNumericStatement,
     validate_domain_result,
 )
 from pension_agent.agent.contracts.permissions import (
@@ -45,10 +42,7 @@ __all__ = [
     "DomainToolResult",
     "EvidenceChunk",
     "ExecutionStatus",
-    "NumericStatementSourceType",
     "Permission",
-    "VerifiedNumericPlaceholder",
-    "VerifiedNumericStatement",
     "document_types_for_permission",
     "validate_domain_result",
     "validate_permission",

@@ -14,7 +14,6 @@ DecisionStatus = Literal[
     "not_applicable",
 ]
 CatalogReturnMode = Literal["count", "items", "count_and_items"]
-NumericStatementSourceType = Literal["statutory_fact", "calculation"]
 
 
 class DomainRequest(TypedDict):
@@ -67,26 +66,6 @@ class DomainDecision(TypedDict):
     missing_conditions: list[str]
 
 
-class VerifiedNumericStatement(TypedDict):
-    """Main이 다시 쓸 수 없는, Python이 registry·계산 결과에서 그대로 만든 숫자 문장.
-
-    Main Supervisor는 이 TypedDict의 ``text``를 직접 보지 않는다. Main에는
-    placeholder token만 노출되고, 최종 답변 조립 단계에서 Python이 이 ``text``로
-    치환한다.
-    """
-
-    source_type: NumericStatementSourceType
-    source_id: str
-    text: str
-
-
-class VerifiedNumericPlaceholder(TypedDict):
-    """Main Supervisor에 노출하는 placeholder와 그 주제 — 실제 문장(text)은 없다."""
-
-    placeholder: str
-    source_id: str
-
-
 class CatalogItem(TypedDict):
     """결정론적 상품 카탈로그 조회가 반환한 최소 상품 항목."""
 
@@ -118,7 +97,6 @@ class DomainResult(TypedDict):
     catalog_result: NotRequired[CatalogResult]
     comparison_answer: NotRequired[str]
     error: NotRequired[str]
-    verified_numeric_statements: NotRequired[list[VerifiedNumericStatement]]
 
 
 class DomainToolResult(TypedDict):
@@ -132,7 +110,6 @@ class DomainToolResult(TypedDict):
     catalog_result: NotRequired[CatalogResult]
     comparison_answer_ready: NotRequired[bool]
     error: NotRequired[str]
-    verified_numeric_placeholders: NotRequired[list[VerifiedNumericPlaceholder]]
 
 
 def validate_domain_result(result: DomainResult) -> None:
@@ -158,12 +135,8 @@ def validate_domain_result(result: DomainResult) -> None:
             raise ValueError("실패한 결과의 근거와 계산 기록은 비어 있어야 합니다.")
         if has_catalog_result:
             raise ValueError("실패한 결과에는 카탈로그 조회 결과를 포함할 수 없습니다.")
-        if result.get("verified_numeric_statements"):
-            raise ValueError("실패한 결과에는 검증된 숫자 문장을 포함할 수 없습니다.")
         if has_comparison_answer:
             raise ValueError("실패한 결과에는 비교 결과를 포함할 수 없습니다.")
-
-    _validate_verified_numeric_statements(result)
 
     if not has_decision:
         return
@@ -185,16 +158,6 @@ def validate_domain_result(result: DomainResult) -> None:
 
     if has_catalog_result:
         _validate_catalog_result(result)
-
-
-def _validate_verified_numeric_statements(result: DomainResult) -> None:
-    """검증된 숫자 문장의 출처·본문이 비어 있지 않은지 확인한다."""
-
-    for statement in result.get("verified_numeric_statements", []):
-        if not statement["source_id"].strip():
-            raise ValueError("검증된 숫자 문장의 source_id가 비어 있습니다.")
-        if not statement["text"].strip():
-            raise ValueError("검증된 숫자 문장의 text가 비어 있습니다.")
 
 
 def _validate_calculation_sources(result: DomainResult) -> None:
