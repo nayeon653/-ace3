@@ -6,7 +6,8 @@ related:
   - 20260905-product-comparison-execution-budget.md
   - 20260906-product-comparison-minimal-criteria.md
   - 20260905-all-generation-hcx-007.md
-supersedes: []
+supersedes:
+  - 20260905-product-comparison-execution-budget.md
 superseded-by: []
 ---
 

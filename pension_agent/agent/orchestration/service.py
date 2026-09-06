@@ -327,7 +327,11 @@ def _format_other_domain_result(result: DomainResult, question: str) -> str:
         return ""
     statements = result.get("verified_numeric_statements", [])
     parts = list(dict.fromkeys(statement["text"] for statement in statements))
-    if not statements and not result["calculations"]:
+    if statements and not result["calculations"]:
+        conclusion = decision["conclusion"]
+        if not extract_numbers(conclusion) and not scan_placeholders(conclusion, set()).malformed:
+            parts.insert(0, f"{label}: {conclusion}")
+    elif not result["calculations"]:
         conclusion = _stabilize_unverified_calculation_answer(
             AgentAnswer(answer=decision["conclusion"]), [result], question
         ).answer

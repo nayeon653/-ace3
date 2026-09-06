@@ -4,7 +4,9 @@ date: 2026-09-06
 type: architecture
 related:
   - 20260905-product-comparison-execution-budget.md
-supersedes: []
+  - 20260906-product-comparison-answer-ownership.md
+supersedes:
+  - 20260905-product-comparison-execution-budget.md
 superseded-by: []
 ---
 

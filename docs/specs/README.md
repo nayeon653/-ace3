@@ -30,7 +30,7 @@ Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 
 
 [Product 비교 작성 입력 재구성](drafts/product-comparison-model-context.md)은
 [도구의 비교 답변 소유권 결정](../decisions/20260906-product-comparison-answer-ownership.md)으로
-대체된 초안이며 당시 제안으로 보존한다.
+대체된 초안이며 당시 제안의 핵심과 대체 이유를 요약해 보존한다.
 
 ## 공통 Agent 계약
 

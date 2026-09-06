@@ -1,12 +1,14 @@
 ---
-status: accepted
+status: superseded
 date: 2026-09-05
 type: architecture
 related:
   - 20260905-all-generation-hcx-007.md
   - 20260820-80-router-search-service.md
 supersedes: []
-superseded-by: []
+superseded-by:
+  - 20260906-product-comparison-minimal-criteria.md
+  - 20260906-product-comparison-answer-ownership.md
 ---
 
 # 상품 비교의 검색 예산과 Product 출력 상한을 분리한다

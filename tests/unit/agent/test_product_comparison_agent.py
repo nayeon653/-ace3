@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Never, cast
 from uuid import UUID
 
 import pytest
@@ -17,10 +17,12 @@ from pydantic import Field
 
 from pension_agent.agent.contracts import Permission, validate_domain_result
 from pension_agent.agent.product import create_product_agent
-from pension_agent.agent.product.catalog_query import PRODUCT_CATALOG_QUERY_TOOL_NAME
+from pension_agent.agent.product.catalog_query import (
+    PRODUCT_CATALOG_QUERY_TOOL_NAME,
+    CatalogQueryPlanError,
+)
 from pension_agent.agent.product.react import _product_model_tool_name
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult, SearchRunner
-from pension_agent.config import DomainAgentConfig
 from pension_agent.core import DocumentType
 from pension_agent.retrieval import load_product_catalog
 
@@ -252,37 +254,92 @@ async def test_product_graph_same_model_fallback_still_starts_fresh_comparison_c
 
 
 @pytest.mark.anyio
-async def test_product_graph_rejects_four_criteria_before_planning_or_searching() -> None:
+@pytest.mark.parametrize(
+    "criteria",
+    [
+        [],
+        ["investment_strategy", "risk", "capital_protection", "fees"],
+        ["investment_strategy", "risk", "capital_protection", "fees", "liquidity"],
+        ["unknown_criterion"],
+        ["risk", 1],
+        ["risk", "risk"],
+        "risk",
+    ],
+)
+async def test_product_graph_finishes_on_invalid_criteria_without_repair_call(
+    criteria: Any,
+) -> None:
     model = ComparisonFakeModel(
         responses=[
             _call(
                 "lookup_product_codes",
-                {
-                    "comparison_criteria": [
-                        "investment_strategy",
-                        "risk",
-                        "capital_protection",
-                        "fees",
-                    ]
-                },
+                {"comparison_criteria": criteria},
                 "invalid-lookup",
             ),
+            *_start_calls(),
         ]
     )
     planner = _planner()
+    writer = ComparisonFakeModel(responses=[_answer_call()])
     search = _search_results()
     agent = create_product_agent(
-        model=model, catalog_planner_model=planner, search_service=cast(SearchRunner, search)
+        model=model,
+        catalog_planner_model=planner,
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
     )
 
     result = await agent({"question": _QUESTION, "objective": "세 상품 비교"})
 
     validate_domain_result(result)
     assert result["execution_status"] == "failed"
-    assert len(model.received_messages) == DomainAgentConfig().max_model_calls
+    assert "비교 항목" in result["error"]
+    assert "1~3개" in result["error"]
+    assert len(model.received_messages) == 1
     assert planner.received_messages == []
+    assert writer.received_messages == []
     assert search.calls == []
     assert result["evidence"] == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("error", "status", "message"),
+    [
+        (
+            CatalogQueryPlanError("provider 응답 실패"),
+            "failed",
+            "상품 카탈로그 조회 계획을 확정하지 못했습니다.",
+        ),
+        (TimeoutError(), "timeout", "상품 카탈로그 조회 계획 시간이 초과됐습니다."),
+        (RuntimeError("예기치 않은 내부 오류"), "failed", "Domain Agent 실행에 실패했습니다."),
+    ],
+)
+async def test_catalog_execution_errors_are_not_mislabeled_as_invalid_comparison_criteria(
+    error: Exception, status: str, message: str
+) -> None:
+    class FailingPlanner:
+        async def plan(self, *, question: str, objective: str, deadline: float) -> Never:
+            raise error
+
+    model = ComparisonFakeModel(responses=_start_calls())
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model,
+        catalog_query_planner=FailingPlanner(),
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "상품별 위험과 원금보장 비교"})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == status
+    assert result["error"] == message
+    assert len(model.received_messages) == 1
+    assert writer.received_messages == []
+    assert search.calls == []
 
 
 @pytest.mark.anyio

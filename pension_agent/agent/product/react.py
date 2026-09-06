@@ -20,6 +20,7 @@ from langchain.agents.middleware import (
     ModelRequest,
     ModelResponse,
     ToolCallLimitMiddleware,
+    ToolCallRequest,
     hook_config,
 )
 from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
@@ -165,11 +166,32 @@ class RequireProductTool(AgentMiddleware[Any, Any, Any]):
 
 
 class ProductComparisonToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]):
-    """복수 상품 비교에서만 필요한 Tool schema와 명시적 Tool 선택을 적용한다."""
+    """비교 Tool 노출을 제한하고 재실행할 수 없는 조회 입력 오류를 종료한다."""
 
     def __init__(self, *, lookup_tool_name: str, max_search_calls: int) -> None:
         self._lookup_tool_name = lookup_tool_name
         self._max_search_calls = max_search_calls
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        response = await handler(request)
+        if (
+            request.tool_call["name"] != self._lookup_tool_name
+            or request.tool_call["args"].get("comparison_criteria") is None
+            or not isinstance(response, ToolMessage)
+            or response.status != "error"
+        ):
+            return response
+        error = "비교 항목 입력이 올바르지 않습니다. 허용된 항목을 중복 없이 1~3개 지정해야 합니다."
+        return Command(
+            update={
+                "domain_result": failed_domain_result("product", error),
+                "messages": [response.model_copy(update={"content": error})],
+            }
+        )
 
     async def awrap_model_call(
         self,

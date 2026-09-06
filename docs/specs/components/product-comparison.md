@@ -46,6 +46,11 @@ Product는 비교 요청의 `lookup_product_codes` 호출에 선택적 입력 `c
 0~1개 식별로 비교를 실행하지 않아도 요청 항목을 보존한다. 카탈로그 코드 오선택에는
 아래의 제한된 Planner 교정만 허용한다. 이 식별 교정은 비교 답변 재작성과 별개다.
 
+조회 Tool의 비교 항목 배열에 타입·개수·enum·중복 오류가 있으면 정제된 `failed` 결과로
+즉시 종료한다. Planner·문서 검색·비교 생성기를 호출하지 않고, Product가 입력을 고치도록
+추가 모델 호출을 반복하지 않는다. 조회 Tool의 요청당 1회 제한과 유효한 입력에 대한
+기존 provider 실패·timeout 분류는 유지한다.
+
 ```text
 ResolveProductsQuery {
   route: "resolve_products",

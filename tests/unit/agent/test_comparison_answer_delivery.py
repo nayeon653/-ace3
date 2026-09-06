@@ -94,7 +94,19 @@ async def test_finished_comparison_is_preserved_through_exact_five_field_api(
 
 
 @pytest.mark.anyio
-async def test_finished_comparison_preserves_other_domain_numeric_firewall() -> None:
+@pytest.mark.parametrize(
+    "conclusion",
+    [
+        "테스트 세액공제 한도는 999만원입니다.",
+        "테스트 공제율은 99%입니다.",
+        "테스트 납입 한도는 900만원입니다.",
+        "세액공제를 받지 않은 원금은 비과세입니다. 테스트 한도는 999만원입니다.",
+        "테스트 한도는 {{VERIFIED_NUMERIC:tax_payout:unknown-limit}}입니다.",
+    ],
+)
+async def test_finished_comparison_preserves_other_domain_numeric_firewall(
+    conclusion: str,
+) -> None:
     comparison = _comparison()
     canonical = "테스트 세액공제 한도는 900만원입니다."
     tax: DomainResult = {
@@ -102,7 +114,7 @@ async def test_finished_comparison_preserves_other_domain_numeric_firewall() -> 
         "execution_status": "completed",
         "decision": {
             "status": "determined",
-            "conclusion": "테스트 세액공제 한도는 999만원입니다.",
+            "conclusion": conclusion,
             "missing_conditions": [],
         },
         "evidence": [],
@@ -116,5 +128,70 @@ async def test_finished_comparison_preserves_other_domain_numeric_firewall() -> 
         question_id="comparison-mixed", question="상품을 비교하고 세액공제 한도를 알려주세요."
     )
     assert comparison["comparison_answer"] in result.answer.answer
-    assert canonical in result.answer.answer
+    assert result.answer.answer.count(canonical) == 1
+    assert conclusion not in result.answer.answer
     assert "999만원" not in result.answer.answer
+    assert "99%" not in result.answer.answer
+    assert "unknown-limit" not in result.answer.answer
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("with_comparison", [True, False])
+async def test_deterministic_assembly_preserves_other_domain_nonnumeric_conclusion(
+    with_comparison: bool,
+) -> None:
+    companion: DomainResult = (
+        _comparison()
+        if with_comparison
+        else {
+            "domain": "product",
+            "execution_status": "failed",
+            "evidence": [],
+            "calculations": [],
+            "warnings": [],
+            "error": "상품 분석을 완료하지 못했습니다.",
+        }
+    )
+    conclusion = "세액공제를 받지 않은 원금은 인출 시 과세하지 않습니다."
+    canonical = "테스트 세액공제 납입금의 연금 외 인출에는 기타소득세 16.5%가 적용됩니다."
+    tax: DomainResult = {
+        "domain": "tax_payout",
+        "execution_status": "completed",
+        "decision": {
+            "status": "conditional",
+            "conclusion": conclusion,
+            "missing_conditions": ["납입금의 세액공제 여부 확인"],
+        },
+        "evidence": [
+            {
+                "chunk_id": "tax-1",
+                "source_file_name": "tax.pdf",
+                "title": "인출 과세",
+                "locator": "1쪽",
+                "content": conclusion + " " + canonical,
+            }
+        ],
+        "calculations": [],
+        "warnings": ["인출 재원 구분 필요"],
+        "verified_numeric_statements": [
+            {"source_type": "statutory_fact", "source_id": "test-tax-rate", "text": canonical}
+        ],
+    }
+
+    result = await AnswerService(_Supervisor([companion, tax])).run(
+        question_id="comparison-mixed-tax",
+        question="상품을 비교하고 납입 재원별 인출 과세를 설명해주세요.",
+    )
+    response = build_answer_response(result).model_dump()
+
+    assert response["answer"].count(conclusion) == 1
+    assert response["answer"].count(canonical) == 1
+    assert "납입금의 세액공제 여부 확인" in response["answer"]
+    assert "인출 재원 구분 필요" in response["answer"]
+    assert "Main이 임의로" not in response["answer"]
+    assert any(chunk["chunk_id"] == "tax-1" for chunk in response["retrieved_context"])
+    assert result.state["domain_results"] == [companion, tax]
+    if with_comparison:
+        assert companion["comparison_answer"] in response["answer"]
+    else:
+        assert companion["error"] in response["answer"]
