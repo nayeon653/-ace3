@@ -5,7 +5,7 @@
 - 구현: `pension_agent/agent/product/comparison.py`, `comparison_answer.py`
 - 설정: `pension_agent/config/product_comparison.py`, `pension_agent/config/hcx.py`
 
-현재 계약은 [자유 비교 쿼리 결정](../../decisions/20260906-product-comparison-free-query.md)을 따른다.
+현재 계약은 [상품 비교 통합 결정](../../decisions/20260906-product-comparison.md)을 따른다.
 상품 선택·재조회는 [Catalog Planner](../agents/product-catalog-query-planner.md), 상위 도구
 실행은 [Product Agent](../agents/product-agent.md), 검색은 [Search Service](search-service.md)를 따른다.
 이 스펙은 실행 계약이며 실제 답변의 정확성을 보증하는 평가 기록이 아니다.

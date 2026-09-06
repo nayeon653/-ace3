@@ -32,7 +32,7 @@ Python은 응답 형식과 카탈로그 선택의 실행 가능 여부를 확인
 위의 현재 스펙으로 이동했으며, 이전 경로에는 이동 안내를 남긴다.
 
 [Product 비교 작성 입력 재구성](drafts/product-comparison-model-context.md)은
-[도구의 비교 답변 소유권 결정](../decisions/20260906-product-comparison-answer-ownership.md)으로
+[상품 비교 결정](../decisions/20260906-product-comparison.md#변경-이력)으로
 대체된 초안이며 당시 제안의 핵심과 대체 이유를 요약해 보존한다.
 
 ## 공통 Agent 계약

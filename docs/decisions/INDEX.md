@@ -22,14 +22,7 @@
 | 2026-08-25 | architecture | accepted | [도메인 Agent 구현과 생성 책임을 각 도메인 패키지가 소유](20260825-98-domain-agent-implementation-ownership.md) |
 | 2026-08-26 | architecture | accepted | [계산 기반을 Domain Agent와 분리된 공용 Python 컴포넌트로 둔다](20260826-104-domain-neutral-calculation-service.md) |
 | 2026-09-05 | architecture | accepted | [모든 생성 LLM 역할을 HCX-007 비추론 모드로 통일](20260905-all-generation-hcx-007.md) |
-| 2026-09-05 | architecture | superseded | [상품 비교의 검색 예산과 Product 출력 상한을 분리](20260905-product-comparison-execution-budget.md) |
-| 2026-09-06 | architecture | superseded | [상품 비교 항목을 필요한 최소 1~3개로 제한](20260906-product-comparison-minimal-criteria.md) |
-| 2026-09-06 | architecture | accepted | [비교 답변 작성을 compare_products가 소유](20260906-product-comparison-answer-ownership.md) |
-| 2026-09-06 | architecture | accepted | [상품 해석은 모델이 맡고 실행 불가 선택은 Product가 재조회](20260906-product-catalog-selection-retry.md) |
-| 2026-09-06 | architecture | accepted | [자유 비교 쿼리로 상품별 검색과 답안 작성을 연결](20260906-product-comparison-free-query.md) |
+| 2026-09-06 | architecture | accepted | [상품 비교의 검색·답안 생성과 상품 식별 책임](20260906-product-comparison.md) |
 
-상품 비교의 현재 입력·검색·결과 계약은 [자유 비교 쿼리 결정](20260906-product-comparison-free-query.md)을
-따른다. 기존 최소 항목 정책과 셀 결과는 대체했으며, 이전 결정의 관련 설명은 당시 기록이다.
-[답변 소유권](20260906-product-comparison-answer-ownership.md)의 독립 생성 책임·예산과
-[카탈로그 선택·재조회](20260906-product-catalog-selection-retry.md)의 의미 판단·실행 불가 선택
-재조회 정책은 유지한다. 구체적인 현재 계약은 [비교 도구 스펙](../specs/components/product-comparison.md)에 정리한다.
+상품 비교의 PR 내 설계 변경은 [통합 결정](20260906-product-comparison.md)의 현재 결정과
+변경 이력에서 확인한다. 실행 계약은 [비교 도구 스펙](../specs/components/product-comparison.md)을 따른다.

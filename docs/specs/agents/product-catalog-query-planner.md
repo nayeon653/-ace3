@@ -103,7 +103,7 @@ Product를 `failed`로 종료한다. 사용자에게 되묻는 절차가 아니�
 - 원시 모델 응답과 내부 예외는 API에 노출하지 않는다.
 
 현재 선택·재조회 정책은
-[카탈로그 선택·재조회 결정](../../decisions/20260906-product-catalog-selection-retry.md)을 따른다.
+[상품 비교 결정의 식별 정책](../../decisions/20260906-product-comparison.md#상품-식별)을 따른다.
 
 ## 검증 위치
 

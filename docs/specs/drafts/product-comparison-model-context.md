@@ -7,7 +7,7 @@
 고유 근거·최신 검색 상태를 새 입력으로 구성하는 것이었다. 이전 도구 호출 이력과 중복
 원문을 제외하되 전체 실행 이력은 state에 보존하고, 별도 요약용 LLM은 추가하지 않는 안이었다.
 
-이후 [비교 답변 소유권 결정](../../decisions/20260906-product-comparison-answer-ownership.md)에서
+이후 [비교 답변 소유권 결정](../../decisions/20260906-product-comparison.md#변경-이력)에서
 검색과 비교 답변 작성을 `compare_products` 내부로 모으는 방향을 채택했다. 도구 내부의
 독립 HCX가 답변을 완료하므로 Product의 작성 입력 middleware와 셀 제출 경로는 필요하지 않다.
 답변 검증을 두지 않는다는 결정에 따라 초안의 snapshot 인용 검사와 오류 후 재제출 순환도
