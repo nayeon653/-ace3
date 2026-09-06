@@ -191,7 +191,8 @@ async def test_answer_api_blocks_attack_before_provider_and_tools_then_accepts_n
         }
         assert payload["question_id"] == "Q-ATTACK"
         assert payload["question"] == _ATTACK
-        assert payload["retrieved_context"] == []
+        assert all(isinstance(value, str) for value in payload.values())
+        assert payload["retrieved_context"] == ""
         assert payload["answer"] == INJECTION_REFUSAL
         assert model.inputs == []
         assert requests == []
@@ -209,8 +210,11 @@ async def test_answer_api_blocks_attack_before_provider_and_tools_then_accepts_n
             "/answer", params={"question_id": "Q-NORMAL", "question": normal_question}
         )
         assert allowed.status_code == 200
-        assert allowed.json()["question"] == normal_question
-        assert allowed.json()["answer"] == "가입 유형별 이전 조건을 확인하세요."
+        allowed_payload = allowed.json()
+        assert all(isinstance(value, str) for value in allowed_payload.values())
+        assert allowed_payload["question"] == normal_question
+        assert allowed_payload["answer"] == "가입 유형별 이전 조건을 확인하세요."
+        assert allowed_payload["retrieved_context"] == ""
         assert len(model.inputs) == 2
         assert requests == [{"question": normal_question, "objective": "이전 조건 확인"}]
 

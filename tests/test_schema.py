@@ -164,20 +164,95 @@ def test_answer_response_has_exact_five_fields_and_preserves_request(
     )
 
     assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
     body = response.json()
     assert set(body) == REQUIRED_KEYS
+    assert all(isinstance(value, str) for value in body.values())
     assert body["question_id"] == "Q-001"
     assert body["question"] == "연금계좌를 이전할 수 있나요?"
     assert body["answer"] == "가입 유형을 확인한 뒤 이전 가능 여부를 판단하세요."
-    assert body["retrieved_context"] == [
-        _evidence("CH-001", "가입 유형에 따라 이전 범위가 달라집니다.")
-    ]
+    assert body["retrieved_context"] == (
+        "[문서 1]\n"
+        "chunk_id: CH-001\n"
+        "source_file_name: policy.pdf\n"
+        "title: 연금계좌 업무 지침\n"
+        "locator: 3쪽\n"
+        "content:\n가입 유형에 따라 이전 범위가 달라집니다."
+    )
     assert service.calls == [
         {
             "question_id": "Q-001",
             "question": "연금계좌를 이전할 수 있나요?",
         }
     ]
+
+
+@pytest.mark.parametrize("domain_results", [[], [_not_applicable_result(), _failed_result()]])
+def test_answer_without_selected_evidence_returns_empty_string(
+    client: TestClient,
+    service: FakeAnswerService,
+    domain_results: list[DomainResult],
+) -> None:
+    assert service.result is not None
+    service.result.state["domain_results"] = domain_results
+
+    response = client.get(
+        "/answer",
+        params={"question_id": "Q-001", "question": "연금계좌를 이전할 수 있나요?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == REQUIRED_KEYS
+    assert all(isinstance(value, str) for value in body.values())
+    assert body["retrieved_context"] == ""
+
+
+def test_answer_preserves_selected_evidence_order_metadata_and_multiline_content(
+    client: TestClient,
+    service: FakeAnswerService,
+) -> None:
+    assert service.result is not None
+    first = _completed_result()
+    first["evidence"][0]["content"] = '첫 줄: "원문"\n둘째 줄: C:\\문서\\근거'
+    second = _completed_result()
+    second["domain"] = "tax_payout"
+    second["evidence"] = [
+        {
+            "chunk_id": "CH-002",
+            "source_file_name": "세제.pdf",
+            "title": "이전 시 세제 조건",
+            "locator": "4–5쪽",
+            "content": "두 번째 근거 본문입니다.",
+        }
+    ]
+    service.result.state["domain_results"] = [
+        first,
+        _not_applicable_result(),
+        _failed_result(),
+        second,
+    ]
+
+    response = client.get(
+        "/answer",
+        params={"question_id": "Q-001", "question": "연금계좌를 이전할 수 있나요?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["retrieved_context"] == (
+        "[문서 1]\n"
+        "chunk_id: CH-001\n"
+        "source_file_name: policy.pdf\n"
+        "title: 연금계좌 업무 지침\n"
+        "locator: 3쪽\n"
+        'content:\n첫 줄: "원문"\n둘째 줄: C:\\문서\\근거\n\n'
+        "[문서 2]\n"
+        "chunk_id: CH-002\n"
+        "source_file_name: 세제.pdf\n"
+        "title: 이전 시 세제 조건\n"
+        "locator: 4–5쪽\n"
+        "content:\n두 번째 근거 본문입니다."
+    )
 
 
 def test_think_trace_uses_safe_state_summary(client: TestClient) -> None:
@@ -314,6 +389,8 @@ def test_openapi_describes_public_contract(client: TestClient) -> None:
     assert answer_operation["summary"] == "연금 질문에 답변"
     assert parameters["question_id"]["description"]
     assert parameters["question"]["description"]
+    assert set(answer_properties) == REQUIRED_KEYS
+    assert all(answer_properties[field]["type"] == "string" for field in REQUIRED_KEYS)
     assert all(answer_properties[field]["description"] for field in REQUIRED_KEYS)
     assert answer_operation["responses"]["400"]["description"]
     assert answer_operation["responses"]["500"]["description"]

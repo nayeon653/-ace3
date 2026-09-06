@@ -24,8 +24,8 @@ class AnswerResponse(BaseModel):
 
     question_id: str = Field(description="요청받은 질의 고유 ID를 변경하지 않고 반환")
     question: str = Field(description="요청받은 자연어 질문 원문")
-    retrieved_context: list[EvidenceChunkResponse] = Field(
-        description="최종 답변에 실제 사용한 근거 문서 청크 목록"
+    retrieved_context: str = Field(
+        description="최종 답변에 실제 사용한 근거 문서의 메타데이터와 본문을 연결한 문자열"
     )
     think_trace: str = Field(description="도메인 호출·판단·누락 조건을 요약한 안전한 실행 기록")
     answer: str = Field(description="Agent가 생성한 최종 자연어 답변")

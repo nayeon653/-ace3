@@ -142,6 +142,7 @@ async def test_unresolved_comparison_keeps_names_and_reasons_without_cells_or_ap
         "think_trace",
         "answer",
     }
+    assert all(isinstance(value, str) for value in response.values())
     assert response["answer"] == domain["comparison_answer"] == domain["decision"]["conclusion"]
     assert domain["decision"]["status"] == "undetermined"
     assert response["answer"].count(reason) == 1
@@ -149,7 +150,7 @@ async def test_unresolved_comparison_keeps_names_and_reasons_without_cells_or_ap
     assert "솔로몬 단기국공채" in response["answer"]
     assert "새봄 원금보장 (카탈로그에서 찾지 못함)" in response["answer"]
     assert "솔로몬 국공채 (후보가 여러 개여서 미식별)" in response["answer"]
-    assert response["retrieved_context"] == []
+    assert response["retrieved_context"] == ""
     assert "무조건 추천" not in response["answer"]
     assert "|" not in response["answer"]
     assert "근거 문서:" not in response["answer"]
