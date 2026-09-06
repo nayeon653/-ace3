@@ -2746,7 +2746,7 @@ def _sequence_result_tool_names(
         "calculations": calculations,
         "messages": [message],
     }
-    update = EnforceTaxPayoutToolSequence(max_model_calls=5).after_model(state, None)
+    update = EnforceTaxPayoutToolSequence().after_model(state, None)
     kept_message = message if update is None else update["messages"][0]
     return [call["name"] for call in kept_message.tool_calls]
 

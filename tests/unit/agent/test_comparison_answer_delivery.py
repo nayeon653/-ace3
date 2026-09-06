@@ -97,18 +97,16 @@ async def test_finished_comparison_is_preserved_through_exact_five_field_api(
 @pytest.mark.parametrize(
     "conclusion",
     [
-        "테스트 세액공제 한도는 999만원입니다.",
-        "테스트 공제율은 99%입니다.",
-        "테스트 납입 한도는 900만원입니다.",
-        "세액공제를 받지 않은 원금은 비과세입니다. 테스트 한도는 999만원입니다.",
-        "테스트 한도는 {{VERIFIED_NUMERIC:tax_payout:unknown-limit}}입니다.",
+        "테스트 세액공제 한도는 900만원입니다.",
+        "테스트 공제율은 16.5%입니다.",
+        "테스트 연금수령 연령은 55세입니다.",
+        "세액공제를 받지 않은 원금은 비과세입니다. 테스트 한도는 900만원입니다.",
     ],
 )
-async def test_finished_comparison_preserves_other_domain_numeric_firewall(
+async def test_finished_comparison_preserves_other_domain_document_numeric_conclusion(
     conclusion: str,
 ) -> None:
     comparison = _comparison()
-    canonical = "테스트 세액공제 한도는 900만원입니다."
     tax: DomainResult = {
         "domain": "tax_payout",
         "execution_status": "completed",
@@ -117,27 +115,33 @@ async def test_finished_comparison_preserves_other_domain_numeric_firewall(
             "conclusion": conclusion,
             "missing_conditions": [],
         },
-        "evidence": [],
+        "evidence": [
+            {
+                "chunk_id": "tax-numeric",
+                "source_file_name": "tax.pdf",
+                "title": "세제 조건",
+                "locator": "1쪽",
+                "content": conclusion,
+            }
+        ],
         "calculations": [],
         "warnings": [],
-        "verified_numeric_statements": [
-            {"source_type": "statutory_fact", "source_id": "test-limit", "text": canonical}
-        ],
     }
     result = await AnswerService(_Supervisor([comparison, tax])).run(
         question_id="comparison-mixed", question="상품을 비교하고 세액공제 한도를 알려주세요."
     )
-    assert comparison["comparison_answer"] in result.answer.answer
-    assert result.answer.answer.count(canonical) == 1
-    assert conclusion not in result.answer.answer
-    assert "999만원" not in result.answer.answer
-    assert "99%" not in result.answer.answer
-    assert "unknown-limit" not in result.answer.answer
+    response = build_answer_response(result).model_dump()
+    assert comparison["comparison_answer"] in response["answer"]
+    assert response["answer"].count(conclusion) == 1
+    assert "tax.pdf" in response["answer"]
+    assert "Main이 임의로" not in response["answer"]
+    assert any(chunk["chunk_id"] == "tax-numeric" for chunk in response["retrieved_context"])
+    assert result.state["domain_results"] == [comparison, tax]
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("with_comparison", [True, False])
-async def test_deterministic_assembly_preserves_other_domain_nonnumeric_conclusion(
+async def test_deterministic_assembly_preserves_other_domain_numeric_and_nonnumeric_conclusion(
     with_comparison: bool,
 ) -> None:
     companion: DomainResult = (
@@ -152,8 +156,9 @@ async def test_deterministic_assembly_preserves_other_domain_nonnumeric_conclusi
             "error": "상품 분석을 완료하지 못했습니다.",
         }
     )
-    conclusion = "세액공제를 받지 않은 원금은 인출 시 과세하지 않습니다."
-    canonical = "테스트 세액공제 납입금의 연금 외 인출에는 기타소득세 16.5%가 적용됩니다."
+    nonnumeric_conclusion = "세액공제를 받지 않은 원금은 인출 시 과세하지 않습니다."
+    numeric_conclusion = "테스트 세액공제 납입금의 연금 외 인출에는 기타소득세 16.5%가 적용됩니다."
+    conclusion = nonnumeric_conclusion + " " + numeric_conclusion
     tax: DomainResult = {
         "domain": "tax_payout",
         "execution_status": "completed",
@@ -168,14 +173,11 @@ async def test_deterministic_assembly_preserves_other_domain_nonnumeric_conclusi
                 "source_file_name": "tax.pdf",
                 "title": "인출 과세",
                 "locator": "1쪽",
-                "content": conclusion + " " + canonical,
+                "content": conclusion,
             }
         ],
         "calculations": [],
         "warnings": ["인출 재원 구분 필요"],
-        "verified_numeric_statements": [
-            {"source_type": "statutory_fact", "source_id": "test-tax-rate", "text": canonical}
-        ],
     }
 
     result = await AnswerService(_Supervisor([companion, tax])).run(
@@ -185,7 +187,8 @@ async def test_deterministic_assembly_preserves_other_domain_nonnumeric_conclusi
     response = build_answer_response(result).model_dump()
 
     assert response["answer"].count(conclusion) == 1
-    assert response["answer"].count(canonical) == 1
+    assert response["answer"].count(nonnumeric_conclusion) == 1
+    assert response["answer"].count(numeric_conclusion) == 1
     assert "납입금의 세액공제 여부 확인" in response["answer"]
     assert "인출 재원 구분 필요" in response["answer"]
     assert "Main이 임의로" not in response["answer"]
