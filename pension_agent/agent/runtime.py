@@ -43,6 +43,7 @@ from pension_agent.config import (
     INJECTION_GUARD_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
     POLICY_AGENT_HCX_CONFIG,
+    PRODUCT_COMPARISON_ANSWER_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
     AgentRuntimeConfig,
     ClovaStudioConnection,
@@ -196,6 +197,12 @@ async def build_runtime_answer_service(
             http_client=model_http.sync,
             http_async_client=model_http.async_,
         )
+        comparison_answer_model = create_chat_clovax(
+            config=PRODUCT_COMPARISON_ANSWER_HCX_CONFIG,
+            connection=clova_connection,
+            http_client=model_http.sync,
+            http_async_client=model_http.async_,
+        )
         injection_guard_model = create_chat_clovax(
             config=INJECTION_GUARD_HCX_CONFIG,
             connection=clova_connection,
@@ -252,6 +259,7 @@ async def build_runtime_answer_service(
             "product": create_product_agent(
                 model=product_react_model,
                 catalog_planner_model=default_domain_model,
+                comparison_answer_model=comparison_answer_model,
                 search_service=search_service,
                 model_concurrency=model_concurrency,
             ),

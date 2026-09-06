@@ -13,10 +13,15 @@ from pension_agent.config.hcx import (
     INJECTION_GUARD_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
     POLICY_AGENT_HCX_CONFIG,
+    PRODUCT_COMPARISON_ANSWER_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
     ChatClovaXConfig,
     ClovaEmbeddingConfig,
     ClovaStudioConnection,
+)
+from pension_agent.config.product_comparison import (
+    DEFAULT_PRODUCT_COMPARISON_CONFIG,
+    ProductComparisonConfig,
 )
 from pension_agent.config.qdrant import QdrantConnection
 from pension_agent.config.search_service import SearchServiceConfig
@@ -27,16 +32,19 @@ __all__ = [
     "DEFAULT_AGENT_RUNTIME_CONFIG",
     "DEFAULT_DOMAIN_AGENT_CONFIG",
     "DEFAULT_DOMAIN_AGENT_HCX_CONFIG",
+    "DEFAULT_PRODUCT_COMPARISON_CONFIG",
     "DEFAULT_SEARCH_SERVICE_CONFIG",
     "INJECTION_GUARD_HCX_CONFIG",
     "MAIN_SUPERVISOR_HCX_CONFIG",
     "POLICY_AGENT_HCX_CONFIG",
+    "PRODUCT_COMPARISON_ANSWER_HCX_CONFIG",
     "PRODUCT_REACT_HCX_CONFIG",
     "AgentRuntimeConfig",
     "ChatClovaXConfig",
     "ClovaEmbeddingConfig",
     "ClovaStudioConnection",
     "DomainAgentConfig",
+    "ProductComparisonConfig",
     "QdrantConnection",
     "SearchServiceConfig",
 ]

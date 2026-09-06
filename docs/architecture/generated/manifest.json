@@ -1,8 +1,8 @@
 {
   "artifacts": {
     "agent-system.png": {
-      "image_sha256": "45eabaf5061c9c6e24c943d1fd27368733ccfed3010adb32615566cc9daec097",
-      "mermaid_sha256": "6bd57ee1f19419cda35b8283627baa250d3684460ed9f323c95e5cd97b803f8a"
+      "image_sha256": "775b1505cb15094f4492f72832ad7cc05f5d718e02f710f872a3cf7cac83c870",
+      "mermaid_sha256": "e50f7f1773980113747951d8b260b1ad337221af1d0d21e7b9053694f731ef15"
     },
     "main-supervisor.png": {
       "image_sha256": "318ff94645225be2dade60c3a0ba1207f1afb96d166089fc8c829547862dc305",
@@ -13,8 +13,8 @@
       "mermaid_sha256": "98803a1674f260946a37c50d98297f5f7f6f11872226b6e3334b5bd995dabf85"
     },
     "product.png": {
-      "image_sha256": "34b15c599e010a1761dc4de372321da73d56ce10e3fbe02a3027be1290f464e7",
-      "mermaid_sha256": "598e0d210675417a0bfa4a0e13e04e4807dd0006bca8626bf10a763ce6eef538"
+      "image_sha256": "0b4cd7e3ef55132f5543b1b90c6104431b96bb49280a8fcc5dae98d891063b4a",
+      "mermaid_sha256": "04d1e879983925210b90a1e14c3211a0e0b2b6fe41c63517a360e19ba0b60bce"
     },
     "tax-payout.png": {
       "image_sha256": "c610f14646c1d8dee1af35002fe7feacdb9990dfb80cb0011f25f93a3de9cd3a",

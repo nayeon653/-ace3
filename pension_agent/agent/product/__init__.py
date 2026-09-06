@@ -22,7 +22,9 @@ from pension_agent.agent.product.catalog_query import (
     BrowseProviderCatalogQuery,
     CatalogQueryPlan,
     CatalogQueryPlanError,
+    ComparisonProductTarget,
     HCXProductCatalogQueryPlanner,
+    MultipleProductsQuery,
     NotFoundProductQuery,
     ProductCatalogQueryPlanner,
     ProductResolutionStatus,
@@ -32,8 +34,13 @@ from pension_agent.agent.product.catalog_query import (
     UnresolvedProductQuery,
     load_product_catalog_query_prompt,
 )
+from pension_agent.agent.product.comparison import (
+    ProductComparisonService,
+)
+from pension_agent.agent.product.react import COMPARE_PRODUCTS_TOOL_NAME
 
 __all__ = [
+    "COMPARE_PRODUCTS_TOOL_NAME",
     "LOOKUP_PRODUCT_CODES_TOOL_NAME",
     "PRODUCT_CATALOG_QUERY_TOOL_NAME",
     "PRODUCT_TOOL_DESCRIPTION",
@@ -44,13 +51,16 @@ __all__ = [
     "BrowseProviderCatalogQuery",
     "CatalogQueryPlan",
     "CatalogQueryPlanError",
+    "ComparisonProductTarget",
     "HCXProductCatalogMatcher",
     "HCXProductCatalogQueryPlanner",
+    "MultipleProductsQuery",
     "NotFoundProductQuery",
     "ProductCatalogMatch",
     "ProductCatalogMatchError",
     "ProductCatalogMatcher",
     "ProductCatalogQueryPlanner",
+    "ProductComparisonService",
     "ProductResolutionStatus",
     "ResolveProductQuery",
     "SingleProductQuery",

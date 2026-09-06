@@ -1,8 +1,8 @@
-"""검증된 카탈로그 조회와 단일 상품 문서 검색을 사용하는 Product Agent 조립."""
+"""검증된 카탈로그 조회와 단일·복수 상품 검색을 사용하는 Product Agent 조립."""
 
 import json
 from importlib import resources
-from typing import Any
+from typing import Annotated, Any
 from uuid import NAMESPACE_URL, uuid5
 
 from langchain.messages import ToolMessage
@@ -10,10 +10,12 @@ from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
+from pydantic import Field
 
 from pension_agent.agent.contracts import (
     CatalogItem,
     CatalogResult,
+    ComparisonTarget,
     DomainResult,
     ExecutionStatus,
     validate_domain_result,
@@ -30,11 +32,15 @@ from pension_agent.agent.product.catalog_query import (
     BrowseProviderCatalogQuery,
     CatalogQueryPlanError,
     HCXProductCatalogQueryPlanner,
+    MultipleProductsQuery,
     ProductCatalogQueryPlanner,
     SingleProductQuery,
     UnregisteredProviderQuery,
     UnresolvedProductQuery,
 )
+from pension_agent.agent.product.comparison import ProductComparisonService
+from pension_agent.agent.product.comparison_answer import HCXProductComparisonAnswerWriter
+from pension_agent.agent.product.comparison_submission import unresolved_comparison_result
 from pension_agent.agent.product.react import ProductAgentState, create_product_react_agent
 from pension_agent.agent.search import SearchRunner
 from pension_agent.config import DEFAULT_DOMAIN_AGENT_CONFIG, DomainAgentConfig
@@ -46,7 +52,7 @@ from pension_agent.retrieval import (
 
 PRODUCT_TOOL_NAME = "analyze_product"
 PRODUCT_TOOL_DESCRIPTION = (
-    "상품 카탈로그 또는 식별된 개별 펀드·클래스의 투자전략, 위험, 보수·판매/환매수수료, "
+    "상품 카탈로그 또는 식별된 개별·복수 펀드의 비교, 투자전략, 위험, 보수·판매/환매수수료, "
     "환매와 유동성을 판단한다. 계좌 서비스·메뉴·계좌 수준 수수료는 다루지 않는다."
 )
 LOOKUP_PRODUCT_CODES_TOOL_NAME = "lookup_product_codes"
@@ -67,6 +73,7 @@ def create_product_agent(
     *,
     model: BaseChatModel,
     catalog_planner_model: BaseChatModel | None = None,
+    comparison_answer_model: BaseChatModel | None = None,
     search_service: SearchRunner,
     config: DomainAgentConfig = DEFAULT_DOMAIN_AGENT_CONFIG,
     model_concurrency: ModelConcurrencyMiddleware | None = None,
@@ -100,6 +107,14 @@ def create_product_agent(
         model_concurrency=model_concurrency,
         product_code_resolver=selected_catalog.resolve_source_file_name,
         product_lookup_tool=catalog_tool,
+        comparison_service=ProductComparisonService(
+            search_service=search_service,
+            catalog=selected_catalog,
+        ),
+        comparison_answer_writer=HCXProductComparisonAnswerWriter(
+            model=comparison_answer_model or model,
+            model_concurrency=model_concurrency,
+        ),
     )
     return GuardedDomainRunner(
         domain="product",
@@ -115,20 +130,29 @@ def _create_product_catalog_query_tool(
     @tool(
         LOOKUP_PRODUCT_CODES_TOOL_NAME,
         description=(
-            "사용자 질문을 전체 상품 카탈로그와 대조해 검증된 단일 상품 코드를 "
+            "사용자 질문을 전체 상품 카탈로그와 대조해 단일 상품 또는 비교할 여러 상품을 "
             "식별하거나, 운용사별 상품 개수와 목록을 정확히 조회한다."
         ),
     )
     async def query_product_catalog(
         runtime: ToolRuntime[ExecutionContext, ProductAgentState],
+        retry_hint: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description="카탈로그 조회 실패 후 재조회할 때, 직전 오류와 제출값에서 다시 확인할 사항",
+            ),
+        ] = None,
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("상품 카탈로그 조회 Tool 호출 ID가 없습니다.")
         try:
+            retry_options = {"retry_hint": retry_hint} if retry_hint is not None else {}
             query = await planner.plan(
                 question=runtime.state.get("question", ""),
                 objective=runtime.state.get("objective", ""),
                 deadline=runtime.context.deadline,
+                **retry_options,
             )
         except TimeoutError:
             result = _failed_product_result(
@@ -136,10 +160,60 @@ def _create_product_catalog_query_tool(
                 execution_status="timeout",
             )
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
-        except CatalogQueryPlanError:
-            result = _failed_product_result("상품 카탈로그 조회 계획을 확정하지 못했습니다.")
+        except CatalogQueryPlanError as error:
+            retry_count = runtime.state.get("product_catalog_retry_count", 0)
+            if error.retryable and retry_count == 0:
+                return _catalog_lookup_command(
+                    runtime.tool_call_id,
+                    payload={
+                        "execution_status": "failed",
+                        "error": str(error),
+                        "retryable": True,
+                        "submitted_query": error.submitted_query,
+                    },
+                    catalog_retry_count=retry_count + 1,
+                )
+            result = _failed_product_result(str(error))
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
 
+        if isinstance(query, MultipleProductsQuery):
+            targets: list[ComparisonTarget] = []
+            for index, item in enumerate(query.targets):
+                target: ComparisonTarget = {
+                    "target_id": f"target_{index + 1}",
+                    "mention_parts": list(item.mention_parts),
+                    "resolution_status": item.resolution_status,
+                }
+                if item.resolution_status == "single" and item.product_code is not None:
+                    product = catalog.select_products([item.product_code])[0]
+                    target["product_code"] = product.product_code
+                    target["official_name"] = product.official_name
+                    target["provider"] = product.provider
+                targets.append(target)
+            codes = list(
+                dict.fromkeys(
+                    target["product_code"]
+                    for target in targets
+                    if target["resolution_status"] == "single"
+                )
+            )
+            incomplete_result: DomainResult | None = None
+            if len(codes) < 2:
+                incomplete_result = unresolved_comparison_result(
+                    targets=targets,
+                    limitation="서로 다른 상품을 2개 이상 식별하지 못해 비교를 실행하지 않았습니다.",
+                )
+            return _catalog_lookup_command(
+                runtime.tool_call_id,
+                payload={
+                    "route": "resolve_products",
+                    "targets": targets,
+                    "product_codes": codes,
+                },
+                candidate_codes=codes,
+                result=incomplete_result,
+                comparison_targets=targets,
+            )
         if isinstance(query, UnregisteredProviderQuery):
             result = _terminal_unregistered_provider_result(query)
             return _catalog_lookup_command(
@@ -226,11 +300,15 @@ def _catalog_lookup_command(
     candidate_codes: list[str] | None = None,
     result: DomainResult | None = None,
     pending_catalog_result: DomainResult | None = None,
+    comparison_targets: list[ComparisonTarget] | None = None,
+    catalog_retry_count: int | None = None,
 ) -> Command:
     if payload is not None:
         message_payload = payload
     elif match is None:
         message_payload = {"execution_status": result["execution_status"] if result else "failed"}
+        if result is not None and "error" in result:
+            message_payload["error"] = result["error"]
     else:
         message_payload = {
             "execution_status": "completed",
@@ -254,11 +332,20 @@ def _catalog_lookup_command(
                 ),
                 tool_call_id=tool_call_id,
                 name=LOOKUP_PRODUCT_CODES_TOOL_NAME,
+                status=(
+                    "error"
+                    if message_payload.get("execution_status") in {"failed", "timeout"}
+                    else "success"
+                ),
             )
         ]
     }
     if candidate_codes is not None:
         update["product_candidate_codes"] = candidate_codes
+    if catalog_retry_count is not None:
+        update["product_catalog_retry_count"] = catalog_retry_count
+    if comparison_targets is not None:
+        update["comparison_targets"] = comparison_targets
     if result is not None:
         validate_domain_result(result)
         update["domain_result"] = result

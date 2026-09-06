@@ -154,10 +154,20 @@ def _system_overview(specs: tuple[DomainAgentSpec, ...]) -> str:
             '        catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]',
             '        catalog_query --> catalog_execute["Python 정확 조회"]',
             "        product_catalog --> catalog_execute",
-            '        catalog_execute --> catalog_result["CatalogResult"]',
+            '        catalog_execute --> catalog_result["CatalogResult · 단일/복수 식별"]',
             "    end",
             f"    {product_node} --> catalog_lookup",
             f"    catalog_result --> {product_node}",
+            "",
+            '    subgraph comparison["복수 상품 비교 · 검색과 답안 생성"]',
+            '        compare_tool["compare_products · 상품 코드 + 비교 쿼리"] --> product_searches["같은 쿼리로 상품별 병렬 검색"]',
+            '        product_searches --> comparison_evidence["질문·비교 쿼리·상품별 원문 · 새 모델 입력"]',
+            '        comparison_evidence --> comparison_writer["HCX-007 비교 답안 작성"]',
+            '        comparison_writer --> comparison_answer["완성 답안 · 실제 인용 근거"]',
+            "    end",
+            f"    {product_node} --> compare_tool",
+            f"    comparison_answer --> {product_node}",
+            "    product_searches --> search_service",
         )
     )
     lines.extend(

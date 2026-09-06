@@ -5,14 +5,21 @@ from __future__ import annotations
 import asyncio
 import json
 from importlib import resources
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, Self
 
 from langchain.messages import AIMessage, HumanMessage, SystemMessage
 from langchain.tools import tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from openai import OpenAIError
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from pension_agent.agent.execution import ModelConcurrencyMiddleware
 from pension_agent.retrieval import (
@@ -28,6 +35,17 @@ ProductResolutionStatus = Literal["single", "not_found", "ambiguous"]
 
 class CatalogQueryPlanError(RuntimeError):
     """HCX의 카탈로그 조회 계획을 안전하게 사용할 수 없는 경우."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        submitted_query: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.submitted_query = submitted_query
 
 
 class _CatalogQueryBase(BaseModel):
@@ -66,6 +84,48 @@ UnresolvedProductQuery = NotFoundProductQuery | AmbiguousProductQuery
 ResolveProductQuery = SingleProductQuery | UnresolvedProductQuery
 
 
+class ComparisonProductTarget(_CatalogQueryBase):
+    """원문 표현과 확정 여부를 함께 보존하는 비교 대상."""
+
+    mention_parts: Annotated[
+        list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]],
+        Field(
+            min_length=1,
+            description=(
+                "모델이 식별한 비교 대상의 상품 표현. "
+                "공통 이름과 수식어는 별도 원소로 나눌 수 있다."
+            ),
+        ),
+    ]
+    resolution_status: ProductResolutionStatus
+    product_code: (
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, min_length=1, to_upper=True),
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description="카탈로그에서 선택한 product_code. single에서만 포함",
+    )
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> Self:
+        if self.resolution_status == "single":
+            if self.product_code is None:
+                raise ValueError("확정된 비교 대상에는 상품 코드가 필요합니다.")
+        elif "product_code" in self.model_fields_set:
+            raise ValueError("미식별 비교 대상에는 상품 코드를 넣을 수 없습니다.")
+        return self
+
+
+class MultipleProductsQuery(_CatalogQueryBase):
+    """하나의 계획 안에 명시적인 복수 비교 대상을 보존한다."""
+
+    route: Literal["resolve_products"]
+    targets: Annotated[list[ComparisonProductTarget], Field(min_length=2, max_length=5)]
+
+
 class BrowseAllCatalogQuery(_CatalogQueryBase):
     """운용사 조건 없이 전체 상품 개수·목록을 조회하는 계획."""
 
@@ -96,6 +156,7 @@ CatalogQueryPlan = Annotated[
     SingleProductQuery
     | NotFoundProductQuery
     | AmbiguousProductQuery
+    | MultipleProductsQuery
     | BrowseAllCatalogQuery
     | BrowseProviderCatalogQuery
     | UnregisteredProviderQuery,
@@ -126,6 +187,7 @@ class ProductCatalogQueryPlanner(Protocol):
         question: str,
         objective: str,
         deadline: float,
+        retry_hint: str | None = None,
     ) -> CatalogQueryPlan: ...
 
 
@@ -143,7 +205,7 @@ def load_product_catalog_query_prompt(catalog: ProductCatalog) -> str:
 
 
 class HCXProductCatalogQueryPlanner:
-    """HCX Query를 같은 카탈로그 스냅샷으로 재검증한다."""
+    """HCX 조회 계획의 형식과 카탈로그 연결 가능 여부를 확인한다."""
 
     def __init__(
         self,
@@ -166,64 +228,81 @@ class HCXProductCatalogQueryPlanner:
         question: str,
         objective: str,
         deadline: float,
+        retry_hint: str | None = None,
     ) -> CatalogQueryPlan:
-        """질문 표현을 검증된 단일 카탈로그 Query로 변환한다."""
+        """조회 계획을 한 번 생성하며 모델의 상품 선택을 다시 판정하지 않는다."""
 
         if deadline <= asyncio.get_running_loop().time():
             raise TimeoutError
+        payload = {"question": question, "objective": objective}
+        if retry_hint is not None:
+            payload["retry_hint"] = retry_hint
         messages = [
             SystemMessage(content=self._system_prompt),
             HumanMessage(
                 content=json.dumps(
-                    {"question": question, "objective": objective},
+                    payload,
                     ensure_ascii=False,
                     separators=(",", ":"),
                 )
             ),
         ]
 
+        async def invoke_model() -> AIMessage:
+            return await self._model.ainvoke(messages)
+
         async def invoke() -> AIMessage:
             if self._model_concurrency is None:
-                return await self._model.ainvoke(messages)
+                return await invoke_model()
             return await self._model_concurrency.arun(
-                lambda: self._model.ainvoke(messages),
+                invoke_model,
                 deadline=deadline,
             )
 
         try:
             async with asyncio.timeout_at(deadline):
                 response = await invoke()
-                query = self._parse_and_validate_response(response)
         except TimeoutError:
-            raise
-        except CatalogQueryPlanError:
             raise
         except (
             AttributeError,
             KeyError,
             OpenAIError,
-            ProductCatalogError,
             RuntimeError,
             TypeError,
-            ValidationError,
             ValueError,
-        ):
-            raise CatalogQueryPlanError("HCX 카탈로그 Query 응답이 올바르지 않습니다.") from None
-        return query
+        ) as exc:
+            raise CatalogQueryPlanError("HCX 카탈로그 모델 호출에 실패했습니다.") from exc
 
-    def _parse_and_validate_response(
-        self,
-        response: AIMessage,
-    ) -> CatalogQueryPlan:
+        try:
+            query = self._parse_response(response)
+        except (AttributeError, KeyError, TypeError, ValidationError, ValueError) as exc:
+            raise CatalogQueryPlanError(
+                "HCX 카탈로그 조회 계획의 응답 형식이 올바르지 않습니다."
+            ) from exc
+        try:
+            return self._validate_query(query)
+        except ProductCatalogError as exc:
+            raise CatalogQueryPlanError(
+                "HCX 카탈로그 조회 계획의 상품 코드 또는 운용사 정보가 카탈로그와 일치하지 않습니다.",
+                retryable=True,
+                submitted_query=query.model_dump(exclude_none=True),
+            ) from exc
+
+    def _parse_response(self, response: AIMessage) -> CatalogQueryPlan:
         calls = [
             call for call in response.tool_calls if call["name"] == PRODUCT_CATALOG_QUERY_TOOL_NAME
         ]
         if len(calls) != 1 or len(response.tool_calls) != 1:
-            raise CatalogQueryPlanError("HCX 카탈로그 Query 응답이 올바르지 않습니다.")
-        query = CatalogQueryEnvelope.model_validate(calls[0]["args"]).query
-        return self._validate_query(query)
+            raise ValueError("카탈로그 조회 계획은 지정된 Tool 호출 하나로 반환해야 합니다.")
+        return CatalogQueryEnvelope.model_validate(calls[0]["args"]).query
 
     def _validate_query(self, query: CatalogQueryPlan) -> CatalogQueryPlan:
+        if isinstance(query, MultipleProductsQuery):
+            for target in query.targets:
+                if target.product_code is not None:
+                    self._catalog.select_products([target.product_code])
+            return query
         if isinstance(query, UnregisteredProviderQuery):
             if self._catalog.has_provider(query.provider):
                 raise ProductCatalogError("등록된 운용사를 미등록으로 처리할 수 없습니다.")

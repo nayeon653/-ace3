@@ -47,10 +47,20 @@ flowchart TB
         catalog_hcx --> catalog_query["검증된 CatalogQueryPlan"]
         catalog_query --> catalog_execute["Python 정확 조회"]
         product_catalog --> catalog_execute
-        catalog_execute --> catalog_result["CatalogResult"]
+        catalog_execute --> catalog_result["CatalogResult · 단일/복수 식별"]
     end
     domain_product --> catalog_lookup
     catalog_result --> domain_product
+
+    subgraph comparison["복수 상품 비교 · 검색과 답안 생성"]
+        compare_tool["compare_products · 상품 코드 + 비교 쿼리"] --> product_searches["같은 쿼리로 상품별 병렬 검색"]
+        product_searches --> comparison_evidence["질문·비교 쿼리·상품별 원문 · 새 모델 입력"]
+        comparison_evidence --> comparison_writer["HCX-007 비교 답안 작성"]
+        comparison_writer --> comparison_answer["완성 답안 · 실제 인용 근거"]
+    end
+    domain_product --> compare_tool
+    comparison_answer --> domain_product
+    product_searches --> search_service
 
     subgraph search["공용 검색 경로"]
         search_tools["search_documents"] --> search_service["SearchService"]
@@ -286,6 +296,7 @@ graph TD;
 	ProductModelCallLimit\2eafter_model("ProductModelCallLimit.after_model")
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model("ToolCallLimitMiddleware[search_documents].after_model")
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model("ToolCallLimitMiddleware[lookup_product_codes].after_model")
+	ToolCallLimitMiddleware\5bcompare_products\5d\2eafter_model("ToolCallLimitMiddleware[compare_products].after_model")
 	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_standard_price].after_model")
 	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_reported_var_risk].after_model")
 	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model("ToolCallLimitMiddleware[calculate_fund_var_risk].after_model")
@@ -312,10 +323,12 @@ graph TD;
 	ToolCallLimitMiddleware\5bcalculate_fund_redemption_fee\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model -.-> __end__;
-	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model -.-> ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcompare_products\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_standard_price\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bcalculate_fund_reported_var_risk\5d\2eafter_model;
 	ToolCallLimitMiddleware\5bcalculate_fund_var_risk\5d\2eafter_model -.-> __end__;
+	ToolCallLimitMiddleware\5bcompare_products\5d\2eafter_model -.-> ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model;
+	ToolCallLimitMiddleware\5bcompare_products\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model;
 	ToolCallLimitMiddleware\5blookup_product_codes\5d\2eafter_model -.-> __end__;
 	ToolCallLimitMiddleware\5bsearch_documents\5d\2eafter_model -.-> ProductModelCallLimit\2eafter_model;

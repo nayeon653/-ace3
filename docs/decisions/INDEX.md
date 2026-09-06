@@ -22,3 +22,7 @@
 | 2026-08-25 | architecture | accepted | [도메인 Agent 구현과 생성 책임을 각 도메인 패키지가 소유](20260825-98-domain-agent-implementation-ownership.md) |
 | 2026-08-26 | architecture | accepted | [계산 기반을 Domain Agent와 분리된 공용 Python 컴포넌트로 둔다](20260826-104-domain-neutral-calculation-service.md) |
 | 2026-09-05 | architecture | accepted | [모든 생성 LLM 역할을 HCX-007 비추론 모드로 통일](20260905-all-generation-hcx-007.md) |
+| 2026-09-06 | architecture | accepted | [상품 비교의 검색·답안 생성과 상품 식별 책임](20260906-product-comparison.md) |
+
+상품 비교의 PR 내 설계 변경은 [통합 결정](20260906-product-comparison.md)의 현재 결정과
+변경 이력에서 확인한다. 실행 계약은 [비교 도구 스펙](../specs/components/product-comparison.md)을 따른다.

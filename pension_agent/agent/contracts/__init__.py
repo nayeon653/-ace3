@@ -1,6 +1,7 @@
 """Main, Domain Agent와 API가 공유하는 실행 계약."""
 
 from pension_agent.agent.contracts.answer import AgentAnswer
+from pension_agent.agent.contracts.comparison import ComparisonTarget
 from pension_agent.agent.contracts.domain import (
     CalculationInputSource,
     CalculationResult,
@@ -34,6 +35,7 @@ __all__ = [
     "CatalogItem",
     "CatalogResult",
     "CatalogReturnMode",
+    "ComparisonTarget",
     "DecisionStatus",
     "DomainDecision",
     "DomainName",

@@ -310,12 +310,17 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
     class CatalogPlannerModel(ToolCallingFakeModel):
         bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
 
+    class ComparisonAnswerModel(ToolCallingFakeModel):
+        bindings: ClassVar[list[tuple[list[str], dict[str, Any]]]] = []
+
+    answer_model = ComparisonAnswerModel(responses=[])
     react_model = ProductReactModel(responses=[])
     planner_model = CatalogPlannerModel(responses=[])
 
     create_product_agent(
         model=react_model,
         catalog_planner_model=planner_model,
+        comparison_answer_model=answer_model,
         search_service=cast(
             SearchRunner,
             FakeSearchService(SearchResult(execution_status="completed")),
@@ -325,10 +330,14 @@ def test_product_agent_binds_catalog_planner_to_separate_model() -> None:
     assert planner_model.bindings == [
         ([PRODUCT_CATALOG_QUERY_TOOL_NAME], {"tool_choice": PRODUCT_CATALOG_QUERY_TOOL_NAME})
     ]
+    assert answer_model.bindings == [
+        (["submit_comparison_answer"], {"tool_choice": "submit_comparison_answer"})
+    ]
     assert all(
         set(names)
         == {
             "lookup_product_codes",
+            "compare_products",
             "search_documents",
             "calculate_fund_standard_price",
             "calculate_fund_reported_var_risk",
@@ -413,10 +422,12 @@ async def test_domain_agents_use_search_result_and_submit_verified_result(
         chunk.chunk_id for chunk in search.result.retrieved_chunks
     }
     assert domain == "policy" or all(
-        set(names)
+        (domain == "product" and names == ["submit_comparison_answer"])
+        or set(names)
         == (
             {
                 "lookup_product_codes",
+                "compare_products",
                 "search_documents",
                 "calculate_fund_standard_price",
                 "calculate_fund_reported_var_risk",
@@ -1221,7 +1232,7 @@ async def test_product_agent_handles_unregistered_and_invalid_hcx_queries_withou
     assert result["execution_status"] == execution_status
     if decision_status is None:
         assert "decision" not in result
-        assert "계획을 확정하지 못했습니다" in result["error"]
+        assert result["error"] == "HCX 카탈로그 조회 계획의 응답 형식이 올바르지 않습니다."
     else:
         assert result["decision"]["status"] == decision_status
         assert result["decision"]["missing_conditions"]

@@ -14,6 +14,7 @@ from pension_agent.config import (
     INJECTION_GUARD_HCX_CONFIG,
     MAIN_SUPERVISOR_HCX_CONFIG,
     POLICY_AGENT_HCX_CONFIG,
+    PRODUCT_COMPARISON_ANSWER_HCX_CONFIG,
     PRODUCT_REACT_HCX_CONFIG,
     AgentRuntimeConfig,
 )
@@ -72,6 +73,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     policy_model = object()
     default_domain_model = object()
     product_react_model = object()
+    comparison_answer_model = object()
     injection_guard_model = object()
     embedder = object()
     qdrant_client = AsyncClosable("qdrant", closed)
@@ -93,6 +95,8 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
             return default_domain_model
         if config is PRODUCT_REACT_HCX_CONFIG:
             return product_react_model
+        if config is PRODUCT_COMPARISON_ANSWER_HCX_CONFIG:
+            return comparison_answer_model
         if config is INJECTION_GUARD_HCX_CONFIG:
             return injection_guard_model
         raise AssertionError("알 수 없는 HCX 역할 설정")
@@ -169,6 +173,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
         POLICY_AGENT_HCX_CONFIG,
         DEFAULT_DOMAIN_AGENT_HCX_CONFIG,
         PRODUCT_REACT_HCX_CONFIG,
+        PRODUCT_COMPARISON_ANSWER_HCX_CONFIG,
         INJECTION_GUARD_HCX_CONFIG,
     ]
     assert all(call["http_client"] is model_http.sync for call in created["model_factories"])
@@ -199,6 +204,7 @@ async def test_runtime_applies_shared_limits_and_closes_owned_clients_in_reverse
     assert created["tax_payout"]["model"] is default_domain_model
     assert created["product"]["model"] is product_react_model
     assert created["product"]["catalog_planner_model"] is default_domain_model
+    assert created["product"]["comparison_answer_model"] is comparison_answer_model
     assert created["supervisor"]["model"] is supervisor_model
     assert created["injection_classifier"]["model"] is injection_guard_model
     assert created["injection_classifier"]["model_concurrency"] is shared_model_limit

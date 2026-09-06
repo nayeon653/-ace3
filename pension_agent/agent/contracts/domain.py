@@ -116,6 +116,7 @@ class DomainResult(TypedDict):
     calculations: list[CalculationResult]
     warnings: list[str]
     catalog_result: NotRequired[CatalogResult]
+    comparison_answer: NotRequired[str]
     error: NotRequired[str]
     verified_numeric_statements: NotRequired[list[VerifiedNumericStatement]]
 
@@ -129,6 +130,7 @@ class DomainToolResult(TypedDict):
     calculations: list[CalculationResult]
     warnings: list[str]
     catalog_result: NotRequired[CatalogResult]
+    comparison_answer_ready: NotRequired[bool]
     error: NotRequired[str]
     verified_numeric_placeholders: NotRequired[list[VerifiedNumericPlaceholder]]
 
@@ -140,6 +142,7 @@ def validate_domain_result(result: DomainResult) -> None:
     has_decision = "decision" in result
     has_error = "error" in result
     has_catalog_result = "catalog_result" in result
+    has_comparison_answer = "comparison_answer" in result
 
     if execution_status == "completed":
         if not has_decision:
@@ -157,6 +160,8 @@ def validate_domain_result(result: DomainResult) -> None:
             raise ValueError("실패한 결과에는 카탈로그 조회 결과를 포함할 수 없습니다.")
         if result.get("verified_numeric_statements"):
             raise ValueError("실패한 결과에는 검증된 숫자 문장을 포함할 수 없습니다.")
+        if has_comparison_answer:
+            raise ValueError("실패한 결과에는 비교 결과를 포함할 수 없습니다.")
 
     _validate_verified_numeric_statements(result)
 
@@ -164,6 +169,11 @@ def validate_domain_result(result: DomainResult) -> None:
         return
 
     _validate_calculation_sources(result)
+
+    if has_comparison_answer:
+        if result["domain"] != "product" or has_catalog_result or result["calculations"]:
+            raise ValueError("비교 답안은 계산·카탈로그 조회가 없는 product 결과여야 합니다.")
+        return
 
     decision = result["decision"]
     missing_conditions = decision["missing_conditions"]

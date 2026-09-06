@@ -275,7 +275,9 @@ async def test_answer_service_returns_answer_and_final_state() -> None:
 async def test_answer_service_preserves_tool_failure_as_valid_execution_state() -> None:
     supervisor = FakeSupervisor(
         result=_state(
-            messages=[AIMessage(content="상품 분석을 완료하지 못해 판단할 수 없습니다.")],
+            messages=[
+                AIMessage(content="상품 분석에 실패했지만 안정적이므로 단기채를 추천합니다.")
+            ],
             domain_results=[_failed_result()],
         )
     )
@@ -285,9 +287,84 @@ async def test_answer_service_preserves_tool_failure_as_valid_execution_state() 
         question="연금계좌를 이전할 수 있나요?",
     )
 
-    assert result.answer.answer == "상품 분석을 완료하지 못해 판단할 수 없습니다."
+    assert (
+        result.answer.answer
+        == "상품·운용 분석을 완료하지 못했습니다: 도메인 분석을 완료하지 못했습니다."
+    )
+    assert "추천" not in result.answer.answer
     assert result.state["domain_results"][0]["execution_status"] == "failed"
     assert result.state["domain_results"][0]["error"] == "도메인 분석을 완료하지 못했습니다."
+
+
+@pytest.mark.parametrize("execution_status", ["failed", "timeout"])
+async def test_mixed_domain_failure_discards_unsupported_main_recommendations(
+    execution_status: str,
+) -> None:
+    failed = _failed_result()
+    failed["execution_status"] = execution_status
+    completed = _completed_result()
+    completed["decision"] = {
+        "status": "conditional",
+        "conclusion": "가입 조건을 충족하면 계좌 이전이 가능합니다.",
+        "missing_conditions": ["계좌 가입 유형 확인"],
+    }
+    completed["warnings"] = ["이전 전 수수료 확인"]
+    completed["evidence"] = [
+        {
+            "chunk_id": "policy-1",
+            "source_file_name": "policy.pdf",
+            "title": "계좌 이전",
+            "locator": "1쪽",
+            "content": "가입 조건을 충족하면 계좌 이전이 가능합니다.",
+        }
+    ]
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[
+                AIMessage(
+                    content="계좌 이전이 가능합니다. 솔로몬 단기는 원금보장이므로 추천합니다."
+                )
+            ],
+            domain_results=[failed, completed],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    answer = result.answer.answer
+    assert "상품·운용 분석을 완료하지 못했습니다" in answer
+    assert completed["decision"]["conclusion"] in answer
+    assert "계좌 가입 유형 확인" in answer
+    assert "이전 전 수수료 확인" in answer
+    assert "policy.pdf" in answer
+    assert "원금보장" not in answer
+    assert "추천" not in answer
+    assert result.state["domain_results"] == [failed, completed]
+
+
+async def test_mixed_failure_preserves_verified_catalog_and_calculation_values() -> None:
+    supervisor = FakeSupervisor(
+        result=_state(
+            messages=[AIMessage(content="미래에셋 상품은 99개이며 연금수령한도는 999원입니다.")],
+            domain_results=[_failed_result(), _catalog_result(), _calculation_result()],
+        )
+    )
+
+    result = await AnswerService(supervisor).run(
+        question_id="Q-001", question="연금계좌를 이전할 수 있나요?"
+    )
+
+    answer = result.answer.answer
+    assert "상품·운용 분석을 완료하지 못했습니다" in answer
+    assert "미래에셋 상품은 총 2개입니다" in answer
+    assert "KR510902511M" in answer
+    assert "KR510902773M" in answer
+    assert "연금수령한도: 1200000.0 KRW" in answer
+    assert "반올림·절사 규칙" in answer
+    assert "99개" not in answer
+    assert "999원" not in answer
 
 
 async def test_answer_service_replaces_catalog_only_answer_with_verified_values() -> None:
