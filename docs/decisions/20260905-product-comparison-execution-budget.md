@@ -9,6 +9,7 @@ supersedes: []
 superseded-by:
   - 20260906-product-comparison-minimal-criteria.md
   - 20260906-product-comparison-answer-ownership.md
+  - 20260906-product-catalog-selection-retry.md
 ---
 
 # 상품 비교의 검색 예산과 Product 출력 상한을 분리한다

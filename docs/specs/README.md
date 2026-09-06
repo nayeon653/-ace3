@@ -21,8 +21,10 @@
 
 Search Service는 현재 LLM Agent가 아니다. 규칙 기반 Router와 Python 검증으로 검색 계획과
 결과를 만든다. Product Catalog Query Planner는 독립 Domain Agent가 아니라 Product Agent의
-`lookup_product_codes` Tool 내부에서 기본 한 번 호출되는 제한된 LLM 컴포넌트다.
-유일한 원문 후보와 비교 코드의 불일치에 한해 한 번의 Planner 교정을 허용한다.
+`lookup_product_codes` Tool 호출마다 계획 하나를 만드는 제한된 LLM 컴포넌트다.
+Python은 응답 형식과 카탈로그 선택의 실행 가능 여부를 확인하며, 이름과 코드의 의미 대응은
+모델이 판단한다. 실행할 수 없는 카탈로그 선택은 Product에 오류로 전달하고 Product가
+`retry_hint`를 넣어 최대 한 번 재조회할 수 있다. Planner 내부의 자동 코드 교정은 하지 않는다.
 `compare_products`는 상품별 검색 뒤 별도 HCX가 비교 답변을 완료하는 도구다.
 
 `drafts/`는 구현 전 제안을 리뷰하는 공간이다. 구현에 반영된 Product 상품 비교 초안은

@@ -1,5 +1,0 @@
-{
-  "status": "validation_failed",
-  "error": "comparison_product_code_mismatch",
-  "instruction": "앞선 복수 상품 계획에서 원문 상품 표현과 선택한 코드의 대응이 잘못됐습니다. mismatches의 candidate는 같은 카탈로그에서 해당 mention_parts 모두를 만족하는 유일한 후보입니다. candidate의 공식명·alias·코드를 원문과 다시 대조한 후 잘못된 product_code만 수정해 전체 resolve_products 계획을 return_product_catalog_query Tool 한 번으로 다시 제출하세요. targets의 개수·순서·mention_parts·resolution_status를 바꾸거나 대상을 추가·제거하지 마세요. 다른 route나 자유 답변을 제출하지 마세요. 이번 재제출이 마지막 교정 기회이며 새 응답도 동일하게 검증됩니다."
-}

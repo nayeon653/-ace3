@@ -1,6 +1,7 @@
 """실제 Product 그래프에서 비교 Tool의 답변 소유권과 별도 모델 입력을 검증한다."""
 
 import asyncio
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Never, cast
@@ -16,12 +17,13 @@ from langchain_core.runnables import Runnable
 from pydantic import Field
 
 from pension_agent.agent.contracts import Permission, validate_domain_result
+from pension_agent.agent.execution import ExecutionContext
 from pension_agent.agent.product import create_product_agent
 from pension_agent.agent.product.catalog_query import (
     PRODUCT_CATALOG_QUERY_TOOL_NAME,
     CatalogQueryPlanError,
 )
-from pension_agent.agent.product.react import _product_model_tool_name
+from pension_agent.agent.product.react import ProductReactAgent, _product_model_tool_name
 from pension_agent.agent.search import SearchChunkPayload, SearchRequest, SearchResult, SearchRunner
 from pension_agent.core import DocumentType
 from pension_agent.retrieval import load_product_catalog
@@ -303,13 +305,61 @@ async def test_product_graph_finishes_on_invalid_criteria_without_repair_call(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("retry_hint", [7, ""])
+async def test_single_lookup_invalid_retry_hint_finishes_and_keeps_raw_tool_error(
+    retry_hint: Any,
+) -> None:
+    model = ComparisonFakeModel(
+        responses=[
+            _call("lookup_product_codes", {"retry_hint": retry_hint}, "invalid-hint"),
+            _call("lookup_product_codes", {}, "unused-retry"),
+        ]
+    )
+    planner = _planner()
+    search = _search_results()
+    agent = create_product_agent(
+        model=model, catalog_planner_model=planner, search_service=cast(SearchRunner, search)
+    )
+    implementation = agent.implementation
+    assert isinstance(implementation, ProductReactAgent)
+
+    state = await implementation.graph.ainvoke(
+        {
+            "question": "솔로몬 단기국공채의 위험은?",
+            "objective": "투자 위험 확인",
+            "messages": [HumanMessage(content="솔로몬 단기국공채의 위험은?")],
+            "calculations": [],
+        },
+        context=ExecutionContext(deadline=asyncio.get_running_loop().time() + 30),
+    )
+
+    result = state["domain_result"]
+    validate_domain_result(result)
+    assert result["execution_status"] == "failed"
+    assert "조회 입력이 올바르지 않습니다" in result["error"]
+    assert "retry_hint" not in result["error"]
+    assert len(model.received_messages) == 1
+    assert planner.received_messages == []
+    assert search.calls == []
+    assert not state.get("product_catalog_retry_count")
+    feedback = next(
+        message
+        for message in state["messages"]
+        if isinstance(message, ToolMessage) and message.tool_call_id == "invalid-hint"
+    )
+    assert feedback.status == "error"
+    assert "retry_hint" in str(feedback.content)
+    assert feedback.content != result["error"]
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("error", "status", "message"),
     [
         (
             CatalogQueryPlanError("provider 응답 실패"),
             "failed",
-            "상품 카탈로그 조회 계획을 확정하지 못했습니다.",
+            "provider 응답 실패",
         ),
         (TimeoutError(), "timeout", "상품 카탈로그 조회 계획 시간이 초과됐습니다."),
         (RuntimeError("예기치 않은 내부 오류"), "failed", "Domain Agent 실행에 실패했습니다."),
@@ -319,7 +369,14 @@ async def test_catalog_execution_errors_are_not_mislabeled_as_invalid_comparison
     error: Exception, status: str, message: str
 ) -> None:
     class FailingPlanner:
-        async def plan(self, *, question: str, objective: str, deadline: float) -> Never:
+        async def plan(
+            self,
+            *,
+            question: str,
+            objective: str,
+            deadline: float,
+            retry_hint: str | None = None,
+        ) -> Never:
             raise error
 
     model = ComparisonFakeModel(responses=_start_calls())
@@ -340,6 +397,215 @@ async def test_catalog_execution_errors_are_not_mislabeled_as_invalid_comparison
     assert len(model.received_messages) == 1
     assert writer.received_messages == []
     assert search.calls == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("invalid_code", ["KR511902511", "KR5000000000"])
+async def test_catalog_code_failure_returns_to_product_for_one_explicit_retry(
+    invalid_code: str,
+) -> None:
+    targets = _targets()
+    targets[0]["product_code"] = invalid_code
+    failed_query = {"route": "resolve_products", "targets": targets}
+    retry_hint = f"직전 제출 코드 {invalid_code}를 전체 카탈로그에서 다시 확인하세요."
+    objective = "세 상품의 위험과 원금보장 여부 비교"
+    model = ComparisonFakeModel(
+        responses=[
+            _start_calls()[0],
+            _call(
+                "lookup_product_codes",
+                {"comparison_criteria": _CRITERIA, "retry_hint": retry_hint},
+                "lookup-retry",
+            ),
+            _start_calls()[1],
+        ]
+    )
+    planner = ComparisonFakeModel(
+        responses=[
+            _call(PRODUCT_CATALOG_QUERY_TOOL_NAME, {"query": failed_query}, "invalid-plan"),
+            _planner().responses[0],
+        ]
+    )
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model,
+        catalog_planner_model=planner,
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": _QUESTION, "objective": objective})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "completed"
+    assert result["comparison_answer"] == _ANSWER
+    assert len(model.received_messages) == 3
+    assert len(planner.received_messages) == 2
+    assert len(writer.received_messages) == 1
+    assert len(search.calls) == 3
+    feedback = model.received_messages[1][-1]
+    assert isinstance(feedback, ToolMessage)
+    assert feedback.name == "lookup_product_codes"
+    assert feedback.status == "error"
+    feedback_payload = json.loads(str(feedback.content))
+    assert feedback_payload["execution_status"] == "failed"
+    assert feedback_payload["retryable"] is True
+    assert feedback_payload["submitted_query"] == failed_query
+    assert "카탈로그" in feedback_payload["error"]
+    assert [type(message) for message in planner.received_messages[0]] == [
+        SystemMessage,
+        HumanMessage,
+    ]
+    assert [type(message) for message in planner.received_messages[1]] == [
+        SystemMessage,
+        HumanMessage,
+    ]
+    assert json.loads(str(planner.received_messages[0][1].content)) == {
+        "question": _QUESTION,
+        "objective": objective,
+    }
+    assert json.loads(str(planner.received_messages[1][1].content)) == {
+        "question": _QUESTION,
+        "objective": objective,
+        "retry_hint": retry_hint,
+    }
+    lookup_results = [
+        message
+        for message in model.received_messages[2]
+        if isinstance(message, ToolMessage) and message.name == "lookup_product_codes"
+    ]
+    assert len(lookup_results) == 2
+    assert json.loads(str(lookup_results[1].content))["product_codes"] == _CODES
+    assert {request.source_file_name for request, _, _ in search.calls} == set(search.results)
+
+
+@pytest.mark.anyio
+async def test_second_catalog_code_failure_finishes_without_third_lookup_or_search() -> None:
+    targets = _targets()
+    targets[0]["product_code"] = "KR511902511"
+    failed_query = {"route": "resolve_products", "targets": targets}
+    model = ComparisonFakeModel(
+        responses=[
+            _start_calls()[0],
+            _call(
+                "lookup_product_codes",
+                {
+                    "comparison_criteria": _CRITERIA,
+                    "retry_hint": "직전 제출 코드가 카탈로그에 없으므로 다시 확인하세요.",
+                },
+                "lookup-retry",
+            ),
+            *_start_calls(),
+        ]
+    )
+    planner = ComparisonFakeModel(
+        responses=[
+            _call(PRODUCT_CATALOG_QUERY_TOOL_NAME, {"query": failed_query}, "first-plan"),
+            _call(PRODUCT_CATALOG_QUERY_TOOL_NAME, {"query": failed_query}, "second-plan"),
+            _planner().responses[0],
+        ]
+    )
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model,
+        catalog_planner_model=planner,
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "세 상품 비교"})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "failed"
+    assert "카탈로그" in result["error"]
+    assert len(model.received_messages) == 2
+    assert len(planner.received_messages) == 2
+    assert writer.received_messages == []
+    assert search.calls == []
+    assert result["evidence"] == []
+    assert "comparison_answer" not in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "response",
+    [
+        AIMessage(content="구조화 조회 계획이 없는 응답입니다."),
+        _call(
+            PRODUCT_CATALOG_QUERY_TOOL_NAME,
+            {"query": {"route": "resolve_products", "targets": "잘못된 자료형"}},
+            "malformed-plan",
+        ),
+    ],
+)
+async def test_catalog_response_format_failure_finishes_without_product_retry(
+    response: AIMessage,
+) -> None:
+    model = ComparisonFakeModel(responses=_start_calls())
+    planner = ComparisonFakeModel(responses=[response, _planner().responses[0]])
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model,
+        catalog_planner_model=planner,
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "세 상품 비교"})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "failed"
+    assert "응답 형식" in result["error"]
+    assert len(model.received_messages) == 1
+    assert len(planner.received_messages) == 1
+    assert writer.received_messages == []
+    assert search.calls == []
+
+
+@pytest.mark.anyio
+async def test_existing_catalog_codes_are_searched_without_product_name_reinterpretation() -> None:
+    targets = _targets()
+    targets[0]["product_code"], targets[1]["product_code"] = _CODES[1], _CODES[0]
+    selected_codes = [_CODES[1], _CODES[0], _CODES[2]]
+    model = ComparisonFakeModel(
+        responses=[
+            _start_calls()[0],
+            _call(
+                "compare_products",
+                {"product_codes": selected_codes, "criteria": _CRITERIA},
+                "compare",
+            ),
+        ]
+    )
+    planner = _planner(targets)
+    writer = ComparisonFakeModel(responses=[_answer_call()])
+    search = _search_results()
+    agent = create_product_agent(
+        model=model,
+        catalog_planner_model=planner,
+        comparison_answer_model=writer,
+        search_service=cast(SearchRunner, search),
+    )
+
+    result = await agent({"question": _QUESTION, "objective": "세 상품 비교"})
+
+    validate_domain_result(result)
+    assert result["execution_status"] == "completed"
+    assert result["comparison_answer"] == _ANSWER
+    assert len(model.received_messages) == 2
+    assert len(planner.received_messages) == 1
+    assert len(search.calls) == 3
+    writer_input = json.loads(str(writer.received_messages[0][1].content))
+    assert [target["product_code"] for target in writer_input["targets"]] == selected_codes
+    assert writer_input["targets"][0]["mention_parts"] == ["솔로몬", "국공채", "단기"]
+    assert (
+        writer_input["targets"][0]["official_name"]
+        == load_product_catalog().select_products([_CODES[1]])[0].official_name
+    )
+    assert {request.source_file_name for request, _, _ in search.calls} == set(search.results)
 
 
 @pytest.mark.anyio

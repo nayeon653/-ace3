@@ -8,7 +8,8 @@ related:
   - 20260905-all-generation-hcx-007.md
 supersedes:
   - 20260905-product-comparison-execution-budget.md
-superseded-by: []
+superseded-by:
+  - 20260906-product-catalog-selection-retry.md
 ---
 
 # 비교 답변 작성을 compare_products가 소유한다

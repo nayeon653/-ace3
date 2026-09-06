@@ -152,6 +152,13 @@ def _create_product_catalog_query_tool(
                 ),
             ),
         ] = None,
+        retry_hint: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description="카탈로그 조회 실패 후 재조회할 때, 직전 오류와 제출값에서 다시 확인할 사항",
+            ),
+        ] = None,
     ) -> Command:
         if runtime.tool_call_id is None:
             raise ValueError("상품 카탈로그 조회 Tool 호출 ID가 없습니다.")
@@ -164,10 +171,12 @@ def _create_product_catalog_query_tool(
                 result=_failed_product_result("비교 항목은 중복 없이 1~3개여야 합니다."),
             )
         try:
+            retry_options = {"retry_hint": retry_hint} if retry_hint is not None else {}
             query = await planner.plan(
                 question=runtime.state.get("question", ""),
                 objective=runtime.state.get("objective", ""),
                 deadline=runtime.context.deadline,
+                **retry_options,
             )
         except TimeoutError:
             result = _failed_product_result(
@@ -175,8 +184,20 @@ def _create_product_catalog_query_tool(
                 execution_status="timeout",
             )
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
-        except CatalogQueryPlanError:
-            result = _failed_product_result("상품 카탈로그 조회 계획을 확정하지 못했습니다.")
+        except CatalogQueryPlanError as error:
+            retry_count = runtime.state.get("product_catalog_retry_count", 0)
+            if error.retryable and retry_count == 0:
+                return _catalog_lookup_command(
+                    runtime.tool_call_id,
+                    payload={
+                        "execution_status": "failed",
+                        "error": str(error),
+                        "retryable": True,
+                        "submitted_query": error.submitted_query,
+                    },
+                    catalog_retry_count=retry_count + 1,
+                )
+            result = _failed_product_result(str(error))
             return _catalog_lookup_command(runtime.tool_call_id, result=result)
 
         if isinstance(query, MultipleProductsQuery):
@@ -321,11 +342,14 @@ def _catalog_lookup_command(
     comparison_targets: list[ComparisonTarget] | None = None,
     comparison_criteria: list[ComparisonCriterion] | None = None,
     catalog_version: str | None = None,
+    catalog_retry_count: int | None = None,
 ) -> Command:
     if payload is not None:
         message_payload = payload
     elif match is None:
         message_payload = {"execution_status": result["execution_status"] if result else "failed"}
+        if result is not None and "error" in result:
+            message_payload["error"] = result["error"]
     else:
         message_payload = {
             "execution_status": "completed",
@@ -349,11 +373,18 @@ def _catalog_lookup_command(
                 ),
                 tool_call_id=tool_call_id,
                 name=LOOKUP_PRODUCT_CODES_TOOL_NAME,
+                status=(
+                    "error"
+                    if message_payload.get("execution_status") in {"failed", "timeout"}
+                    else "success"
+                ),
             )
         ]
     }
     if candidate_codes is not None:
         update["product_candidate_codes"] = candidate_codes
+    if catalog_retry_count is not None:
+        update["product_catalog_retry_count"] = catalog_retry_count
     if comparison_targets is not None:
         update["comparison_targets"] = comparison_targets
         update["comparison_criteria"] = comparison_criteria

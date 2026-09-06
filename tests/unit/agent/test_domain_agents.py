@@ -1232,7 +1232,7 @@ async def test_product_agent_handles_unregistered_and_invalid_hcx_queries_withou
     assert result["execution_status"] == execution_status
     if decision_status is None:
         assert "decision" not in result
-        assert "계획을 확정하지 못했습니다" in result["error"]
+        assert result["error"] == "HCX 카탈로그 조회 계획의 응답 형식이 올바르지 않습니다."
     else:
         assert result["decision"]["status"] == decision_status
         assert result["decision"]["missing_conditions"]

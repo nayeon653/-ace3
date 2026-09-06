@@ -91,6 +91,7 @@ class ProductAgentState(AgentState):
     product_scoped_search_completed: NotRequired[bool]
     product_scoped_source_file_name: NotRequired[str]
     product_catalog_result: NotRequired[DomainResult]
+    product_catalog_retry_count: NotRequired[int]
     search_result: NotRequired[SearchResult]
     comparison_targets: NotRequired[list[ComparisonTarget]]
     comparison_criteria: NotRequired[list[ComparisonCriterion]]
@@ -180,16 +181,18 @@ class ProductComparisonToolAvailabilityMiddleware(AgentMiddleware[Any, Any, Any]
         response = await handler(request)
         if (
             request.tool_call["name"] != self._lookup_tool_name
-            or request.tool_call["args"].get("comparison_criteria") is None
             or not isinstance(response, ToolMessage)
             or response.status != "error"
         ):
             return response
-        error = "비교 항목 입력이 올바르지 않습니다. 허용된 항목을 중복 없이 1~3개 지정해야 합니다."
+        error = (
+            "상품 카탈로그 조회 입력이 올바르지 않습니다. "
+            "비교 항목은 중복 없이 1~3개, 재조회 지시는 문자열이어야 합니다."
+        )
         return Command(
             update={
                 "domain_result": failed_domain_result("product", error),
-                "messages": [response.model_copy(update={"content": error})],
+                "messages": [response],
             }
         )
 
@@ -424,7 +427,7 @@ def create_product_react_agent(
             ),
             ToolCallLimitMiddleware(
                 tool_name=product_lookup_tool.name,
-                run_limit=1,
+                run_limit=2,
                 exit_behavior="continue",
             ),
             ToolCallLimitMiddleware(
