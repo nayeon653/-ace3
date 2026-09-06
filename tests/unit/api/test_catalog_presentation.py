@@ -52,7 +52,16 @@ def test_catalog_result_is_in_trace_and_retrieved_context() -> None:
         AnswerServiceResult(answer=AgentAnswer(answer="검증된 답변"), state=state)
     ).model_dump()
 
-    assert response["retrieved_context"] == [evidence]
+    assert all(isinstance(value, str) for value in response.values())
+    assert response["retrieved_context"] == (
+        "[문서 1]\n"
+        "chunk_id: 550e8400-e29b-41d4-a716-446655440000\n"
+        "source_file_name: product_catalog.json\n"
+        "title: 검증된 상품 카탈로그 조회 결과\n"
+        "locator: provider=미래에셋;catalog_version=v1\n"
+        "content:\n"
+        '{"total_count":1}'
+    )
     assert "route=browse_catalog" in response["think_trace"]
     assert "provider=미래에셋" in response["think_trace"]
     assert "total_count=1" in response["think_trace"]

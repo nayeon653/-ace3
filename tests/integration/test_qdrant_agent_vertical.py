@@ -169,16 +169,17 @@ async def test_main_domain_search_qdrant_to_five_field_response() -> None:
         "think_trace",
         "answer",
     }
+    assert all(isinstance(value, str) for value in response.values())
     assert response["question_id"] == "Q-E2E-001"
     assert response["question"] == "IRP 계좌를 이전하려면 어떻게 해야 하나요?"
-    assert response["retrieved_context"] == [
-        {
-            "chunk_id": CHUNK_ID,
-            "source_file_name": "pension-guide.pdf",
-            "title": "IRP 이전",
-            "locator": "4페이지",
-            "content": "IRP 계좌 이전은 접수 절차와 가입 유형 확인이 필요합니다.",
-        }
-    ]
+    assert response["retrieved_context"] == (
+        "[문서 1]\n"
+        f"chunk_id: {CHUNK_ID}\n"
+        "source_file_name: pension-guide.pdf\n"
+        "title: IRP 이전\n"
+        "locator: 4페이지\n"
+        "content:\n"
+        "IRP 계좌 이전은 접수 절차와 가입 유형 확인이 필요합니다."
+    )
     assert "policy(완료)" in response["think_trace"]
     assert response["answer"] == "가입 유형을 확인한 뒤 IRP 이전 접수 절차를 진행하세요."

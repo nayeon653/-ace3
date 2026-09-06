@@ -82,16 +82,25 @@ def build_think_trace(domain_results: list[DomainResult]) -> str:
 
 def _serialize_retrieved_context(
     domain_results: list[DomainResult],
-) -> list[EvidenceChunkResponse]:
+) -> str:
     """답변 조립 대상인 완료 판단의 근거만 직렬화한다."""
 
-    return [
+    chunks = [
         EvidenceChunkResponse.model_validate(evidence)
         for result in domain_results
         if result["execution_status"] == "completed"
         and ("comparison_answer" in result or result["decision"]["status"] != "not_applicable")
         for evidence in result["evidence"]
     ]
+    return "\n\n".join(
+        f"[문서 {index}]\n"
+        f"chunk_id: {chunk.chunk_id}\n"
+        f"source_file_name: {chunk.source_file_name}\n"
+        f"title: {chunk.title}\n"
+        f"locator: {chunk.locator}\n"
+        f"content:\n{chunk.content}"
+        for index, chunk in enumerate(chunks, start=1)
+    )
 
 
 def _one_line(value: str) -> str:

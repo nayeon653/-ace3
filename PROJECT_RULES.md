@@ -20,6 +20,7 @@
    안정성에 관련된 변경은 특히 신중히 다룬다.
 4. **`GET /answer` 응답 JSON은 정확히 5개 필드만 포함한다:**
    `question_id`, `question`, `retrieved_context`, `think_trace`, `answer`.
+   모든 필드의 값은 문자열(`string`)이다.
 5. **제공된 문서 데이터가 최종 근거다.** 외부 지식은 보조 수단일 뿐이며,
    제공 자료와 상충하면 제공 자료를 따른다.
 

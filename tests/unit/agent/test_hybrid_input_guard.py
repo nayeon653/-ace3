@@ -240,7 +240,8 @@ async def test_privacy_classifier_block_stops_execution_with_five_field_http_res
     }
     assert payload["question_id"] == "Q-PRIVACY-BLOCK"
     assert payload["question"] == question
-    assert payload["retrieved_context"] == []
+    assert all(isinstance(value, str) for value in payload.values())
+    assert payload["retrieved_context"] == ""
     assert payload["answer"] == INJECTION_REFUSAL
     assert len(classifier.calls) == 1
     assert question in classifier.calls[0][0]
@@ -390,7 +391,8 @@ async def test_classifier_failure_returns_sanitized_five_field_answer(
     }
     assert payload["question_id"] == "Q-FAILURE"
     assert payload["question"] == _NORMAL
-    assert payload["retrieved_context"] == []
+    assert all(isinstance(value, str) for value in payload.values())
+    assert payload["retrieved_context"] == ""
     assert payload["answer"] == INPUT_CHECK_UNAVAILABLE
     assert secret not in response.text
     assert len(classifier.calls) == 1

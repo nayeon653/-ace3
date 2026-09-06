@@ -18,17 +18,36 @@ GET {TBD}/answer
 
 ### 응답 (200)
 
-정확히 아래 5개 필드만 포함한다.
+`application/json`으로 반환하며, 정확히 아래 5개 필드만 포함한다. 모든 필드의 값은
+문자열(`string`)이다.
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `question_id` | string | 요청받은 `question_id` 그대로 반환 |
 | `question` | string | 요청받은 `question` 그대로 반환 |
-| `retrieved_context` | array[object] | 실제로 답변에 인용된 근거 문서 목록 (리랭킹/컷오프 후) |
+| `retrieved_context` | string | 실제로 답변에 인용된 근거 문서를 순서대로 연결한 문자열 (리랭킹/컷오프 후) |
 | `think_trace` | string | 조건 분기 판단 과정 요약 |
 | `answer` | string | 최종 답변. 확인이 필요한 조건과 조건별 결론을 포함할 수 있음 |
 
-`retrieved_context`의 각 객체는 아래 필드를 포함한다. 완료된 도메인 판단 중
+`retrieved_context`는 아래 형식의 문서 블록을 빈 줄(`\n\n`)로 연결한 문자열이다.
+문서 번호는 1부터 순서대로 붙이고, 선택된 근거의 순서와 메타데이터·본문을 그대로
+보존한다. 본문에 포함된 줄바꿈도 보존하며, 근거가 없으면 빈 문자열(`""`)을 반환한다.
+
+```text
+[문서 1]
+chunk_id: CH-001
+source_file_name: policy.pdf
+title: 연금계좌 업무 지침
+locator: 3쪽
+content:
+가입 유형에 따라 이전 범위가 달라집니다.
+```
+
+각 블록에는 근거 청크 식별자(`chunk_id`), 출처 문서 파일명(`source_file_name`), 근거
+구간 제목(`title`), 원문 위치(`locator`), 답변에 실제 사용한 본문(`content`)을 위 순서로
+기록한다.
+
+완료된 도메인 판단 중
 `decision.status`가 `not_applicable`이 아닌 결과에서 최종 답변에 실제 사용한
 근거만 포함한다. 단, 도구가 완료한 `comparison_answer`의 선택 근거는 모델 판단 상태와
 관계없이 포함한다. 상품 카탈로그 개수·목록 조회는 Qdrant 청크 대신 검증된
@@ -37,14 +56,6 @@ GET {TBD}/answer
 상품 비교에서는 비교 생성기가 사용했다고 선택한 ID 중 실제 검색 결과에 존재하는 청크만
 포함한다. 존재하지 않는 ID는 제외하며, 본문과 인용의 의미를 자동 검증하지 않는다.
 같은 문서 alias를 공유하는 상품의 중복 청크도 ID 기준으로 한 번만 들어간다.
-
-| 필드 | 타입 | 설명 |
-|---|---|---|
-| `chunk_id` | string | 근거 청크 식별자 |
-| `source_file_name` | string | 출처 문서 파일명 |
-| `title` | string | 근거 구간 제목 |
-| `locator` | string | 원문에서 근거 위치를 찾기 위한 표시 |
-| `content` | string | 답변에 실제 사용한 근거 본문 |
 
 `think_trace`는 실제 도메인 호출·실행 상태, 판단 결론과 누락 조건을 서버가
 결정론적으로 요약한 문장이다. LLM 내부 사고 과정, 원시 Tool 로그, 원시 예외,
@@ -67,15 +78,7 @@ Product나 Main이 새로 작성한 비교 문장은 채택하지 않는다. 검
 {
   "question_id": "Q-001",
   "question": "연금계좌를 이전할 수 있나요?",
-  "retrieved_context": [
-    {
-      "chunk_id": "CH-001",
-      "source_file_name": "policy.pdf",
-      "title": "연금계좌 업무 지침",
-      "locator": "3쪽",
-      "content": "가입 유형에 따라 이전 범위가 달라집니다."
-    }
-  ],
+  "retrieved_context": "[문서 1]\nchunk_id: CH-001\nsource_file_name: policy.pdf\ntitle: 연금계좌 업무 지침\nlocator: 3쪽\ncontent:\n가입 유형에 따라 이전 범위가 달라집니다.",
   "think_trace": "도메인 호출: policy(완료). 판단 요약: policy=조건부: 가입 유형에 따라 이전할 수 있습니다. 확인이 필요한 조건: policy=가입 유형.",
   "answer": "가입 유형을 확인한 뒤 이전 가능 여부를 판단하세요."
 }

@@ -82,6 +82,7 @@ async def test_finished_comparison_is_preserved_through_exact_five_field_api(
         "think_trace",
         "answer",
     }
+    assert all(isinstance(value, str) for value in response.values())
     assert response["answer"].startswith(domain["comparison_answer"])
     assert "Main이 임의로" not in response["answer"]
     assert "fund.pdf" not in response["answer"]
@@ -89,8 +90,15 @@ async def test_finished_comparison_is_preserved_through_exact_five_field_api(
     assert "공시 기준일 확인 필요" in response["answer"]
     assert "사용자가 선택한 투자기간 확인 필요" in response["answer"]
     assert "검증된 상품 비교" not in response["think_trace"]
-    assert len(response["retrieved_context"]) == 1
-    assert response["retrieved_context"][0]["source_file_name"] == "fund.pdf"
+    assert response["retrieved_context"] == (
+        "[문서 1]\n"
+        "chunk_id: chunk-1\n"
+        "source_file_name: fund.pdf\n"
+        "title: 투자위험\n"
+        "locator: 1쪽\n"
+        "content:\n"
+        "이 테스트 근거에는 구체적인 위험 수치가 없습니다."
+    )
 
 
 @pytest.mark.anyio
@@ -131,11 +139,18 @@ async def test_finished_comparison_preserves_other_domain_document_numeric_concl
         question_id="comparison-mixed", question="상품을 비교하고 세액공제 한도를 알려주세요."
     )
     response = build_answer_response(result).model_dump()
+    assert all(isinstance(value, str) for value in response.values())
     assert comparison["comparison_answer"] in response["answer"]
     assert response["answer"].count(conclusion) == 1
     assert "tax.pdf" in response["answer"]
     assert "Main이 임의로" not in response["answer"]
-    assert any(chunk["chunk_id"] == "tax-numeric" for chunk in response["retrieved_context"])
+    context = response["retrieved_context"]
+    assert context.count("[문서 ") == 2
+    assert context.startswith("[문서 1]\nchunk_id: chunk-1\n")
+    assert "\nsource_file_name: fund.pdf\n" in context
+    assert "\n\n[문서 2]\nchunk_id: tax-numeric\n" in context
+    assert "\nsource_file_name: tax.pdf\n" in context
+    assert context.endswith(f"content:\n{conclusion}")
     assert result.state["domain_results"] == [comparison, tax]
 
 
@@ -186,15 +201,24 @@ async def test_deterministic_assembly_preserves_other_domain_numeric_and_nonnume
     )
     response = build_answer_response(result).model_dump()
 
+    assert all(isinstance(value, str) for value in response.values())
     assert response["answer"].count(conclusion) == 1
     assert response["answer"].count(nonnumeric_conclusion) == 1
     assert response["answer"].count(numeric_conclusion) == 1
     assert "납입금의 세액공제 여부 확인" in response["answer"]
     assert "인출 재원 구분 필요" in response["answer"]
     assert "Main이 임의로" not in response["answer"]
-    assert any(chunk["chunk_id"] == "tax-1" for chunk in response["retrieved_context"])
+    context = response["retrieved_context"]
+    assert context.count("[문서 ") == (2 if with_comparison else 1)
+    assert "\nchunk_id: tax-1\nsource_file_name: tax.pdf\n" in context
+    assert context.endswith(f"content:\n{conclusion}")
     assert result.state["domain_results"] == [companion, tax]
     if with_comparison:
         assert companion["comparison_answer"] in response["answer"]
+        assert context.startswith("[문서 1]\nchunk_id: chunk-1\n")
+        assert "\nsource_file_name: fund.pdf\n" in context
+        assert "\n\n[문서 2]\nchunk_id: tax-1\n" in context
     else:
         assert companion["error"] in response["answer"]
+        assert context.startswith("[문서 1]\nchunk_id: tax-1\n")
+        assert "\nsource_file_name: fund.pdf\n" not in context
